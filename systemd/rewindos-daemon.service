@@ -1,0 +1,19 @@
+[Unit]
+Description=RewindOS Capture Daemon
+Documentation=https://github.com/jay/rewindos
+After=graphical-session.target pipewire.service dbus.service
+Requires=dbus.service
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/rewindos-daemon
+Restart=on-failure
+RestartSec=5
+Environment=RUST_LOG=info
+
+# Ensure Wayland/D-Bus sockets are accessible
+Environment=XDG_RUNTIME_DIR=%t
+
+[Install]
+WantedBy=graphical-session.target

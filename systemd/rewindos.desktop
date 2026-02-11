@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=RewindOS
+Comment=Privacy-first screen capture and search
+Exec=rewindos --minimized
+Icon=rewindos
+Type=Application
+Categories=Utility;
+StartupWMClass=RewindOS
+X-GNOME-Autostart-enabled=true

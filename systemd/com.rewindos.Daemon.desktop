@@ -1,0 +1,7 @@
+[Desktop Entry]
+Name=RewindOS Daemon
+Comment=Privacy-first screen capture daemon
+Exec=rewindos-daemon
+Type=Application
+NoDisplay=true
+X-KDE-DBUS-Restricted-Interfaces=org.kde.KWin.ScreenShot2

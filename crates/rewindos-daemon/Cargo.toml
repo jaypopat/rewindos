@@ -1,0 +1,17 @@
+[package]
+name = "rewindos-daemon"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rewindos-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+zbus = { version = "5", default-features = false, features = ["tokio"] }
+nix = { version = "0.29", features = ["fs"] }
+clap = { version = "4", features = ["derive"] }

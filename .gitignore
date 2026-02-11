@@ -1,3 +1,11 @@
+# Rust build output
+/target/
+
+# Node
+node_modules
+dist
+dist-ssr
+
 # Logs
 logs
 *.log
@@ -7,18 +15,32 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-node_modules
-dist
-dist-ssr
+# Tauri build bundles
+src-tauri/target/
+src-tauri/gen/schemas
+
+# Environment / secrets
 *.local
+.env
+.env.*
 
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
 .idea
-.DS_Store
 *.suo
 *.ntvs*
 *.njsproj
 *.sln
 *.sw?
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Claude Code agent skills (auto-generated)
+.agents/
+.claude/skills/
+
+# Personal / non-project files
+interview-answers.txt

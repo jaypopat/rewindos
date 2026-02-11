@@ -1,0 +1,14 @@
+[workspace]
+resolver = "2"
+members = ["crates/rewindos-core", "crates/rewindos-daemon", "src-tauri"]
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+chrono = { version = "0.4", features = ["serde"] }
+thiserror = "2"
+anyhow = "1"
+rewindos-core = { path = "crates/rewindos-core" }

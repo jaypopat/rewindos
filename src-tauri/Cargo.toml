@@ -1,16 +1,11 @@
 [package]
 name = "rewindos"
 version = "0.1.0"
-description = "A Tauri App"
+description = "Privacy-first screen capture and search for Linux"
 authors = ["you"]
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [lib]
-# The `_lib` suffix may seem redundant but it is necessary
-# to make the lib name unique and wouldn't conflict with the bin name.
-# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
 name = "rewindos_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
@@ -18,8 +13,19 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["protocol-asset", "tray-icon", "image-png"] }
 tauri-plugin-opener = "2"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-
+rewindos-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+zbus = "5"
+tokio = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tauri-plugin-global-shortcut = "2.3.1"
+reqwest = { version = "0.12", features = ["json"] }
+uuid = { version = "1", features = ["v4"] }
+futures = "0.3"
+chrono = { workspace = true }
+toml = "0.8"
+regex-lite = "0.1"
