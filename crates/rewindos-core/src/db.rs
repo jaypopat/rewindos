@@ -21,12 +21,10 @@ impl Database {
     /// Register the sqlite-vec extension globally (idempotent).
     fn ensure_sqlite_vec() {
         static INIT: Once = Once::new();
-        INIT.call_once(|| {
-            unsafe {
-                sqlite3_auto_extension(Some(std::mem::transmute(
-                    sqlite_vec::sqlite3_vec_init as *const (),
-                )));
-            }
+        INIT.call_once(|| unsafe {
+            sqlite3_auto_extension(Some(std::mem::transmute(
+                sqlite_vec::sqlite3_vec_init as *const (),
+            )));
         });
     }
 

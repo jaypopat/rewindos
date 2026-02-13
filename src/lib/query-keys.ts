@@ -10,4 +10,6 @@ export const queryKeys = {
   timeline: (startTime: number) => ["timeline", startTime] as const,
   dailySummary: (startTime: number) => ["daily-summary", startTime] as const,
   askHealth: () => ["ask-health"] as const,
+  hourlyBrowse: (startTime: number, endTime: number) =>
+    ["hourly-browse", startTime, endTime] as const,
 };

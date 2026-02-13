@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { getConfig, updateConfig } from "@/lib/api";
+import { type AppConfig } from "@/lib/config";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
 type Tab = "general" | "capture" | "privacy" | "ai" | "storage" | "ocr" | "focus";
@@ -14,68 +15,16 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "ocr", label: "OCR" },
 ];
 
-interface ConfigState {
-  capture: {
-    interval_seconds: number;
-    change_threshold: number;
-    enabled: boolean;
-  };
-  storage: {
-    base_dir: string;
-    retention_days: number;
-    screenshot_quality: number;
-    thumbnail_width: number;
-  };
-  privacy: {
-    excluded_apps: string[];
-    excluded_title_patterns: string[];
-  };
-  ocr: {
-    enabled: boolean;
-    tesseract_lang: string;
-    max_workers: number;
-  };
-  ui: {
-    global_hotkey: string;
-    theme: string;
-  };
-  semantic: {
-    enabled: boolean;
-    ollama_url: string;
-    model: string;
-    embedding_dimensions: number;
-  };
-  chat: {
-    enabled: boolean;
-    ollama_url: string;
-    model: string;
-    max_context_tokens: number;
-    max_history_messages: number;
-    temperature: number;
-  };
-  focus: {
-    work_minutes: number;
-    short_break_minutes: number;
-    long_break_minutes: number;
-    sessions_before_long_break: number;
-    daily_goal_minutes: number;
-    distraction_apps: string[];
-    auto_start_breaks: boolean;
-    auto_start_work: boolean;
-    category_rules: Record<string, string[]>;
-  };
-}
-
 export function SettingsView() {
   const [tab, setTab] = useState<Tab>("general");
-  const [config, setConfig] = useState<ConfigState | null>(null);
+  const [config, setConfig] = useState<AppConfig | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     getConfig()
-      .then((c) => setConfig(c as unknown as ConfigState))
+      .then((c) => setConfig(c as unknown as AppConfig))
       .catch((e) => setError(String(e)));
   }, []);
 
@@ -95,10 +44,10 @@ export function SettingsView() {
   }, [config]);
 
   const update = useCallback(
-    <S extends keyof ConfigState, K extends keyof ConfigState[S]>(
+    <S extends keyof AppConfig, K extends keyof AppConfig[S]>(
       section: S,
       key: K,
-      value: ConfigState[S][K],
+      value: AppConfig[S][K],
     ) => {
       setConfig((prev) => {
         if (!prev) return prev;

@@ -124,7 +124,7 @@ function App() {
           </div>
         )}
 
-        {(view === "search" || view === "dashboard" || view === "ask") && subView === "detail" && selectedScreenshotId !== null && (
+        {(view === "search" || view === "dashboard" || view === "history" || view === "ask") && subView === "detail" && selectedScreenshotId !== null && (
           <ScreenshotDetail
             screenshotId={selectedScreenshotId}
             onBack={handleBack}
@@ -138,8 +138,8 @@ function App() {
           <DashboardView onSelectScreenshot={handleSelectResult} />
         )}
 
-        {view === "history" && (
-          <HistoryView />
+        {view === "history" && subView === "list" && (
+          <HistoryView onSelectScreenshot={handleSelectResult} />
         )}
 
         {view === "ask" && subView === "list" && (

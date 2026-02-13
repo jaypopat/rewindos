@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { usePomodoroTimer, type PomodoroConfig, type PomodoroPhase } from "@/hooks/usePomodoroTimer";
 import { useFocusScore } from "@/hooks/useFocusScore";
 import { getConfig } from "@/lib/api";
+import { type AppConfig } from "@/lib/config";
 import { cn } from "@/lib/utils";
 import { getCategoryColor, buildCategoryRules } from "@/lib/app-categories";
 
@@ -40,22 +41,26 @@ export function FocusView() {
   });
   const [distractionApps, setDistractionApps] = useState<string[]>([]);
   const [categoryRules, setCategoryRules] = useState<Record<string, string[]> | undefined>();
+  const [dailyGoalMinutes, setDailyGoalMinutes] = useState(480);
 
-  // Load config from backend
+  // Load config from backend (single fetch)
   useEffect(() => {
     getConfig().then((c) => {
-      const focus = c.focus as Record<string, unknown> | undefined;
+      const { focus } = c as unknown as AppConfig;
       if (focus) {
         setConfig({
-          workMinutes: (focus.work_minutes as number) ?? 25,
-          shortBreakMinutes: (focus.short_break_minutes as number) ?? 5,
-          longBreakMinutes: (focus.long_break_minutes as number) ?? 15,
-          sessionsBeforeLongBreak: (focus.sessions_before_long_break as number) ?? 4,
-          autoStartBreaks: (focus.auto_start_breaks as boolean) ?? true,
-          autoStartWork: (focus.auto_start_work as boolean) ?? false,
+          workMinutes: focus.work_minutes ?? 25,
+          shortBreakMinutes: focus.short_break_minutes ?? 5,
+          longBreakMinutes: focus.long_break_minutes ?? 15,
+          sessionsBeforeLongBreak: focus.sessions_before_long_break ?? 4,
+          autoStartBreaks: focus.auto_start_breaks ?? true,
+          autoStartWork: focus.auto_start_work ?? false,
         });
-        setDistractionApps((focus.distraction_apps as string[]) ?? []);
-        const userRules = (focus.category_rules ?? {}) as Record<string, string[]>;
+        setDistractionApps(focus.distraction_apps ?? []);
+        if (focus.daily_goal_minutes) {
+          setDailyGoalMinutes(focus.daily_goal_minutes);
+        }
+        const userRules = focus.category_rules ?? {};
         if (Object.keys(userRules).length > 0) {
           setCategoryRules(buildCategoryRules(userRules));
         }
@@ -70,7 +75,6 @@ export function FocusView() {
     ? ((state.totalSeconds - state.secondsRemaining) / state.totalSeconds) * 100
     : 0;
 
-  const dailyGoalMinutes = 480;
   const dailyProgress = Math.min(100, (focus.productiveMinutes / dailyGoalMinutes) * 100);
 
   // Ring dimensions

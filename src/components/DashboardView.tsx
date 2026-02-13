@@ -11,6 +11,7 @@ import {
   type TimelineEntry,
 } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
+import { type AppConfig } from "@/lib/config";
 import { useFocusScore } from "@/hooks/useFocusScore";
 import { formatDuration } from "@/lib/format";
 import { StatCard } from "./StatCard";
@@ -312,10 +313,10 @@ export function DashboardView({ onSelectScreenshot }: DashboardViewProps) {
   useEffect(() => {
     getConfig()
       .then((c) => {
-        const focus = c.focus as Record<string, unknown> | undefined;
+        const { focus } = c as unknown as AppConfig;
         if (focus) {
-          setDistractionApps((focus.distraction_apps as string[]) ?? []);
-          const userRules = (focus.category_rules ?? {}) as Record<string, string[]>;
+          setDistractionApps(focus.distraction_apps ?? []);
+          const userRules = focus.category_rules ?? {};
           if (Object.keys(userRules).length > 0) {
             setCategoryRules(buildCategoryRules(userRules));
           }
