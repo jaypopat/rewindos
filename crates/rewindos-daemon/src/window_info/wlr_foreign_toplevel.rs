@@ -127,8 +127,7 @@ fn run_toplevel_loop(
     current: Arc<RwLock<WindowInfo>>,
     stop_flag: Arc<AtomicBool>,
 ) -> Result<(), String> {
-    let conn =
-        Connection::connect_to_env().map_err(|e| format!("Wayland connect failed: {e}"))?;
+    let conn = Connection::connect_to_env().map_err(|e| format!("Wayland connect failed: {e}"))?;
 
     let display = conn.display();
     let mut event_queue = conn.new_event_queue();
@@ -148,9 +147,7 @@ fn run_toplevel_loop(
         .map_err(|e| format!("initial roundtrip failed: {e}"))?;
 
     if state.manager.is_none() {
-        return Err(
-            "zwlr_foreign_toplevel_manager_v1 not found in compositor globals".to_string(),
-        );
+        return Err("zwlr_foreign_toplevel_manager_v1 not found in compositor globals".to_string());
     }
 
     info!("wlr-foreign-toplevel manager bound, listening for window events");
@@ -257,13 +254,12 @@ impl Dispatch<wl_registry::WlRegistry, ()> for ToplevelState {
         {
             if interface == "zwlr_foreign_toplevel_manager_v1" {
                 let bind_version = version.min(3);
-                let manager = registry.bind::<ZwlrForeignToplevelManagerV1, _, _>(
-                    name,
-                    bind_version,
-                    qh,
-                    (),
+                let manager =
+                    registry.bind::<ZwlrForeignToplevelManagerV1, _, _>(name, bind_version, qh, ());
+                debug!(
+                    version = bind_version,
+                    "bound zwlr_foreign_toplevel_manager_v1"
                 );
-                debug!(version = bind_version, "bound zwlr_foreign_toplevel_manager_v1");
                 state.manager = Some(manager);
             }
         }
@@ -319,12 +315,10 @@ impl Dispatch<ZwlrForeignToplevelHandleV1, ()> for ToplevelState {
             }
             zwlr_foreign_toplevel_handle_v1::Event::State { state: raw_state } => {
                 // State is an array of u32 values encoded as raw bytes (little-endian)
-                handle_state.activated = raw_state
-                    .chunks_exact(4)
-                    .any(|chunk| {
-                        let val = u32::from_ne_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
-                        val == zwlr_foreign_toplevel_handle_v1::State::Activated as u32
-                    });
+                handle_state.activated = raw_state.chunks_exact(4).any(|chunk| {
+                    let val = u32::from_ne_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+                    val == zwlr_foreign_toplevel_handle_v1::State::Activated as u32
+                });
             }
             zwlr_foreign_toplevel_handle_v1::Event::Done => {
                 // Atomic update complete — if this handle is activated, publish it

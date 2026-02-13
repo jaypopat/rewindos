@@ -198,14 +198,14 @@ async fn run_daemon() -> anyhow::Result<()> {
 
     // Start the capture pipeline
     let pipeline_handle =
-        pipeline::start_pipeline(&config, db.clone(), capture_backend, window_info.clone())
-            .await?;
+        pipeline::start_pipeline(&config, db.clone(), capture_backend, window_info.clone()).await?;
 
     info!("capture pipeline started");
 
     // Register D-Bus service
     let dbus_service = service::DaemonService {
         db: db.clone(),
+        config: Arc::new(config.clone()),
         metrics: pipeline_handle.metrics.clone(),
         is_capturing: pipeline_handle.is_capturing.clone(),
         start_time: Instant::now(),
@@ -228,8 +228,7 @@ async fn run_daemon() -> anyhow::Result<()> {
     }
 
     // Wait for shutdown signal
-    let mut sigterm =
-        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+    let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
 
     tokio::select! {
         _ = tokio::signal::ctrl_c() => {

@@ -51,8 +51,8 @@ impl super::CaptureBackend for KwinCaptureBackend {
 /// We read the raw pixels, convert from QImage format (ARGB32/RGB32) to RGBA, and return a `RawFrame`.
 pub async fn capture_workspace(conn: &Connection) -> Result<RawFrame, CaptureError> {
     // Create a Unix pipe: KWin writes to write_fd, we read from read_fd
-    let (read_fd, write_fd) = unistd::pipe()
-        .map_err(|e| CaptureError::KWin(format!("failed to create pipe: {e}")))?;
+    let (read_fd, write_fd) =
+        unistd::pipe().map_err(|e| CaptureError::KWin(format!("failed to create pipe: {e}")))?;
 
     // Build options dict for CaptureWorkspace
     let mut options: HashMap<&str, Value<'_>> = HashMap::new();
@@ -178,7 +178,13 @@ enum QImageFormat {
 }
 
 /// Convert QImage raw pixels to RGBA byte order.
-fn convert_qimage_to_rgba(src: &[u8], width: u32, height: u32, stride: u32, format: u32) -> Vec<u8> {
+fn convert_qimage_to_rgba(
+    src: &[u8],
+    width: u32,
+    height: u32,
+    stride: u32,
+    format: u32,
+) -> Vec<u8> {
     let pixel_count = (width * height) as usize;
     let mut rgba = Vec::with_capacity(pixel_count * 4);
 
@@ -199,22 +205,22 @@ fn convert_qimage_to_rgba(src: &[u8], width: u32, height: u32, stride: u32, form
                 {
                     rgba.push(src[offset + 2]); // R
                     rgba.push(src[offset + 1]); // G
-                    rgba.push(src[offset]);     // B
-                    rgba.push(255);             // A (force opaque)
+                    rgba.push(src[offset]); // B
+                    rgba.push(255); // A (force opaque)
                 }
                 // RGBX8888 / RGBA8888: memory layout is RGBA
                 f if f == QImageFormat::RGBX8888 as u32 || f == QImageFormat::RGBA8888 as u32 => {
-                    rgba.push(src[offset]);     // R
+                    rgba.push(src[offset]); // R
                     rgba.push(src[offset + 1]); // G
                     rgba.push(src[offset + 2]); // B
-                    rgba.push(255);             // A
+                    rgba.push(255); // A
                 }
                 // Unknown format — assume BGRA (most common on KDE/Wayland)
                 _ => {
                     rgba.push(src[offset + 2]); // R
                     rgba.push(src[offset + 1]); // G
-                    rgba.push(src[offset]);     // B
-                    rgba.push(255);             // A
+                    rgba.push(src[offset]); // B
+                    rgba.push(255); // A
                 }
             }
         }

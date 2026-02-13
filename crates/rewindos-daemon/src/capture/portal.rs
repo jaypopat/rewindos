@@ -139,7 +139,10 @@ impl super::CaptureBackend for PortalCaptureBackend {
         }
 
         let node_id = streams[0].pipe_wire_node_id();
-        info!(node_id, "portal screencast started, spawning PipeWire stream");
+        info!(
+            node_id,
+            "portal screencast started, spawning PipeWire stream"
+        );
 
         // Get PipeWire remote fd
         let pw_fd = screencast
@@ -312,7 +315,8 @@ fn run_pipewire_loop(
                 let data = &mut datas[0];
                 let stride = data.chunk().stride() as u32;
                 let Some(slice) = data.data() else { return };
-                let rgba = convert_spa_to_rgba(slice, fmt.width, fmt.height, stride, fmt.spa_format);
+                let rgba =
+                    convert_spa_to_rgba(slice, fmt.width, fmt.height, stride, fmt.spa_format);
 
                 *shared_process.frame.lock().unwrap() = Some(FrameData {
                     pixels: rgba,
@@ -377,9 +381,8 @@ fn parse_video_format(param: &pipewire::spa::pod::Pod) -> Result<VideoFormat, St
     use pipewire::spa::pod::deserialize::PodDeserializer;
     use pipewire::spa::pod::Value;
 
-    let (_, value) =
-        PodDeserializer::deserialize_any_from(param.as_bytes())
-            .map_err(|e| format!("pod deserialize error: {e:?}"))?;
+    let (_, value) = PodDeserializer::deserialize_any_from(param.as_bytes())
+        .map_err(|e| format!("pod deserialize error: {e:?}"))?;
 
     let Value::Object(obj) = value else {
         return Err("expected Object pod".into());
@@ -413,10 +416,10 @@ fn parse_video_format(param: &pipewire::spa::pod::Pod) -> Result<VideoFormat, St
     }
 
     let spa_format = match format_id {
-        7 => SpaVideoFormat::BGRx,    // SPA_VIDEO_FORMAT_BGRx
-        8 => SpaVideoFormat::RGBx,    // SPA_VIDEO_FORMAT_RGBx
-        9 => SpaVideoFormat::BGRA,    // SPA_VIDEO_FORMAT_BGRA
-        10 => SpaVideoFormat::RGBA,   // SPA_VIDEO_FORMAT_RGBA
+        7 => SpaVideoFormat::BGRx,  // SPA_VIDEO_FORMAT_BGRx
+        8 => SpaVideoFormat::RGBx,  // SPA_VIDEO_FORMAT_RGBx
+        9 => SpaVideoFormat::BGRA,  // SPA_VIDEO_FORMAT_BGRA
+        10 => SpaVideoFormat::RGBA, // SPA_VIDEO_FORMAT_RGBA
         other => SpaVideoFormat::Unknown(other),
     };
 
@@ -428,7 +431,13 @@ fn parse_video_format(param: &pipewire::spa::pod::Pod) -> Result<VideoFormat, St
 }
 
 /// Convert SPA video format pixels to RGBA.
-fn convert_spa_to_rgba(src: &[u8], width: u32, height: u32, stride: u32, format: SpaVideoFormat) -> Vec<u8> {
+fn convert_spa_to_rgba(
+    src: &[u8],
+    width: u32,
+    height: u32,
+    stride: u32,
+    format: SpaVideoFormat,
+) -> Vec<u8> {
     let pixel_count = (width * height) as usize;
     let mut rgba = Vec::with_capacity(pixel_count * 4);
 
@@ -446,22 +455,22 @@ fn convert_spa_to_rgba(src: &[u8], width: u32, height: u32, stride: u32, format:
                 SpaVideoFormat::BGRx | SpaVideoFormat::BGRA => {
                     rgba.push(src[offset + 2]); // R
                     rgba.push(src[offset + 1]); // G
-                    rgba.push(src[offset]);     // B
-                    rgba.push(255);             // A
+                    rgba.push(src[offset]); // B
+                    rgba.push(255); // A
                 }
                 // RGBx / RGBA: bytes are [R, G, B, A/x] in memory
                 SpaVideoFormat::RGBx | SpaVideoFormat::RGBA => {
-                    rgba.push(src[offset]);     // R
+                    rgba.push(src[offset]); // R
                     rgba.push(src[offset + 1]); // G
                     rgba.push(src[offset + 2]); // B
-                    rgba.push(255);             // A
+                    rgba.push(255); // A
                 }
                 // Unknown format — assume BGRx (most common on Linux)
                 SpaVideoFormat::Unknown(_) => {
                     rgba.push(src[offset + 2]); // R
                     rgba.push(src[offset + 1]); // G
-                    rgba.push(src[offset]);     // B
-                    rgba.push(255);             // A
+                    rgba.push(src[offset]); // B
+                    rgba.push(255); // A
                 }
             }
         }
@@ -474,9 +483,7 @@ fn convert_spa_to_rgba(src: &[u8], width: u32, height: u32, stride: u32, format:
 fn build_video_params(buf: &mut [u8]) -> &pipewire::spa::pod::Pod {
     use pipewire::spa::pod::serialize::PodSerializer;
     use pipewire::spa::pod::{ChoiceValue, Object, Property, PropertyFlags, Value};
-    use pipewire::spa::utils::{
-        Choice, ChoiceEnum, ChoiceFlags, Fraction, Id, Rectangle,
-    };
+    use pipewire::spa::utils::{Choice, ChoiceEnum, ChoiceFlags, Fraction, Id, Rectangle};
 
     let obj = Value::Object(Object {
         type_: pipewire::spa::utils::SpaTypes::ObjectParamFormat.as_raw(),
@@ -484,13 +491,13 @@ fn build_video_params(buf: &mut [u8]) -> &pipewire::spa::pod::Pod {
         properties: vec![
             // mediaType = Video
             Property {
-                key: 0x00010001, // SPA_FORMAT_mediaType
+                key: 0x00010001,         // SPA_FORMAT_mediaType
                 value: Value::Id(Id(2)), // SPA_MEDIA_TYPE_video
                 flags: PropertyFlags::empty(),
             },
             // mediaSubtype = Raw
             Property {
-                key: 0x00010002, // SPA_FORMAT_mediaSubtype
+                key: 0x00010002,         // SPA_FORMAT_mediaSubtype
                 value: Value::Id(Id(1)), // SPA_MEDIA_SUBTYPE_raw
                 flags: PropertyFlags::empty(),
             },
@@ -500,12 +507,12 @@ fn build_video_params(buf: &mut [u8]) -> &pipewire::spa::pod::Pod {
                 value: Value::Choice(ChoiceValue::Id(Choice(
                     ChoiceFlags::empty(),
                     ChoiceEnum::Enum {
-                        default: Id(7),  // BGRx
+                        default: Id(7), // BGRx
                         alternatives: vec![
-                            Id(7),   // BGRx
-                            Id(8),   // RGBx
-                            Id(9),   // BGRA
-                            Id(10),  // RGBA
+                            Id(7),  // BGRx
+                            Id(8),  // RGBx
+                            Id(9),  // BGRA
+                            Id(10), // RGBA
                         ],
                     },
                 ))),
@@ -517,9 +524,18 @@ fn build_video_params(buf: &mut [u8]) -> &pipewire::spa::pod::Pod {
                 value: Value::Choice(ChoiceValue::Rectangle(Choice(
                     ChoiceFlags::empty(),
                     ChoiceEnum::Range {
-                        default: Rectangle { width: 1920, height: 1080 },
-                        min: Rectangle { width: 1, height: 1 },
-                        max: Rectangle { width: 8192, height: 8192 },
+                        default: Rectangle {
+                            width: 1920,
+                            height: 1080,
+                        },
+                        min: Rectangle {
+                            width: 1,
+                            height: 1,
+                        },
+                        max: Rectangle {
+                            width: 8192,
+                            height: 8192,
+                        },
                     },
                 ))),
                 flags: PropertyFlags::empty(),
@@ -540,9 +556,8 @@ fn build_video_params(buf: &mut [u8]) -> &pipewire::spa::pod::Pod {
         ],
     });
 
-    let (result, _) =
-        PodSerializer::serialize(std::io::Cursor::new(buf), &obj)
-            .expect("failed to serialize video params pod");
+    let (result, _) = PodSerializer::serialize(std::io::Cursor::new(buf), &obj)
+        .expect("failed to serialize video params pod");
 
     unsafe {
         let ptr = result.into_inner().as_ptr();

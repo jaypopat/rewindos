@@ -2,6 +2,7 @@ use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+use rewindos_core::config::AppConfig;
 use rewindos_core::db::Database;
 use rewindos_core::embedding::OllamaClient;
 use rewindos_core::schema::{DaemonStatus, QueueDepths, SearchFilters};
@@ -14,6 +15,7 @@ use crate::window_info::kwin::KwinWindowInfo;
 /// D-Bus service object for `com.rewindos.Daemon`.
 pub struct DaemonService {
     pub db: Arc<Mutex<Database>>,
+    pub config: Arc<AppConfig>,
     pub metrics: Arc<PipelineMetrics>,
     pub is_capturing: Arc<std::sync::atomic::AtomicBool>,
     pub start_time: Instant,
@@ -60,7 +62,12 @@ impl DaemonService {
                 index: 0,
             },
             uptime_seconds: uptime,
-            disk_usage_bytes: 0, // TODO: compute from screenshots dir
+            disk_usage_bytes: self
+                .config
+                .screenshots_dir()
+                .ok()
+                .map(|dir| dir_size(&dir))
+                .unwrap_or(0),
             last_capture_timestamp: None,
         };
 
@@ -113,7 +120,8 @@ impl DaemonService {
         info!(start, end, "delete range requested via D-Bus");
 
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
-        let deleted = db.delete_screenshots_before(end)
+        let deleted = db
+            .delete_screenshots_before(end)
             .map_err(|e| zbus::fdo::Error::Failed(format!("delete error: {e}")))?;
 
         Ok(deleted)
@@ -121,12 +129,7 @@ impl DaemonService {
 
     /// Called by the KWin tracking script when the active window changes.
     /// No-op if a non-KWin window info provider is active.
-    async fn report_active_window(
-        &self,
-        caption: &str,
-        resource_class: &str,
-        resource_name: &str,
-    ) {
+    async fn report_active_window(&self, caption: &str, resource_class: &str, resource_name: &str) {
         if let Some(ref kwin) = self.kwin_window_info {
             kwin.update(
                 caption.to_string(),
@@ -143,6 +146,23 @@ impl DaemonService {
 
     #[zbus(property)]
     fn capture_interval(&self) -> u32 {
-        0 // TODO: wire to config
+        self.config.capture.interval_seconds
     }
+}
+
+/// Walk a directory and sum file sizes.
+fn dir_size(path: &std::path::Path) -> u64 {
+    std::fs::read_dir(path)
+        .into_iter()
+        .flatten()
+        .filter_map(|e| e.ok())
+        .map(|e| {
+            let meta = e.metadata().ok();
+            if meta.as_ref().map(|m| m.is_dir()).unwrap_or(false) {
+                dir_size(&e.path())
+            } else {
+                meta.map(|m| m.len()).unwrap_or(0)
+            }
+        })
+        .sum()
 }

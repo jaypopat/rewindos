@@ -225,9 +225,7 @@ impl OllamaChatClient {
 
         if !response.status().is_success() {
             let status = response.status();
-            return Err(CoreError::Chat(format!(
-                "analyze_query failed: {status}"
-            )));
+            return Err(CoreError::Chat(format!("analyze_query failed: {status}")));
         }
 
         let resp_json: serde_json::Value = response
@@ -235,9 +233,7 @@ impl OllamaChatClient {
             .await
             .map_err(|e| CoreError::Chat(format!("parse analyze_query response: {e}")))?;
 
-        let content = resp_json["message"]["content"]
-            .as_str()
-            .unwrap_or("{}");
+        let content = resp_json["message"]["content"].as_str().unwrap_or("{}");
 
         // Strip <think>...</think> blocks (reasoning models like deepseek-r1)
         let clean = if let Ok(re) = regex_lite::Regex::new(r"(?s)<think>.*?</think>") {
@@ -257,9 +253,7 @@ impl OllamaChatClient {
 
     fn parse_intent_json(json_str: &str) -> Result<QueryIntent> {
         let v: serde_json::Value = serde_json::from_str(json_str).map_err(|e| {
-            CoreError::Chat(format!(
-                "failed to parse intent JSON: {e}, raw: {json_str}"
-            ))
+            CoreError::Chat(format!("failed to parse intent JSON: {e}, raw: {json_str}"))
         })?;
 
         let now = chrono::Local::now().timestamp();
@@ -430,9 +424,11 @@ impl IntentClassifier {
         ];
 
         // "in <app>" pattern
-        if let Some(caps) = regex_lite::Regex::new(r"in\s+([\w\s]+?)(?:\s+(?:yesterday|today|this|last|when|while)|\?|$)")
-            .ok()
-            .and_then(|re| re.captures(query))
+        if let Some(caps) = regex_lite::Regex::new(
+            r"in\s+([\w\s]+?)(?:\s+(?:yesterday|today|this|last|when|while)|\?|$)",
+        )
+        .ok()
+        .and_then(|re| re.captures(query))
         {
             let app_mention = caps[1].trim();
             for (pattern, app_name) in &app_patterns {
@@ -454,12 +450,65 @@ impl IntentClassifier {
 
     fn extract_search_terms(query: &str) -> Vec<String> {
         let stop_words = [
-            "what", "was", "that", "the", "i", "saw", "in", "did", "do", "show", "me", "when",
-            "how", "long", "much", "time", "spent", "on", "a", "an", "is", "it", "my", "have",
-            "has", "been", "were", "are", "this", "last", "yesterday", "today", "week", "month",
-            "find", "search", "look", "for", "about", "with", "from", "to", "at", "of",
-            "can", "you", "tell", "give", "get", "happened", "there", "doing",
-            "worked", "working", "used", "using", "opened", "visited", "played",
+            "what",
+            "was",
+            "that",
+            "the",
+            "i",
+            "saw",
+            "in",
+            "did",
+            "do",
+            "show",
+            "me",
+            "when",
+            "how",
+            "long",
+            "much",
+            "time",
+            "spent",
+            "on",
+            "a",
+            "an",
+            "is",
+            "it",
+            "my",
+            "have",
+            "has",
+            "been",
+            "were",
+            "are",
+            "this",
+            "last",
+            "yesterday",
+            "today",
+            "week",
+            "month",
+            "find",
+            "search",
+            "look",
+            "for",
+            "about",
+            "with",
+            "from",
+            "to",
+            "at",
+            "of",
+            "can",
+            "you",
+            "tell",
+            "give",
+            "get",
+            "happened",
+            "there",
+            "doing",
+            "worked",
+            "working",
+            "used",
+            "using",
+            "opened",
+            "visited",
+            "played",
         ];
 
         query
@@ -489,7 +538,11 @@ impl ContextAssembler {
 
         for (id, timestamp, app_name, window_title, file_path, ocr_text) in results {
             let time_str = chrono::DateTime::from_timestamp(*timestamp, 0)
-                .map(|dt| dt.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M:%S").to_string())
+                .map(|dt| {
+                    dt.with_timezone(&chrono::Local)
+                        .format("%Y-%m-%d %H:%M:%S")
+                        .to_string()
+                })
                 .unwrap_or_else(|| timestamp.to_string());
 
             let app = app_name.as_deref().unwrap_or("Unknown");
@@ -528,7 +581,11 @@ impl ContextAssembler {
             let app = app_name.as_deref().unwrap_or("Unknown");
             let title = window_title.as_deref().unwrap_or("");
             let time_str = chrono::DateTime::from_timestamp(*ts, 0)
-                .map(|dt| dt.with_timezone(&chrono::Local).format("%H:%M:%S").to_string())
+                .map(|dt| {
+                    dt.with_timezone(&chrono::Local)
+                        .format("%H:%M:%S")
+                        .to_string()
+                })
                 .unwrap_or_default();
 
             if current_app != Some(app) {

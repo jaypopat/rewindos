@@ -42,11 +42,7 @@ impl OllamaClient {
         let response = match self.client.post(&url).json(&req).send().await {
             Ok(r) => r,
             Err(e) if e.is_connect() || e.is_timeout() => return Ok(None),
-            Err(e) => {
-                return Err(CoreError::Embedding(format!(
-                    "request failed: {e}"
-                )))
-            }
+            Err(e) => return Err(CoreError::Embedding(format!("request failed: {e}"))),
         };
 
         if !response.status().is_success() {

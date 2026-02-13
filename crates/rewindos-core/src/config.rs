@@ -21,7 +21,7 @@ pub struct AppConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CaptureConfig {
-pub interval_seconds: u32,
+    pub interval_seconds: u32,
     pub change_threshold: u32,
     pub enabled: bool,
 }
@@ -153,6 +153,7 @@ impl Default for PrivacyConfig {
     fn default() -> Self {
         Self {
             excluded_apps: vec![
+                "rewindos".to_string(),
                 "keepassxc".to_string(),
                 "1password".to_string(),
                 "bitwarden".to_string(),
@@ -161,6 +162,8 @@ impl Default for PrivacyConfig {
             excluded_title_patterns: vec![
                 "Private Browsing".to_string(),
                 "Incognito".to_string(),
+                "Lock Screen".to_string(),
+                "Screen Locker".to_string(),
             ],
         }
     }

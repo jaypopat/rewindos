@@ -250,11 +250,7 @@ level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theigh
 
     #[test]
     fn join_words_should_newline_between_lines() {
-        let parts = vec![
-            "Line1".to_string(),
-            "\n".to_string(),
-            "Line2".to_string(),
-        ];
+        let parts = vec!["Line1".to_string(), "\n".to_string(), "Line2".to_string()];
         assert_eq!(join_words(&parts), "Line1\nLine2");
     }
 }

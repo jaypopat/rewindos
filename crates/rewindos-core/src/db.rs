@@ -91,12 +91,7 @@ impl Database {
     }
 
     /// Insert OCR text for a screenshot into both the content table and FTS5 index.
-    pub fn insert_ocr_text(
-        &self,
-        screenshot_id: i64,
-        text: &str,
-        word_count: i32,
-    ) -> Result<()> {
+    pub fn insert_ocr_text(&self, screenshot_id: i64, text: &str, word_count: i32) -> Result<()> {
         self.conn.execute(
             "INSERT INTO ocr_text_content (screenshot_id, text_content, word_count)
              VALUES (?1, ?2, ?3)",
@@ -168,9 +163,7 @@ impl Database {
                 height: row.get(9)?,
                 file_size_bytes: row.get(10)?,
                 perceptual_hash: row.get(11)?,
-                ocr_status: OcrStatus::parse(
-                    &row.get::<_, String>(12)?,
-                ),
+                ocr_status: OcrStatus::parse(&row.get::<_, String>(12)?),
                 created_at: row.get(13)?,
             })
         })?;
@@ -224,7 +217,8 @@ impl Database {
             },
         )?;
 
-        rows.collect::<std::result::Result<Vec<_>, _>>().map_err(Into::into)
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Into::into)
     }
 
     /// Get recent perceptual hashes for deduplication.
@@ -341,13 +335,11 @@ impl Database {
 
     /// Get the OCR text content for a screenshot.
     pub fn get_ocr_text(&self, screenshot_id: i64) -> Result<Option<String>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT text_content FROM ocr_text_content WHERE screenshot_id = ?1",
-        )?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT text_content FROM ocr_text_content WHERE screenshot_id = ?1")?;
 
-        let mut rows = stmt.query_map(params![screenshot_id], |row| {
-            row.get::<_, String>(0)
-        })?;
+        let mut rows = stmt.query_map(params![screenshot_id], |row| row.get::<_, String>(0))?;
 
         match rows.next() {
             Some(row) => Ok(Some(row?)),
@@ -411,7 +403,8 @@ impl Database {
             ))
         })?;
 
-        rows.collect::<std::result::Result<Vec<_>, _>>().map_err(Into::into)
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Into::into)
     }
 
     /// Get OCR sessions with screenshot IDs and file paths for richer context.
@@ -443,7 +436,8 @@ impl Database {
             ))
         })?;
 
-        rows.collect::<std::result::Result<Vec<_>, _>>().map_err(Into::into)
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Into::into)
     }
 
     /// Get app usage statistics since a given unix timestamp.
@@ -563,10 +557,7 @@ impl Database {
 
     /// Insert an embedding for a screenshot into the vector table.
     pub fn insert_embedding(&self, screenshot_id: i64, embedding: &[f32]) -> Result<()> {
-        let blob: Vec<u8> = embedding
-            .iter()
-            .flat_map(|f| f.to_le_bytes())
-            .collect();
+        let blob: Vec<u8> = embedding.iter().flat_map(|f| f.to_le_bytes()).collect();
 
         self.conn.execute(
             "INSERT INTO ocr_embeddings (screenshot_id, embedding)
@@ -604,11 +595,7 @@ impl Database {
     }
 
     /// KNN vector search — returns (screenshot_id, distance) pairs.
-    pub fn vector_search(
-        &self,
-        query_embedding: &[f32],
-        limit: usize,
-    ) -> Result<Vec<(i64, f64)>> {
+    pub fn vector_search(&self, query_embedding: &[f32], limit: usize) -> Result<Vec<(i64, f64)>> {
         let blob: Vec<u8> = query_embedding
             .iter()
             .flat_map(|f| f.to_le_bytes())
@@ -716,9 +703,7 @@ impl Database {
             } else {
                 // This result came from vector search only — construct a SearchResult
                 if let Some(ss) = self.get_screenshot(*id)? {
-                    let matched_text = self
-                        .get_ocr_text(*id)?
-                        .unwrap_or_default();
+                    let matched_text = self.get_ocr_text(*id)?.unwrap_or_default();
                     let snippet = if matched_text.len() > 200 {
                         // Find a valid char boundary at or before byte 200
                         let end = matched_text
@@ -912,7 +897,10 @@ mod tests {
         let id = db.insert_screenshot(&new).unwrap();
         assert!(id > 0);
 
-        let got = db.get_screenshot(id).unwrap().expect("screenshot not found");
+        let got = db
+            .get_screenshot(id)
+            .unwrap()
+            .expect("screenshot not found");
         assert_eq!(got.id, id);
         assert_eq!(got.timestamp, 1706137200);
         assert_eq!(got.app_name.as_deref(), Some("firefox"));
@@ -920,7 +908,10 @@ mod tests {
         assert_eq!(got.width, 1920);
         assert_eq!(got.height, 1080);
         assert_eq!(got.ocr_status, OcrStatus::Pending);
-        assert_eq!(got.perceptual_hash, vec![0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08]);
+        assert_eq!(
+            got.perceptual_hash,
+            vec![0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08]
+        );
     }
 
     #[test]
@@ -963,9 +954,12 @@ mod tests {
         let id2 = db.insert_screenshot(&make_screenshot(2000)).unwrap();
         let id3 = db.insert_screenshot(&make_screenshot(3000)).unwrap();
 
-        db.insert_ocr_text(id1, "hello world from screenshot one", 5).unwrap();
-        db.insert_ocr_text(id2, "hello world from screenshot two", 5).unwrap();
-        db.insert_ocr_text(id3, "hello world from screenshot three", 5).unwrap();
+        db.insert_ocr_text(id1, "hello world from screenshot one", 5)
+            .unwrap();
+        db.insert_ocr_text(id2, "hello world from screenshot two", 5)
+            .unwrap();
+        db.insert_ocr_text(id3, "hello world from screenshot three", 5)
+            .unwrap();
 
         // Search with start_time filter
         let filters = SearchFilters {
@@ -1007,8 +1001,10 @@ mod tests {
         ss2.app_name = Some("code".to_string());
         let id2 = db.insert_screenshot(&ss2).unwrap();
 
-        db.insert_ocr_text(id1, "search query text in firefox", 5).unwrap();
-        db.insert_ocr_text(id2, "search query text in vscode", 5).unwrap();
+        db.insert_ocr_text(id1, "search query text in firefox", 5)
+            .unwrap();
+        db.insert_ocr_text(id2, "search query text in vscode", 5)
+            .unwrap();
 
         let filters = SearchFilters {
             query: "search query".to_string(),
@@ -1030,7 +1026,8 @@ mod tests {
 
         for i in 0..5 {
             let id = db.insert_screenshot(&make_screenshot(1000 + i)).unwrap();
-            db.insert_ocr_text(id, &format!("common search term item {i}"), 4).unwrap();
+            db.insert_ocr_text(id, &format!("common search term item {i}"), 4)
+                .unwrap();
         }
 
         // Page 1
@@ -1251,8 +1248,10 @@ mod tests {
         // Timestamps at different hours
         // 1706140800 = 2024-01-25 00:00:00 UTC
         db.insert_screenshot(&make_screenshot(1706140800)).unwrap(); // hour depends on localtime
-        db.insert_screenshot(&make_screenshot(1706140800 + 3600)).unwrap();
-        db.insert_screenshot(&make_screenshot(1706140800 + 3600 + 60)).unwrap();
+        db.insert_screenshot(&make_screenshot(1706140800 + 3600))
+            .unwrap();
+        db.insert_screenshot(&make_screenshot(1706140800 + 3600 + 60))
+            .unwrap();
 
         let hourly = db.get_hourly_activity(0).unwrap();
         assert!(!hourly.is_empty());
@@ -1322,7 +1321,9 @@ mod tests {
 
         let ocr_count: i64 = db
             .conn
-            .query_row("SELECT COUNT(*) FROM ocr_text_content", [], |row| row.get(0))
+            .query_row("SELECT COUNT(*) FROM ocr_text_content", [], |row| {
+                row.get(0)
+            })
             .unwrap();
         assert_eq!(ocr_count, 0);
 

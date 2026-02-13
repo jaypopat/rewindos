@@ -110,11 +110,8 @@ impl CaptureManager {
 
             let window = self.window_info.current();
 
-            if window_info::is_excluded(
-                &window,
-                &self.excluded_apps,
-                &self.excluded_title_patterns,
-            ) {
+            if window_info::is_excluded(&window, &self.excluded_apps, &self.excluded_title_patterns)
+            {
                 debug!(
                     app = ?window.app_name,
                     title = ?window.window_title,

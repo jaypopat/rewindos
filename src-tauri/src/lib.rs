@@ -81,7 +81,10 @@ async fn search(
         .await
         .map_err(|e| format!("dbus call: {e}"))?;
 
-    let result_json: String = reply.body().deserialize().map_err(|e| format!("dbus deserialize: {e}"))?;
+    let result_json: String = reply
+        .body()
+        .deserialize()
+        .map_err(|e| format!("dbus deserialize: {e}"))?;
     let response: SearchResponse =
         serde_json::from_str(&result_json).map_err(|e| format!("parse response: {e}"))?;
 
@@ -89,9 +92,7 @@ async fn search(
 }
 
 #[tauri::command]
-async fn get_daemon_status(
-    state: State<'_, AppState>,
-) -> Result<DaemonStatusResponse, String> {
+async fn get_daemon_status(state: State<'_, AppState>) -> Result<DaemonStatusResponse, String> {
     let reply = state
         .dbus
         .call_method(
@@ -104,7 +105,10 @@ async fn get_daemon_status(
         .await
         .map_err(|e| format!("dbus call: {e}"))?;
 
-    let status_json: String = reply.body().deserialize().map_err(|e| format!("dbus deserialize: {e}"))?;
+    let status_json: String = reply
+        .body()
+        .deserialize()
+        .map_err(|e| format!("dbus deserialize: {e}"))?;
     let status: DaemonStatusResponse =
         serde_json::from_str(&status_json).map_err(|e| format!("parse status: {e}"))?;
 
@@ -346,7 +350,11 @@ async fn get_daily_summary(
             // Flush previous group
             if let Some(prev_app) = &current_group_app {
                 let titles: Vec<&str> = group_titles.iter().take(3).map(|s| s.as_str()).collect();
-                let snippet = group_ocr_snippets.join(" ").chars().take(200).collect::<String>();
+                let snippet = group_ocr_snippets
+                    .join(" ")
+                    .chars()
+                    .take(200)
+                    .collect::<String>();
                 context_lines.push(format!(
                     "- {prev_app}: windows [{}], content: \"{}\"",
                     titles.join(", "),
@@ -372,7 +380,11 @@ async fn get_daily_summary(
     // Flush last group
     if let Some(prev_app) = &current_group_app {
         let titles: Vec<&str> = group_titles.iter().take(3).map(|s| s.as_str()).collect();
-        let snippet = group_ocr_snippets.join(" ").chars().take(200).collect::<String>();
+        let snippet = group_ocr_snippets
+            .join(" ")
+            .chars()
+            .take(200)
+            .collect::<String>();
         context_lines.push(format!(
             "- {prev_app}: windows [{}], content: \"{}\"",
             titles.join(", "),
@@ -383,7 +395,12 @@ async fn get_daily_summary(
     let app_summary_text = app_breakdown
         .iter()
         .take(8)
-        .map(|a| format!("{}: {:.0}min ({} sessions)", a.app_name, a.minutes, a.session_count))
+        .map(|a| {
+            format!(
+                "{}: {:.0}min ({} sessions)",
+                a.app_name, a.minutes, a.session_count
+            )
+        })
         .collect::<Vec<_>>()
         .join(", ");
 
@@ -401,7 +418,10 @@ async fn get_daily_summary(
 
     // 4. Call Ollama (using config URL and model)
     let (ollama_url, ollama_model) = {
-        let cfg = state.config.lock().map_err(|e| format!("config lock: {e}"))?;
+        let cfg = state
+            .config
+            .lock()
+            .map_err(|e| format!("config lock: {e}"))?;
         (
             format!("{}/api/generate", cfg.chat.ollama_url.trim_end_matches('/')),
             cfg.chat.model.clone(),
@@ -502,7 +522,10 @@ struct AskErrorPayload {
 #[tauri::command]
 fn ask_new_session(state: State<'_, AppState>) -> Result<String, String> {
     let session_id = uuid::Uuid::new_v4().to_string();
-    let mut sessions = state.chat_sessions.lock().map_err(|e| format!("lock: {e}"))?;
+    let mut sessions = state
+        .chat_sessions
+        .lock()
+        .map_err(|e| format!("lock: {e}"))?;
     sessions.insert(session_id.clone(), Vec::new());
     Ok(session_id)
 }
@@ -510,7 +533,10 @@ fn ask_new_session(state: State<'_, AppState>) -> Result<String, String> {
 #[tauri::command]
 async fn ask_health(state: State<'_, AppState>) -> Result<bool, String> {
     let chat_config = {
-        let cfg = state.config.lock().map_err(|e| format!("config lock: {e}"))?;
+        let cfg = state
+            .config
+            .lock()
+            .map_err(|e| format!("config lock: {e}"))?;
         cfg.chat.clone()
     };
     let client = OllamaChatClient::new(&chat_config);
@@ -524,7 +550,11 @@ async fn ask(
     session_id: String,
     message: String,
 ) -> Result<AskResponse, String> {
-    let config = state.config.lock().map_err(|e| format!("config lock: {e}"))?.clone();
+    let config = state
+        .config
+        .lock()
+        .map_err(|e| format!("config lock: {e}"))?
+        .clone();
     let chat_client = OllamaChatClient::new(&config.chat);
 
     // 1. Classify intent — LLM-based, with regex fallback if Ollama fails
@@ -544,9 +574,7 @@ async fn ask(
         let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
 
         match intent.category {
-            IntentCategory::Recall
-            | IntentCategory::General
-            | IntentCategory::AppSpecific => {
+            IntentCategory::Recall | IntentCategory::General | IntentCategory::AppSpecific => {
                 // Try FTS5 search with extracted terms
                 let search_query = if intent.search_terms.is_empty() {
                     message.clone()
@@ -575,8 +603,7 @@ async fn ask(
                         .results
                         .iter()
                         .map(|r| {
-                            let ocr =
-                                db.get_ocr_text(r.id).unwrap_or(None).unwrap_or_default();
+                            let ocr = db.get_ocr_text(r.id).unwrap_or(None).unwrap_or_default();
                             (
                                 r.id,
                                 r.timestamp,
@@ -607,10 +634,7 @@ async fn ask(
                             .results
                             .iter()
                             .map(|r| {
-                                let ocr = db
-                                    .get_ocr_text(r.id)
-                                    .unwrap_or(None)
-                                    .unwrap_or_default();
+                                let ocr = db.get_ocr_text(r.id).unwrap_or(None).unwrap_or_default();
                                 (
                                     r.id,
                                     r.timestamp,
@@ -625,8 +649,7 @@ async fn ask(
                     } else {
                         // Fallback B: recent activity timeline
                         let now = chrono::Local::now().timestamp();
-                        let (start, end) =
-                            intent.time_range.unwrap_or((now - 86400, now));
+                        let (start, end) = intent.time_range.unwrap_or((now - 86400, now));
                         let sessions = db
                             .get_ocr_sessions_with_ids(start, end, 100)
                             .unwrap_or_default();
@@ -692,7 +715,10 @@ async fn ask(
     // Get history and add user message
     let mut messages = vec![system_message];
     {
-        let mut sessions = state.chat_sessions.lock().map_err(|e| format!("lock: {e}"))?;
+        let mut sessions = state
+            .chat_sessions
+            .lock()
+            .map_err(|e| format!("lock: {e}"))?;
         if let Some(history) = sessions.get_mut(&session_id) {
             // Trim history to max
             let max = config.chat.max_history_messages;
@@ -773,15 +799,15 @@ async fn ask(
 
 #[tauri::command]
 fn get_config(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
-    let cfg = state.config.lock().map_err(|e| format!("config lock: {e}"))?;
+    let cfg = state
+        .config
+        .lock()
+        .map_err(|e| format!("config lock: {e}"))?;
     serde_json::to_value(&*cfg).map_err(|e| format!("serialize: {e}"))
 }
 
 #[tauri::command]
-fn update_config(
-    state: State<'_, AppState>,
-    config_json: serde_json::Value,
-) -> Result<(), String> {
+fn update_config(state: State<'_, AppState>, config_json: serde_json::Value) -> Result<(), String> {
     let new_config: AppConfig =
         serde_json::from_value(config_json).map_err(|e| format!("invalid config: {e}"))?;
 
@@ -793,7 +819,10 @@ fn update_config(
     std::fs::write(&config_path, toml_str).map_err(|e| format!("write config: {e}"))?;
 
     // Update in-memory config
-    let mut cfg = state.config.lock().map_err(|e| format!("config lock: {e}"))?;
+    let mut cfg = state
+        .config
+        .lock()
+        .map_err(|e| format!("config lock: {e}"))?;
     *cfg = new_config;
 
     Ok(())
@@ -807,10 +836,8 @@ pub fn run() {
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, shortcut, event| {
                     if event.state() == ShortcutState::Pressed {
-                        let ctrl_shift_space = Shortcut::new(
-                            Some(Modifiers::CONTROL | Modifiers::SHIFT),
-                            Code::Space,
-                        );
+                        let ctrl_shift_space =
+                            Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::Space);
                         if shortcut == &ctrl_shift_space {
                             if let Some(window) = app.get_webview_window("main") {
                                 let _ = window.show();
@@ -834,15 +861,13 @@ pub fn run() {
                 })?;
 
             // Open database read-only (WAL mode supports concurrent readers)
-            let config = rewindos_core::AppConfig::load().map_err(|e| {
-                Box::new(e) as Box<dyn std::error::Error>
-            })?;
-            let db_path = config.db_path().map_err(|e| {
-                Box::new(e) as Box<dyn std::error::Error>
-            })?;
-            let db = Database::open(&db_path).map_err(|e| {
-                Box::new(e) as Box<dyn std::error::Error>
-            })?;
+            let config = rewindos_core::AppConfig::load()
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+            let db_path = config
+                .db_path()
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+            let db =
+                Database::open(&db_path).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
 
             app.manage(AppState {
                 dbus,
@@ -852,10 +877,8 @@ pub fn run() {
             });
 
             // Register Ctrl+Shift+Space global shortcut
-            let ctrl_shift_space = Shortcut::new(
-                Some(Modifiers::CONTROL | Modifiers::SHIFT),
-                Code::Space,
-            );
+            let ctrl_shift_space =
+                Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::Space);
             if let Err(e) = app.global_shortcut().register(ctrl_shift_space) {
                 warn!("Failed to register global shortcut: {e}");
             }
@@ -879,10 +902,9 @@ pub fn run() {
                 .build()
                 .expect("failed to build tray menu");
 
-            let tray_icon = tauri::image::Image::from_bytes(
-                include_bytes!("../icons/tray-icon.png"),
-            )
-            .expect("failed to load tray icon");
+            let tray_icon =
+                tauri::image::Image::from_bytes(include_bytes!("../icons/tray-icon.png"))
+                    .expect("failed to load tray icon");
 
             // If launched with --minimized, hide the window (autostart mode)
             let start_minimized = std::env::args().any(|a| a == "--minimized");
@@ -904,27 +926,42 @@ pub fn run() {
                             tauri::async_runtime::spawn(async move {
                                 let state = app.state::<AppState>();
                                 // Check current status
-                                let reply = state.dbus.call_method(
-                                    Some("com.rewindos.Daemon"),
-                                    "/com/rewindos/Daemon",
-                                    Some("com.rewindos.Daemon"),
-                                    "GetStatus",
-                                    &(),
-                                ).await;
+                                let reply = state
+                                    .dbus
+                                    .call_method(
+                                        Some("com.rewindos.Daemon"),
+                                        "/com/rewindos/Daemon",
+                                        Some("com.rewindos.Daemon"),
+                                        "GetStatus",
+                                        &(),
+                                    )
+                                    .await;
 
                                 match reply {
                                     Ok(reply) => {
-                                        if let Ok(status_json) = reply.body().deserialize::<String>() {
-                                            if let Ok(status) = serde_json::from_str::<serde_json::Value>(&status_json) {
-                                                let is_capturing = status["is_capturing"].as_bool().unwrap_or(true);
-                                                let method = if is_capturing { "Pause" } else { "Resume" };
-                                                let _ = state.dbus.call_method(
-                                                    Some("com.rewindos.Daemon"),
-                                                    "/com/rewindos/Daemon",
-                                                    Some("com.rewindos.Daemon"),
-                                                    method,
-                                                    &(),
-                                                ).await;
+                                        if let Ok(status_json) =
+                                            reply.body().deserialize::<String>()
+                                        {
+                                            if let Ok(status) =
+                                                serde_json::from_str::<serde_json::Value>(
+                                                    &status_json,
+                                                )
+                                            {
+                                                let is_capturing = status["is_capturing"]
+                                                    .as_bool()
+                                                    .unwrap_or(true);
+                                                let method =
+                                                    if is_capturing { "Pause" } else { "Resume" };
+                                                let _ = state
+                                                    .dbus
+                                                    .call_method(
+                                                        Some("com.rewindos.Daemon"),
+                                                        "/com/rewindos/Daemon",
+                                                        Some("com.rewindos.Daemon"),
+                                                        method,
+                                                        &(),
+                                                    )
+                                                    .await;
                                             }
                                         }
                                     }

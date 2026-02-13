@@ -101,7 +101,9 @@ pub fn create_capture_backend(
     // KDE Plasma: always use KWin ScreenShot2 (works on both Wayland and X11, no crosshair)
     if *desktop == DesktopEnvironment::KdePlasma {
         info!("using KWin ScreenShot2 capture backend (KDE Plasma)");
-        return Ok(Box::new(capture::kwin::KwinCaptureBackend::new(conn.clone())));
+        return Ok(Box::new(capture::kwin::KwinCaptureBackend::new(
+            conn.clone(),
+        )));
     }
 
     // Non-KDE Wayland: use xdg-desktop-portal + PipeWire
@@ -144,7 +146,10 @@ pub fn create_window_info_provider(
                 session = ?session,
                 "no window info provider available, using noop"
             );
-            (Arc::new(NoopWindowInfo) as Arc<dyn WindowInfoProvider>, None)
+            (
+                Arc::new(NoopWindowInfo) as Arc<dyn WindowInfoProvider>,
+                None,
+            )
         }
     }
 }

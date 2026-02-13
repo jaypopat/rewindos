@@ -5,9 +5,7 @@ use std::sync::{Arc, Mutex};
 use rewindos_core::config::AppConfig;
 use rewindos_core::db::Database;
 use rewindos_core::embedding::OllamaClient;
-use rewindos_core::hasher::{
-    self, PerceptualHasher,
-};
+use rewindos_core::hasher::{self, PerceptualHasher};
 use rewindos_core::ocr;
 use rewindos_core::schema::{EmbedRequest, NewScreenshot, OcrStatus, ProcessedFrame, RawFrame};
 use tokio::sync::mpsc;
@@ -120,15 +118,7 @@ pub async fn start_pipeline(
         let metrics = metrics.clone();
         let screenshots_dir = screenshots_dir.clone();
         tokio::spawn(async move {
-            run_hash_stage(
-                &config,
-                db,
-                raw_rx,
-                processed_tx,
-                metrics,
-                screenshots_dir,
-            )
-            .await;
+            run_hash_stage(&config, db, raw_rx, processed_tx, metrics, screenshots_dir).await;
         })
     };
 
@@ -403,7 +393,10 @@ async fn run_ocr_stage(
                     metrics.frames_ocr_pending.fetch_sub(1, Ordering::Relaxed);
 
                     if output.full_text.trim().is_empty() {
-                        debug!(screenshot_id = frame.screenshot_id, "no text found in screenshot");
+                        debug!(
+                            screenshot_id = frame.screenshot_id,
+                            "no text found in screenshot"
+                        );
                         let db = db.clone();
                         let sid = frame.screenshot_id;
                         let _ = tokio::task::spawn_blocking(move || {
@@ -523,7 +516,10 @@ async fn run_embed_stage(
     let client = OllamaClient::new(&semantic_config.ollama_url, &semantic_config.model);
 
     if !client.health_check().await {
-        warn!("Ollama is not reachable at {}, embeddings will be skipped", semantic_config.ollama_url);
+        warn!(
+            "Ollama is not reachable at {}, embeddings will be skipped",
+            semantic_config.ollama_url
+        );
     } else {
         info!("embed stage connected to Ollama");
     }
@@ -552,7 +548,10 @@ async fn run_embed_stage(
                 }
             }
             Ok(None) => {
-                debug!(screenshot_id = req.screenshot_id, "Ollama unavailable, skipping embedding");
+                debug!(
+                    screenshot_id = req.screenshot_id,
+                    "Ollama unavailable, skipping embedding"
+                );
             }
             Err(e) => {
                 warn!(screenshot_id = req.screenshot_id, error = %e, "embedding failed");
