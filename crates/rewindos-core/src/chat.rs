@@ -685,10 +685,13 @@ impl ContextAssembler {
     }
 
     /// Build context from app usage stats (for productivity queries).
+    /// Accepts the richer session tuple with screenshot IDs so references can be
+    /// produced for the LLM to link back to specific captures.
     pub fn from_app_stats(
         stats: &[(String, f64, usize)],
         // (app_name, minutes, session_count)
-        sessions: &[(Option<String>, Option<String>, i64, String)],
+        sessions: &[(i64, Option<String>, Option<String>, i64, String, String)],
+        // (id, app_name, window_title, timestamp, file_path, ocr_text)
     ) -> (String, Vec<ScreenshotReference>) {
         let mut context = String::from("## App Usage Breakdown\n\n");
 
@@ -701,8 +704,8 @@ impl ContextAssembler {
         let total: f64 = stats.iter().map(|(_, m, _)| m).sum();
         context.push_str(&format!("\n**Total tracked time**: {total:.0} minutes\n\n"));
 
-        // Add session detail for context
-        let (session_context, refs) = Self::from_sessions(sessions);
+        // Add session detail for context (with screenshot references)
+        let (session_context, refs) = Self::from_sessions_with_refs(sessions);
         context.push_str(&session_context);
 
         (context, refs)

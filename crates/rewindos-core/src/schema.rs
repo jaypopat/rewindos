@@ -108,6 +108,7 @@ pub struct DaemonStatus {
     pub queue_depths: QueueDepths,
     pub uptime_seconds: u64,
     pub disk_usage_bytes: u64,
+    pub capture_interval: u32,
     pub last_capture_timestamp: Option<i64>,
 }
 

@@ -102,6 +102,10 @@ impl CaptureManager {
 
             let mut frame = match self.backend.capture_frame().await {
                 Ok(frame) => frame,
+                Err(CaptureError::PipeWire(_)) => {
+                    debug!(error = "no frame available", "capture retry");
+                    continue;
+                }
                 Err(e) => {
                     warn!(error = %e, "capture failed, will retry");
                     continue;

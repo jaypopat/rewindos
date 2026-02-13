@@ -376,6 +376,19 @@ enum SpaVideoFormat {
     Unknown(u32),
 }
 
+// SPA format IDs (from spa/param/video/format-utils.h)
+const SPA_VIDEO_FORMAT_BGRX: u32 = 7;
+const SPA_VIDEO_FORMAT_RGBX: u32 = 8;
+const SPA_VIDEO_FORMAT_BGRA: u32 = 9;
+const SPA_VIDEO_FORMAT_RGBA: u32 = 10;
+
+// SPA pod property keys (from spa/param/format.h)
+const SPA_FORMAT_MEDIA_TYPE: u32 = 0x00010001;
+const SPA_FORMAT_MEDIA_SUBTYPE: u32 = 0x00010002;
+const SPA_FORMAT_VIDEO_FORMAT: u32 = 0x00020002;
+const SPA_FORMAT_VIDEO_SIZE: u32 = 0x00020003;
+const SPA_FORMAT_VIDEO_FRAMERATE: u32 = 0x00020004;
+
 /// Parse the negotiated video format from a SPA pod.
 fn parse_video_format(param: &pipewire::spa::pod::Pod) -> Result<VideoFormat, String> {
     use pipewire::spa::pod::deserialize::PodDeserializer;
@@ -394,14 +407,12 @@ fn parse_video_format(param: &pipewire::spa::pod::Pod) -> Result<VideoFormat, St
 
     for prop in &obj.properties {
         match prop.key {
-            // SPA_FORMAT_VIDEO_format
-            0x00020002 => {
+            SPA_FORMAT_VIDEO_FORMAT => {
                 if let Value::Id(id) = &prop.value {
                     format_id = id.0;
                 }
             }
-            // SPA_FORMAT_VIDEO_size
-            0x00020003 => {
+            SPA_FORMAT_VIDEO_SIZE => {
                 if let Value::Rectangle(rect) = &prop.value {
                     width = rect.width;
                     height = rect.height;
@@ -416,10 +427,10 @@ fn parse_video_format(param: &pipewire::spa::pod::Pod) -> Result<VideoFormat, St
     }
 
     let spa_format = match format_id {
-        7 => SpaVideoFormat::BGRx,  // SPA_VIDEO_FORMAT_BGRx
-        8 => SpaVideoFormat::RGBx,  // SPA_VIDEO_FORMAT_RGBx
-        9 => SpaVideoFormat::BGRA,  // SPA_VIDEO_FORMAT_BGRA
-        10 => SpaVideoFormat::RGBA, // SPA_VIDEO_FORMAT_RGBA
+        SPA_VIDEO_FORMAT_BGRX => SpaVideoFormat::BGRx,
+        SPA_VIDEO_FORMAT_RGBX => SpaVideoFormat::RGBx,
+        SPA_VIDEO_FORMAT_BGRA => SpaVideoFormat::BGRA,
+        SPA_VIDEO_FORMAT_RGBA => SpaVideoFormat::RGBA,
         other => SpaVideoFormat::Unknown(other),
     };
 
@@ -491,28 +502,28 @@ fn build_video_params(buf: &mut [u8]) -> &pipewire::spa::pod::Pod {
         properties: vec![
             // mediaType = Video
             Property {
-                key: 0x00010001,         // SPA_FORMAT_mediaType
+                key: SPA_FORMAT_MEDIA_TYPE,
                 value: Value::Id(Id(2)), // SPA_MEDIA_TYPE_video
                 flags: PropertyFlags::empty(),
             },
             // mediaSubtype = Raw
             Property {
-                key: 0x00010002,         // SPA_FORMAT_mediaSubtype
+                key: SPA_FORMAT_MEDIA_SUBTYPE,
                 value: Value::Id(Id(1)), // SPA_MEDIA_SUBTYPE_raw
                 flags: PropertyFlags::empty(),
             },
             // format = BGRx (preferred), with alternatives
             Property {
-                key: 0x00020002, // SPA_FORMAT_VIDEO_format
+                key: SPA_FORMAT_VIDEO_FORMAT,
                 value: Value::Choice(ChoiceValue::Id(Choice(
                     ChoiceFlags::empty(),
                     ChoiceEnum::Enum {
-                        default: Id(7), // BGRx
+                        default: Id(SPA_VIDEO_FORMAT_BGRX),
                         alternatives: vec![
-                            Id(7),  // BGRx
-                            Id(8),  // RGBx
-                            Id(9),  // BGRA
-                            Id(10), // RGBA
+                            Id(SPA_VIDEO_FORMAT_BGRX),
+                            Id(SPA_VIDEO_FORMAT_RGBX),
+                            Id(SPA_VIDEO_FORMAT_BGRA),
+                            Id(SPA_VIDEO_FORMAT_RGBA),
                         ],
                     },
                 ))),
@@ -520,7 +531,7 @@ fn build_video_params(buf: &mut [u8]) -> &pipewire::spa::pod::Pod {
             },
             // size = range from 1x1 to 8192x8192
             Property {
-                key: 0x00020003, // SPA_FORMAT_VIDEO_size
+                key: SPA_FORMAT_VIDEO_SIZE,
                 value: Value::Choice(ChoiceValue::Rectangle(Choice(
                     ChoiceFlags::empty(),
                     ChoiceEnum::Range {
@@ -542,7 +553,7 @@ fn build_video_params(buf: &mut [u8]) -> &pipewire::spa::pod::Pod {
             },
             // framerate = range 0/1 to 60/1 (we only need ~1fps but accept anything)
             Property {
-                key: 0x00020004, // SPA_FORMAT_VIDEO_framerate
+                key: SPA_FORMAT_VIDEO_FRAMERATE,
                 value: Value::Choice(ChoiceValue::Fraction(Choice(
                     ChoiceFlags::empty(),
                     ChoiceEnum::Range {

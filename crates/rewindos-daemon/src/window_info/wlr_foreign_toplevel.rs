@@ -316,7 +316,7 @@ impl Dispatch<ZwlrForeignToplevelHandleV1, ()> for ToplevelState {
             zwlr_foreign_toplevel_handle_v1::Event::State { state: raw_state } => {
                 // State is an array of u32 values encoded as raw bytes (little-endian)
                 handle_state.activated = raw_state.chunks_exact(4).any(|chunk| {
-                    let val = u32::from_ne_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+                    let val = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
                     val == zwlr_foreign_toplevel_handle_v1::State::Activated as u32
                 });
             }

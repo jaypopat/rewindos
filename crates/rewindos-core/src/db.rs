@@ -21,10 +21,12 @@ impl Database {
     /// Register the sqlite-vec extension globally (idempotent).
     fn ensure_sqlite_vec() {
         static INIT: Once = Once::new();
-        INIT.call_once(|| unsafe {
-            sqlite3_auto_extension(Some(std::mem::transmute(
-                sqlite_vec::sqlite3_vec_init as *const (),
-            )));
+        INIT.call_once(|| {
+            unsafe {
+                sqlite3_auto_extension(Some(std::mem::transmute(
+                    sqlite_vec::sqlite3_vec_init as *const (),
+                )));
+            }
         });
     }
 
@@ -91,43 +93,50 @@ impl Database {
     }
 
     /// Insert OCR text for a screenshot into both the content table and FTS5 index.
+    /// Wrapped in a transaction so both tables stay in sync on crash.
     pub fn insert_ocr_text(&self, screenshot_id: i64, text: &str, word_count: i32) -> Result<()> {
-        self.conn.execute(
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute(
             "INSERT INTO ocr_text_content (screenshot_id, text_content, word_count)
              VALUES (?1, ?2, ?3)",
             params![screenshot_id, text, word_count],
         )?;
-        // Insert into standalone FTS5 table (no triggers, manual sync)
-        self.conn.execute(
+        tx.execute(
             "INSERT INTO ocr_fts (text_content, screenshot_id)
              VALUES (?1, ?2)",
             params![text, screenshot_id],
         )?;
+        tx.commit()?;
         Ok(())
     }
 
     /// Insert bounding boxes for a screenshot.
+    /// Wrapped in a transaction for performance (single fsync instead of N).
     pub fn insert_bounding_boxes(
         &self,
         screenshot_id: i64,
         boxes: &[NewBoundingBox],
     ) -> Result<()> {
-        let mut stmt = self.conn.prepare(
-            "INSERT INTO ocr_bounding_boxes (screenshot_id, text_content, x, y, width, height, confidence)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        )?;
+        let tx = self.conn.unchecked_transaction()?;
+        {
+            let mut stmt = tx.prepare(
+                "INSERT INTO ocr_bounding_boxes (screenshot_id, text_content, x, y, width, height, confidence)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            )?;
 
-        for b in boxes {
-            stmt.execute(params![
-                screenshot_id,
-                b.text_content,
-                b.x,
-                b.y,
-                b.width,
-                b.height,
-                b.confidence,
-            ])?;
+            for b in boxes {
+                stmt.execute(params![
+                    screenshot_id,
+                    b.text_content,
+                    b.x,
+                    b.y,
+                    b.width,
+                    b.height,
+                    b.confidence,
+                ])?;
+            }
         }
+        tx.commit()?;
         Ok(())
     }
 
@@ -247,7 +256,14 @@ impl Database {
     }
 
     /// Delete screenshots before a given unix timestamp. Returns number of deleted rows.
+    /// Also removes associated screenshot and thumbnail files from disk.
     pub fn delete_screenshots_before(&self, timestamp: i64) -> Result<u64> {
+        // Collect file paths before deleting rows
+        let paths = self.collect_screenshot_paths(
+            "SELECT file_path, thumbnail_path FROM screenshots WHERE timestamp < ?1",
+            params![timestamp],
+        )?;
+
         // Delete FTS5 entries first (standalone table, no cascade)
         self.conn.execute(
             "DELETE FROM ocr_fts WHERE screenshot_id IN
@@ -258,7 +274,59 @@ impl Database {
             "DELETE FROM screenshots WHERE timestamp < ?1",
             params![timestamp],
         )?;
+
+        Self::remove_files(&paths);
         Ok(count as u64)
+    }
+
+    /// Delete screenshots in a time range [start, end). Returns number of deleted rows.
+    /// Also removes associated screenshot and thumbnail files from disk.
+    pub fn delete_screenshots_in_range(&self, start: i64, end: i64) -> Result<u64> {
+        let paths = self.collect_screenshot_paths(
+            "SELECT file_path, thumbnail_path FROM screenshots WHERE timestamp >= ?1 AND timestamp < ?2",
+            params![start, end],
+        )?;
+
+        self.conn.execute(
+            "DELETE FROM ocr_fts WHERE screenshot_id IN
+             (SELECT id FROM screenshots WHERE timestamp >= ?1 AND timestamp < ?2)",
+            params![start, end],
+        )?;
+        let count = self.conn.execute(
+            "DELETE FROM screenshots WHERE timestamp >= ?1 AND timestamp < ?2",
+            params![start, end],
+        )?;
+
+        Self::remove_files(&paths);
+        Ok(count as u64)
+    }
+
+    /// Collect file_path and thumbnail_path for rows matching a query.
+    fn collect_screenshot_paths(
+        &self,
+        sql: &str,
+        params: impl rusqlite::Params,
+    ) -> Result<Vec<String>> {
+        let mut stmt = self.conn.prepare(sql)?;
+        let rows = stmt.query_map(params, |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+        })?;
+        let mut paths = Vec::new();
+        for row in rows {
+            let (file_path, thumb_path) = row?;
+            paths.push(file_path);
+            if let Some(tp) = thumb_path {
+                paths.push(tp);
+            }
+        }
+        Ok(paths)
+    }
+
+    /// Best-effort removal of files from disk.
+    fn remove_files(paths: &[String]) {
+        for path in paths {
+            let _ = std::fs::remove_file(path);
+        }
     }
 
     /// Get all distinct app names from screenshots.
@@ -743,10 +811,11 @@ impl Database {
         start: i64,
         end: i64,
         limit: i64,
+        capture_interval_secs: i64,
     ) -> Result<Vec<TaskUsageStat>> {
         let mut stmt = self.conn.prepare(
             "SELECT app_name, window_title, COUNT(*) as captures,
-                    COUNT(*) * 5 as estimated_seconds
+                    COUNT(*) * ?4 as estimated_seconds
              FROM screenshots
              WHERE timestamp >= ?1 AND timestamp < ?2
                AND app_name IS NOT NULL
@@ -755,7 +824,7 @@ impl Database {
              LIMIT ?3",
         )?;
 
-        let rows = stmt.query_map(params![start, end, limit], |row| {
+        let rows = stmt.query_map(params![start, end, limit, capture_interval_secs], |row| {
             Ok(TaskUsageStat {
                 app_name: row.get(0)?,
                 window_title: row.get(1)?,
@@ -768,8 +837,14 @@ impl Database {
             .map_err(Into::into)
     }
 
-    /// Detect active time blocks by finding gaps >60s between consecutive screenshots.
-    pub fn get_active_blocks(&self, start: i64, end: i64) -> Result<Vec<ActiveBlock>> {
+    /// Detect active time blocks by finding gaps between consecutive screenshots.
+    /// `capture_interval_secs` is used to pad the final block.
+    pub fn get_active_blocks(
+        &self,
+        start: i64,
+        end: i64,
+        capture_interval_secs: i64,
+    ) -> Result<Vec<ActiveBlock>> {
         let mut stmt = self.conn.prepare(
             "SELECT timestamp FROM screenshots
              WHERE timestamp >= ?1 AND timestamp < ?2
@@ -793,8 +868,8 @@ impl Database {
                 // Gap detected — close current block
                 blocks.push(ActiveBlock {
                     start_time: block_start,
-                    end_time: block_end + 5, // add one capture interval
-                    duration_secs: block_end - block_start + 5,
+                    end_time: block_end + capture_interval_secs,
+                    duration_secs: block_end - block_start + capture_interval_secs,
                 });
                 block_start = ts;
             }
@@ -804,8 +879,8 @@ impl Database {
         // Close final block
         blocks.push(ActiveBlock {
             start_time: block_start,
-            end_time: block_end + 5,
-            duration_secs: block_end - block_start + 5,
+            end_time: block_end + capture_interval_secs,
+            duration_secs: block_end - block_start + capture_interval_secs,
         });
 
         Ok(blocks)

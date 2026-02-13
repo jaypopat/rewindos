@@ -245,8 +245,14 @@ fn get_task_breakdown(
     end_time: i64,
     limit: Option<i64>,
 ) -> Result<Vec<TaskUsageStat>, String> {
+    let capture_interval = state
+        .config
+        .lock()
+        .map_err(|e| format!("config lock: {e}"))?
+        .capture
+        .interval_seconds as i64;
     let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
-    db.get_task_breakdown(start_time, end_time, limit.unwrap_or(100))
+    db.get_task_breakdown(start_time, end_time, limit.unwrap_or(100), capture_interval)
         .map_err(|e| format!("db error: {e}"))
 }
 
@@ -256,8 +262,14 @@ fn get_active_blocks(
     start_time: i64,
     end_time: i64,
 ) -> Result<Vec<ActiveBlock>, String> {
+    let capture_interval = state
+        .config
+        .lock()
+        .map_err(|e| format!("config lock: {e}"))?
+        .capture
+        .interval_seconds as i64;
     let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
-    db.get_active_blocks(start_time, end_time)
+    db.get_active_blocks(start_time, end_time, capture_interval)
         .map_err(|e| format!("db error: {e}"))
 }
 
@@ -299,6 +311,14 @@ async fn get_daily_summary(
     }
 
     // 2. Build app breakdown from raw session data
+    let capture_interval_secs = {
+        let cfg = state
+            .config
+            .lock()
+            .map_err(|e| format!("config lock: {e}"))?;
+        cfg.capture.interval_seconds as f64
+    };
+
     let mut app_times: HashMap<String, (f64, usize)> = HashMap::new();
     let mut current_app: Option<String> = None;
     let mut last_ts = 0i64;
@@ -308,11 +328,11 @@ async fn get_daily_summary(
         let is_same = current_app.as_deref() == Some(&name);
         let gap = ts - last_ts;
 
-        // Count time: if same app and gap < 60s, attribute the gap; otherwise 5s for the capture
+        // Count time: if same app and gap < 60s, attribute the gap; otherwise use capture interval
         let secs = if is_same && gap < 60 && gap > 0 {
             gap as f64
         } else {
-            5.0
+            capture_interval_secs
         };
 
         let entry = app_times.entry(name.clone()).or_insert((0.0, 0));
@@ -686,12 +706,15 @@ async fn ask(
                 });
 
                 let stats = db.get_app_usage_stats(start).unwrap_or_default();
-                let sessions = db.get_ocr_sessions(start, end, 200).unwrap_or_default();
+                let sessions = db
+                    .get_ocr_sessions_with_ids(start, end, 200)
+                    .unwrap_or_default();
 
+                let capture_secs = config.capture.interval_seconds as f64;
                 let stat_tuples: Vec<_> = stats
                     .iter()
                     .map(|s| {
-                        let minutes = s.screenshot_count as f64 * 5.0 / 60.0;
+                        let minutes = s.screenshot_count as f64 * capture_secs / 60.0;
                         (s.app_name.clone(), minutes, s.screenshot_count as usize)
                     })
                     .collect();
@@ -719,15 +742,14 @@ async fn ask(
             .chat_sessions
             .lock()
             .map_err(|e| format!("lock: {e}"))?;
-        if let Some(history) = sessions.get_mut(&session_id) {
-            // Trim history to max
-            let max = config.chat.max_history_messages;
-            if history.len() > max {
-                *history = history[history.len() - max..].to_vec();
-            }
-            messages.extend(history.iter().cloned());
-            history.push(user_message.clone());
+        let history = sessions.entry(session_id.clone()).or_default();
+        // Trim history to max
+        let max = config.chat.max_history_messages;
+        if history.len() > max {
+            *history = history[history.len() - max..].to_vec();
         }
+        messages.extend(history.iter().cloned());
+        history.push(user_message.clone());
     }
     messages.push(user_message);
 

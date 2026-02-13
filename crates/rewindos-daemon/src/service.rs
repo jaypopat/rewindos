@@ -23,6 +23,14 @@ pub struct DaemonService {
     pub kwin_window_info: Option<Arc<KwinWindowInfo>>,
 }
 
+/// Lock a mutex, logging a warning if it was poisoned.
+fn lock_db(db: &Mutex<Database>) -> std::sync::MutexGuard<'_, Database> {
+    db.lock().unwrap_or_else(|e| {
+        warn!("database mutex was poisoned, recovering");
+        e.into_inner()
+    })
+}
+
 #[interface(name = "com.rewindos.Daemon")]
 impl DaemonService {
     async fn pause(&mut self) -> zbus::fdo::Result<()> {
@@ -49,25 +57,34 @@ impl DaemonService {
 
     async fn get_status(&self) -> zbus::fdo::Result<String> {
         let uptime = self.start_time.elapsed().as_secs();
+        let is_capturing = self.is_capturing.load(Ordering::SeqCst);
+        let frames_captured_today = self.metrics.frames_captured.load(Ordering::Relaxed);
+        let frames_deduplicated_today = self.metrics.frames_deduplicated.load(Ordering::Relaxed);
+        let frames_ocr_pending = self.metrics.frames_ocr_pending.load(Ordering::Relaxed);
+        let capture_interval = self.config.capture.interval_seconds;
+
+        // Compute disk usage off the async executor
+        let screenshots_dir = self.config.screenshots_dir().ok();
+        let disk_usage_bytes = tokio::task::spawn_blocking(move || {
+            screenshots_dir.map(|dir| dir_size(&dir)).unwrap_or(0)
+        })
+        .await
+        .unwrap_or(0);
 
         let status = DaemonStatus {
-            is_capturing: self.is_capturing.load(Ordering::SeqCst),
-            frames_captured_today: self.metrics.frames_captured.load(Ordering::Relaxed),
-            frames_deduplicated_today: self.metrics.frames_deduplicated.load(Ordering::Relaxed),
-            frames_ocr_pending: self.metrics.frames_ocr_pending.load(Ordering::Relaxed),
+            is_capturing,
+            frames_captured_today,
+            frames_deduplicated_today,
+            frames_ocr_pending,
             queue_depths: QueueDepths {
                 capture: 0,
                 hash: 0,
-                ocr: self.metrics.frames_ocr_pending.load(Ordering::Relaxed),
+                ocr: frames_ocr_pending,
                 index: 0,
             },
             uptime_seconds: uptime,
-            disk_usage_bytes: self
-                .config
-                .screenshots_dir()
-                .ok()
-                .map(|dir| dir_size(&dir))
-                .unwrap_or(0),
+            disk_usage_bytes,
+            capture_interval,
             last_capture_timestamp: None,
         };
 
@@ -104,12 +121,17 @@ impl DaemonService {
             None
         };
 
-        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
-        let result = if query_embedding.is_some() {
-            db.hybrid_search(&filters, query_embedding.as_deref())
-        } else {
-            db.search(&filters)
-        }
+        let db = self.db.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            let db = lock_db(&db);
+            if query_embedding.is_some() {
+                db.hybrid_search(&filters, query_embedding.as_deref())
+            } else {
+                db.search(&filters)
+            }
+        })
+        .await
+        .map_err(|e| zbus::fdo::Error::Failed(format!("search task panicked: {e}")))?
         .map_err(|e| zbus::fdo::Error::Failed(format!("search error: {e}")))?;
 
         serde_json::to_string(&result)
@@ -119,10 +141,14 @@ impl DaemonService {
     async fn delete_range(&self, start: i64, end: i64) -> zbus::fdo::Result<u64> {
         info!(start, end, "delete range requested via D-Bus");
 
-        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
-        let deleted = db
-            .delete_screenshots_before(end)
-            .map_err(|e| zbus::fdo::Error::Failed(format!("delete error: {e}")))?;
+        let db = self.db.clone();
+        let deleted = tokio::task::spawn_blocking(move || {
+            let db = lock_db(&db);
+            db.delete_screenshots_in_range(start, end)
+        })
+        .await
+        .map_err(|e| zbus::fdo::Error::Failed(format!("delete task panicked: {e}")))?
+        .map_err(|e| zbus::fdo::Error::Failed(format!("delete error: {e}")))?;
 
         Ok(deleted)
     }

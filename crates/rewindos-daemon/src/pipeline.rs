@@ -230,7 +230,10 @@ async fn run_hash_stage(
         let db_clone = db.clone();
         let hash_clone = hash.clone();
         let is_dup = tokio::task::spawn_blocking(move || {
-            let db = db_clone.lock().unwrap_or_else(|e| e.into_inner());
+            let db = db_clone.lock().unwrap_or_else(|e| {
+                warn!("database mutex was poisoned, recovering");
+                e.into_inner()
+            });
             let since = timestamp_secs - 30; // last 30 seconds
             match db.get_recent_hashes(since, 10) {
                 Ok(recent) => PerceptualHasher::is_duplicate(&hash_clone, &recent, threshold),
@@ -295,7 +298,10 @@ async fn run_hash_stage(
 
         let db_clone = db.clone();
         let insert_result = tokio::task::spawn_blocking(move || {
-            let db = db_clone.lock().unwrap_or_else(|e| e.into_inner());
+            let db = db_clone.lock().unwrap_or_else(|e| {
+                warn!("database mutex was poisoned, recovering");
+                e.into_inner()
+            });
             db.insert_screenshot(&new_screenshot)
         })
         .await;
@@ -380,7 +386,10 @@ async fn run_ocr_stage(
                 let db = db.clone();
                 let sid = frame.screenshot_id;
                 let _ = tokio::task::spawn_blocking(move || {
-                    let db = db.lock().unwrap_or_else(|e| e.into_inner());
+                    let db = db.lock().unwrap_or_else(|e| {
+                        warn!("database mutex was poisoned, recovering");
+                        e.into_inner()
+                    });
                     db.update_ocr_status(sid, OcrStatus::Processing)
                 })
                 .await;
@@ -400,7 +409,10 @@ async fn run_ocr_stage(
                         let db = db.clone();
                         let sid = frame.screenshot_id;
                         let _ = tokio::task::spawn_blocking(move || {
-                            let db = db.lock().unwrap_or_else(|e| e.into_inner());
+                            let db = db.lock().unwrap_or_else(|e| {
+                                warn!("database mutex was poisoned, recovering");
+                                e.into_inner()
+                            });
                             db.update_ocr_status(sid, OcrStatus::Done)
                         })
                         .await;
@@ -424,7 +436,10 @@ async fn run_ocr_stage(
                     let db = db.clone();
                     let sid = frame.screenshot_id;
                     let _ = tokio::task::spawn_blocking(move || {
-                        let db = db.lock().unwrap_or_else(|e| e.into_inner());
+                        let db = db.lock().unwrap_or_else(|e| {
+                            warn!("database mutex was poisoned, recovering");
+                            e.into_inner()
+                        });
                         db.update_ocr_status(sid, OcrStatus::Failed)
                     })
                     .await;
@@ -454,7 +469,10 @@ async fn run_index_stage(
         let text_for_embed = ocr_result.full_text.clone();
 
         let result = tokio::task::spawn_blocking(move || {
-            let db = db.lock().unwrap_or_else(|e| e.into_inner());
+            let db = db.lock().unwrap_or_else(|e| {
+                warn!("database mutex was poisoned, recovering");
+                e.into_inner()
+            });
 
             db.insert_ocr_text(
                 ocr_result.screenshot_id,
@@ -530,7 +548,10 @@ async fn run_embed_stage(
                 let db = db.clone();
                 let sid = req.screenshot_id;
                 let result = tokio::task::spawn_blocking(move || {
-                    let db = db.lock().unwrap_or_else(|e| e.into_inner());
+                    let db = db.lock().unwrap_or_else(|e| {
+                        warn!("database mutex was poisoned, recovering");
+                        e.into_inner()
+                    });
                     db.insert_embedding(sid, &embedding)
                 })
                 .await;
