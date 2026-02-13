@@ -382,10 +382,10 @@ const SPA_VIDEO_FORMAT_RGBX: u32 = 8;
 const SPA_VIDEO_FORMAT_BGRA: u32 = 9;
 const SPA_VIDEO_FORMAT_RGBA: u32 = 10;
 
-// SPA pod property keys (from spa/param/format.h)
-const SPA_FORMAT_MEDIA_TYPE: u32 = 0x00010001;
-const SPA_FORMAT_MEDIA_SUBTYPE: u32 = 0x00010002;
-const SPA_FORMAT_VIDEO_FORMAT: u32 = 0x00020002;
+// SPA pod property keys (from spa/param/format.h enum spa_format)
+const SPA_FORMAT_MEDIA_TYPE: u32 = 1;
+const SPA_FORMAT_MEDIA_SUBTYPE: u32 = 2;
+const SPA_FORMAT_VIDEO_FORMAT: u32 = 0x00020001;
 const SPA_FORMAT_VIDEO_SIZE: u32 = 0x00020003;
 const SPA_FORMAT_VIDEO_FRAMERATE: u32 = 0x00020004;
 
