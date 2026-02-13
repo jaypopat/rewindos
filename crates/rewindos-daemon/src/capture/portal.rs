@@ -229,13 +229,11 @@ fn run_pipewire_loop(
 ) -> Result<(), String> {
     use pipewire as pw;
     use pw::spa;
-    use pw::stream::{Stream, StreamFlags};
+    use pw::stream::{StreamBox, StreamFlags};
 
-    pw::init();
-
-    let mainloop = pw::main_loop::MainLoop::new(None)
+    let mainloop = pw::main_loop::MainLoopBox::new(None)
         .map_err(|e| format!("failed to create PipeWire main loop: {e}"))?;
-    let context = pw::context::Context::new(&mainloop)
+    let context = pw::context::ContextBox::new(mainloop.loop_(), None)
         .map_err(|e| format!("failed to create PipeWire context: {e}"))?;
 
     // Connect to PipeWire using the portal-provided fd
@@ -244,7 +242,7 @@ fn run_pipewire_loop(
         .connect_fd(pw_fd_owned, None)
         .map_err(|e| format!("failed to connect PipeWire fd: {e}"))?;
 
-    let stream = Stream::new(
+    let stream = StreamBox::new(
         &core,
         "rewindos-capture",
         pw::properties::properties! {
@@ -350,7 +348,6 @@ fn run_pipewire_loop(
 
     debug!("PipeWire main loop exiting");
     drop(stream);
-    unsafe { pw::deinit() };
 
     Ok(())
 }
