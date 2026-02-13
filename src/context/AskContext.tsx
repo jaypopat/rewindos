@@ -1,6 +1,19 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { ask, askNewSession, type AskResponse, type ScreenshotRef } from "@/lib/api";
+import {
+  ask,
+  askNewSession,
+  type AskResponse,
+  type ScreenshotRef,
+} from "@/lib/api";
 
 export interface ChatMessage {
   role: "user" | "assistant";
@@ -24,7 +37,18 @@ interface AskErrorPayload {
   error: string;
 }
 
-export function useAskStream() {
+interface AskContextValue {
+  messages: ChatMessage[];
+  isStreaming: boolean;
+  error: string | null;
+  sessionId: string | null;
+  sendMessage: (text: string) => Promise<void>;
+  newSession: () => Promise<void>;
+}
+
+const AskContext = createContext<AskContextValue | null>(null);
+
+export function AskProvider({ children }: { children: ReactNode }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -33,12 +57,10 @@ export function useAskStream() {
   const sessionIdRef = useRef(sessionId);
   sessionIdRef.current = sessionId;
 
-  // Initialize session on mount
-  useEffect(() => {
-    askNewSession().then(setSessionId).catch((e) => setError(String(e)));
-  }, []);
+  const isStreamingRef = useRef(isStreaming);
+  isStreamingRef.current = isStreaming;
 
-  // Listen to Tauri events
+  // Listen to Tauri events — registered once for the lifetime of the app
   useEffect(() => {
     const unlisteners: Promise<UnlistenFn>[] = [];
 
@@ -92,9 +114,20 @@ export function useAskStream() {
     };
   }, []);
 
+  // Lazily create a session on first use
+  const ensureSession = useCallback(async (): Promise<string> => {
+    if (sessionIdRef.current) return sessionIdRef.current;
+    const id = await askNewSession();
+    setSessionId(id);
+    sessionIdRef.current = id;
+    return id;
+  }, []);
+
   const sendMessage = useCallback(
     async (text: string) => {
-      if (!sessionId || isStreaming || !text.trim()) return;
+      if (isStreamingRef.current || !text.trim()) return;
+
+      const sid = await ensureSession();
 
       setError(null);
       setIsStreaming(true);
@@ -107,7 +140,7 @@ export function useAskStream() {
       ]);
 
       try {
-        const response: AskResponse = await ask(sessionId, text);
+        const response: AskResponse = await ask(sid, text);
         // Attach references to the assistant placeholder
         setMessages((prev) => {
           const last = prev[prev.length - 1];
@@ -132,7 +165,7 @@ export function useAskStream() {
         });
       }
     },
-    [sessionId, isStreaming],
+    [ensureSession],
   );
 
   const newSession = useCallback(async () => {
@@ -142,10 +175,23 @@ export function useAskStream() {
     try {
       const id = await askNewSession();
       setSessionId(id);
+      sessionIdRef.current = id;
     } catch (e) {
       setError(String(e));
     }
   }, []);
 
-  return { messages, isStreaming, error, sessionId, sendMessage, newSession };
+  return (
+    <AskContext.Provider
+      value={{ messages, isStreaming, error, sessionId, sendMessage, newSession }}
+    >
+      {children}
+    </AskContext.Provider>
+  );
+}
+
+export function useAskChat() {
+  const ctx = useContext(AskContext);
+  if (!ctx) throw new Error("useAskChat must be used within AskProvider");
+  return ctx;
 }

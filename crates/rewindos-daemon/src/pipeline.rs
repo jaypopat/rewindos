@@ -13,8 +13,8 @@ use rewindos_core::schema::{EmbedRequest, NewScreenshot, OcrStatus, ProcessedFra
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 
-use crate::capture::CaptureManager;
-use crate::window_info::WindowTracker;
+use crate::capture::{CaptureBackend, CaptureError, CaptureManager};
+use crate::window_info::WindowInfoProvider;
 
 /// Shared pipeline metrics, accessible from D-Bus GetStatus.
 pub struct PipelineMetrics {
@@ -78,15 +78,15 @@ impl PipelineHandle {
 pub async fn start_pipeline(
     config: &AppConfig,
     db: Arc<Mutex<Database>>,
-    dbus_conn: zbus::Connection,
-    window_tracker: Arc<WindowTracker>,
-) -> Result<PipelineHandle, crate::capture::CaptureError> {
+    capture_backend: Box<dyn CaptureBackend>,
+    window_info: Arc<dyn WindowInfoProvider>,
+) -> Result<PipelineHandle, CaptureError> {
     let metrics = Arc::new(PipelineMetrics::new());
     let is_capturing = Arc::new(AtomicBool::new(true));
 
     let screenshots_dir = config
         .screenshots_dir()
-        .map_err(|e| crate::capture::CaptureError::KWin(format!("config error: {e}")))?;
+        .map_err(|e| CaptureError::Unavailable(format!("config error: {e}")))?;
 
     // Channels connecting pipeline stages (bounded, capacity 32)
     let (raw_tx, raw_rx) = mpsc::channel::<RawFrame>(32);
@@ -94,17 +94,17 @@ pub async fn start_pipeline(
     let (ocr_tx, ocr_rx) = mpsc::channel::<rewindos_core::schema::OcrResult>(32);
     let (embed_tx, embed_rx) = mpsc::channel::<EmbedRequest>(32);
 
-    // Create CaptureManager (KWin-based, no separate thread needed)
+    // Create CaptureManager with trait-based backend
     let capture = CaptureManager::start(
         &config.capture,
         &config.privacy,
-        dbus_conn,
+        capture_backend,
+        window_info,
         is_capturing.clone(),
-        window_tracker,
     )
     .await?;
 
-    // Stage 1: Capture — KWin screenshot → RawFrame
+    // Stage 1: Capture → RawFrame
     let capture_task = {
         let metrics = metrics.clone();
         let is_capturing = is_capturing.clone();
@@ -175,7 +175,7 @@ pub async fn start_pipeline(
 // -- Stage 1: Capture --
 
 async fn run_capture_stage(
-    capture: CaptureManager,
+    mut capture: CaptureManager,
     raw_tx: mpsc::Sender<RawFrame>,
     metrics: Arc<PipelineMetrics>,
     is_capturing: Arc<AtomicBool>,

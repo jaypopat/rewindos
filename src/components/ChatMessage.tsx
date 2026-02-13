@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import type { ChatMessage as ChatMessageType } from "@/hooks/useAskStream";
+import type { ChatMessage as ChatMessageType } from "@/context/AskContext";
 import { ScreenshotRefCard } from "./ScreenshotRefCard";
 
 interface ChatMessageProps {
@@ -50,6 +50,22 @@ export function ChatMessage({ message, isStreaming, onScreenshotClick }: ChatMes
     );
   }
 
+  // Collect all referenced IDs to show as source cards at the bottom
+  const referencedRefs = useMemo(() => {
+    if (!message.references || refIds.length === 0) return [];
+    return refIds
+      .map((id) => message.references!.find((r) => r.id === id))
+      .filter((r): r is NonNullable<typeof r> => r != null);
+  }, [message.references, refIds]);
+
+  const unreferencedRefs = useMemo(() => {
+    if (!message.references) return [];
+    if (refIds.length === 0) return message.references;
+    return [];
+  }, [message.references, refIds]);
+
+  const allSourceRefs = [...referencedRefs, ...unreferencedRefs];
+
   // Assistant message
   return (
     <div className="mb-5 animate-fade-in-up">
@@ -62,24 +78,14 @@ export function ChatMessage({ message, isStreaming, onScreenshotClick }: ChatMes
       </div>
 
       <div className="pl-3.5 border-l border-semantic/20">
-        {/* Rendered content */}
+        {/* Rendered content — inline refs become small clickable chips */}
         <div className="text-sm text-text-secondary leading-relaxed space-y-2 [&_strong]:text-text-primary [&_strong]:font-semibold [&_code]:font-mono [&_code]:text-xs [&_code]:bg-surface-overlay [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-accent">
           {segments.map((seg, i) => {
             if (seg.type === "ref") {
-              const ref = message.references?.find((r) => r.id === parseInt(seg.value));
-              if (ref && onScreenshotClick) {
-                return (
-                  <ScreenshotRefCard
-                    key={`ref-${i}`}
-                    reference={ref}
-                    onClick={() => onScreenshotClick(ref.id)}
-                  />
-                );
-              }
               return (
                 <span
                   key={`ref-${i}`}
-                  className="inline-flex items-center font-mono text-xs text-accent cursor-pointer hover:underline"
+                  className="inline-flex items-center font-mono text-[10px] text-accent/80 hover:text-accent cursor-pointer hover:underline mx-0.5"
                   onClick={() => onScreenshotClick?.(parseInt(seg.value))}
                 >
                   [#{seg.value}]
@@ -91,12 +97,12 @@ export function ChatMessage({ message, isStreaming, onScreenshotClick }: ChatMes
           })}
         </div>
 
-        {/* Unreferenced screenshot refs at the bottom */}
-        {message.references && message.references.length > 0 && refIds.length === 0 && (
+        {/* Source cards — always shown at bottom, never inline */}
+        {allSourceRefs.length > 0 && (
           <div className="mt-3 pt-2 border-t border-border/30">
             <span className="font-mono text-[10px] text-text-muted uppercase tracking-wider">sources</span>
             <div className="mt-1 flex flex-wrap gap-1">
-              {message.references.map((ref) => (
+              {allSourceRefs.map((ref) => (
                 <ScreenshotRefCard
                   key={ref.id}
                   reference={ref}

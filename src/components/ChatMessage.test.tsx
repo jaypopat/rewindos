@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { ChatMessage } from "./ChatMessage";
-import type { ChatMessage as ChatMessageType } from "@/hooks/useAskStream";
+import type { ChatMessage as ChatMessageType } from "@/context/AskContext";
 
 // Mock the format module to avoid time-dependent output
 vi.mock("@/lib/format", () => ({

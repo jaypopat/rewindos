@@ -56,12 +56,15 @@ pub struct ScreenshotReference {
 pub const SYSTEM_PROMPT: &str = r#"You are RewindOS, a local AI assistant with access to the user's screen capture history. You answer questions about what the user has seen, done, and worked on — based on OCR text extracted from periodic screenshots.
 
 Rules:
-- Only answer based on the provided context. If the context doesn't contain relevant information, say so honestly.
+- Answer the user's question directly. Analyze the provided context to give a useful, specific answer.
+- NEVER just rephrase or repeat the user's question back. Always provide concrete information from the context.
+- Ignore any screenshots that show the RewindOS app itself (e.g. screenshots containing "RewindOS", "ask about your screen history", or this chat interface). Those are self-referential and not useful.
 - When referencing a specific screenshot, use [REF:ID] format (e.g. [REF:42]) so the UI can make it clickable.
 - Be specific: mention timestamps, window titles, and app names when available.
+- For "what did I work on" or productivity questions: list the actual apps and tasks visible in the context with time estimates. Group by activity, not by individual screenshot.
 - Use markdown for formatting (bold, lists, code blocks).
 - Keep answers concise and direct. No filler.
-- For productivity questions, give concrete numbers and breakdowns.
+- If the context has no relevant data, say "I don't have enough screen history for that time period" rather than guessing.
 - Never fabricate information not present in the context."#;
 
 // -- Ollama client --
@@ -177,7 +180,126 @@ impl OllamaChatClient {
     }
 }
 
-// -- Intent classifier --
+const QUERY_ANALYSIS_PROMPT: &str = r#"You are a query analyzer for a screen capture search system. The system captures screenshots periodically and runs OCR on them. Given a user's question, extract structured search parameters so we can find relevant screenshots.
+
+Output ONLY valid JSON (no markdown fences, no explanation) with these fields:
+- "category": one of "recall", "time_based", "productivity", "app_specific", "general"
+  - "recall": user wants to find something specific they saw/did
+  - "time_based": user asks about a time period without specific keywords (e.g. "what happened yesterday?")
+  - "productivity": user asks about time spent, productivity, summaries of work
+  - "app_specific": user asks about a specific application
+  - "general": greeting or unrelated question
+- "search_terms": array of distinctive keywords to search in OCR text. Focus on specific nouns, proper nouns, and technical terms that would appear on screen. Omit common verbs like "played", "used", "opened", "visited". Example: "last time I played chess" → ["chess"]
+- "time_range_seconds": how far back to search in seconds, or null if not specified. Common values: 3600 (1 hour), 86400 (1 day/today/yesterday), 604800 (1 week), 2592000 (30 days). For "last time" / "when did" / "when was" queries use 2592000.
+- "app_filter": lowercase process name if query targets a specific app, or null. Known mappings: "vs code"/"vscode" → "code", "chrome" → "google-chrome", "brave" → "brave-browser". Others use lowercase name directly (firefox, konsole, kitty, slack, discord, obsidian, spotify).
+
+Examples:
+User: "last time I played chess?" → {"category":"recall","search_terms":["chess"],"time_range_seconds":2592000,"app_filter":null}
+User: "what was I doing yesterday?" → {"category":"time_based","search_terms":[],"time_range_seconds":86400,"app_filter":null}
+User: "errors in vs code today" → {"category":"app_specific","search_terms":["error"],"time_range_seconds":86400,"app_filter":"code"}
+User: "how long on firefox this week?" → {"category":"productivity","search_terms":[],"time_range_seconds":604800,"app_filter":"firefox"}"#;
+
+impl OllamaChatClient {
+    /// Use the LLM to analyze a user query and extract structured search parameters.
+    pub async fn analyze_query(&self, query: &str) -> Result<QueryIntent> {
+        let prompt = format!("{QUERY_ANALYSIS_PROMPT}\n\nUser: \"{query}\"");
+
+        let body = serde_json::json!({
+            "model": self.model,
+            "messages": [{"role": "user", "content": prompt}],
+            "stream": false,
+            "options": {
+                "temperature": 0.0,
+                "num_predict": 256,
+            }
+        });
+
+        let url = format!("{}/api/chat", self.base_url);
+        let response = self
+            .client
+            .post(&url)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| CoreError::Chat(format!("analyze_query request failed: {e}")))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            return Err(CoreError::Chat(format!(
+                "analyze_query failed: {status}"
+            )));
+        }
+
+        let resp_json: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|e| CoreError::Chat(format!("parse analyze_query response: {e}")))?;
+
+        let content = resp_json["message"]["content"]
+            .as_str()
+            .unwrap_or("{}");
+
+        // Strip <think>...</think> blocks (reasoning models like deepseek-r1)
+        let clean = if let Ok(re) = regex_lite::Regex::new(r"(?s)<think>.*?</think>") {
+            re.replace_all(content, "").trim().to_string()
+        } else {
+            content.to_string()
+        };
+
+        // Strip markdown code fences if present
+        let clean = clean.trim();
+        let clean = clean.strip_prefix("```json").unwrap_or(clean);
+        let clean = clean.strip_prefix("```").unwrap_or(clean);
+        let clean = clean.strip_suffix("```").unwrap_or(clean).trim();
+
+        Self::parse_intent_json(clean)
+    }
+
+    fn parse_intent_json(json_str: &str) -> Result<QueryIntent> {
+        let v: serde_json::Value = serde_json::from_str(json_str).map_err(|e| {
+            CoreError::Chat(format!(
+                "failed to parse intent JSON: {e}, raw: {json_str}"
+            ))
+        })?;
+
+        let now = chrono::Local::now().timestamp();
+
+        let category = match v["category"].as_str().unwrap_or("general") {
+            "recall" => IntentCategory::Recall,
+            "time_based" => IntentCategory::TimeBased,
+            "productivity" => IntentCategory::Productivity,
+            "app_specific" => IntentCategory::AppSpecific,
+            _ => IntentCategory::General,
+        };
+
+        let search_terms: Vec<String> = v["search_terms"]
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let time_range = v["time_range_seconds"]
+            .as_i64()
+            .map(|secs| (now - secs, now));
+
+        let app_filter = v["app_filter"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .map(String::from);
+
+        Ok(QueryIntent {
+            category,
+            search_terms,
+            time_range,
+            app_filter,
+        })
+    }
+}
+
+// -- Intent classifier (regex fallback) --
 
 pub struct IntentClassifier;
 
@@ -261,6 +383,29 @@ impl IntentClassifier {
             }
         }
 
+        // "last N days"
+        if let Some(caps) = regex_lite::Regex::new(r"last (\d+) days?")
+            .ok()
+            .and_then(|re| re.captures(query))
+        {
+            if let Ok(days) = caps[1].parse::<i64>() {
+                return Some((now - days * 86400, now));
+            }
+        }
+
+        // "last week"
+        if query.contains("last week") {
+            return Some((now - 7 * 86400, now));
+        }
+
+        // "last time", "when did", "when was" → search last 30 days
+        if query.contains("last time")
+            || query.starts_with("when did")
+            || query.starts_with("when was")
+        {
+            return Some((now - 30 * 86400, now));
+        }
+
         None
     }
 
@@ -313,7 +458,8 @@ impl IntentClassifier {
             "how", "long", "much", "time", "spent", "on", "a", "an", "is", "it", "my", "have",
             "has", "been", "were", "are", "this", "last", "yesterday", "today", "week", "month",
             "find", "search", "look", "for", "about", "with", "from", "to", "at", "of",
-            "can", "you", "tell", "give", "get",
+            "can", "you", "tell", "give", "get", "happened", "there", "doing",
+            "worked", "working", "used", "using", "opened", "visited", "played",
         ];
 
         query
@@ -418,6 +564,69 @@ impl ContextAssembler {
         (context, refs)
     }
 
+    /// Build context from OCR sessions that include screenshot IDs and file paths.
+    /// Produces `ScreenshotReference` entries so the LLM can output `[REF:ID]` tags.
+    pub fn from_sessions_with_refs(
+        sessions: &[(i64, Option<String>, Option<String>, i64, String, String)],
+        // (id, app_name, window_title, timestamp, file_path, ocr_text)
+    ) -> (String, Vec<ScreenshotReference>) {
+        let mut context = String::from("## Activity Timeline\n\n");
+        let mut refs = Vec::new();
+
+        let mut current_app: Option<&str> = None;
+        let mut group_content = Vec::new();
+
+        for (id, app_name, window_title, ts, file_path, ocr_text) in sessions {
+            let app = app_name.as_deref().unwrap_or("Unknown");
+            let title = window_title.as_deref().unwrap_or("");
+            let time_str = chrono::DateTime::from_timestamp(*ts, 0)
+                .map(|dt| {
+                    dt.with_timezone(&chrono::Local)
+                        .format("%H:%M:%S")
+                        .to_string()
+                })
+                .unwrap_or_default();
+
+            if current_app != Some(app) {
+                if !group_content.is_empty() {
+                    let prev_app = current_app.unwrap_or("Unknown");
+                    context.push_str(&format!("**{prev_app}**:\n"));
+                    for line in &group_content {
+                        context.push_str(&format!("  - {line}\n"));
+                    }
+                    context.push('\n');
+                    group_content.clear();
+                }
+                current_app = Some(app);
+            }
+
+            let snippet: String = ocr_text.chars().take(150).collect();
+            if !snippet.trim().is_empty() {
+                group_content.push(format!("[{time_str}] [REF:{id}] {title}: {snippet}"));
+            }
+
+            refs.push(ScreenshotReference {
+                id: *id,
+                timestamp: *ts,
+                app_name: app_name.clone(),
+                window_title: window_title.clone(),
+                file_path: file_path.clone(),
+            });
+        }
+
+        // Flush last group
+        if !group_content.is_empty() {
+            let prev_app = current_app.unwrap_or("Unknown");
+            context.push_str(&format!("**{prev_app}**:\n"));
+            for line in &group_content {
+                context.push_str(&format!("  - {line}\n"));
+            }
+            context.push('\n');
+        }
+
+        (context, refs)
+    }
+
     /// Build context from app usage stats (for productivity queries).
     pub fn from_app_stats(
         stats: &[(String, f64, usize)],
@@ -493,6 +702,47 @@ mod tests {
             IntentClassifier::extract_app_filter("what was in firefox yesterday"),
             Some("firefox".to_string())
         );
+    }
+
+    #[test]
+    fn test_extract_time_range_last_time() {
+        let range = IntentClassifier::extract_time_range("last time i played chess");
+        assert!(range.is_some());
+        let (start, end) = range.unwrap();
+        // Should be ~30 days
+        assert!(end - start >= 29 * 86400);
+    }
+
+    #[test]
+    fn test_extract_time_range_when_did() {
+        let range = IntentClassifier::extract_time_range("when did i visit that website");
+        assert!(range.is_some());
+        let (start, end) = range.unwrap();
+        assert!(end - start >= 29 * 86400);
+    }
+
+    #[test]
+    fn test_extract_time_range_when_was() {
+        let range = IntentClassifier::extract_time_range("when was the last meeting");
+        assert!(range.is_some());
+    }
+
+    #[test]
+    fn test_extract_time_range_last_week() {
+        let range = IntentClassifier::extract_time_range("what did i do last week");
+        assert!(range.is_some());
+        let (start, end) = range.unwrap();
+        assert!(end - start >= 6 * 86400);
+        assert!(end - start <= 8 * 86400);
+    }
+
+    #[test]
+    fn test_extract_time_range_last_n_days() {
+        let range = IntentClassifier::extract_time_range("show me activity from the last 5 days");
+        assert!(range.is_some());
+        let (start, end) = range.unwrap();
+        assert!(end - start >= 4 * 86400);
+        assert!(end - start <= 6 * 86400);
     }
 
     #[test]

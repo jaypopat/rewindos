@@ -9,7 +9,7 @@ use tracing::{info, warn};
 use zbus::interface;
 
 use crate::pipeline::PipelineMetrics;
-use crate::window_info::WindowTracker;
+use crate::window_info::kwin::KwinWindowInfo;
 
 /// D-Bus service object for `com.rewindos.Daemon`.
 pub struct DaemonService {
@@ -18,7 +18,7 @@ pub struct DaemonService {
     pub is_capturing: Arc<std::sync::atomic::AtomicBool>,
     pub start_time: Instant,
     pub ollama_client: Option<Arc<OllamaClient>>,
-    pub window_tracker: Arc<WindowTracker>,
+    pub kwin_window_info: Option<Arc<KwinWindowInfo>>,
 }
 
 #[interface(name = "com.rewindos.Daemon")]
@@ -120,17 +120,20 @@ impl DaemonService {
     }
 
     /// Called by the KWin tracking script when the active window changes.
+    /// No-op if a non-KWin window info provider is active.
     async fn report_active_window(
         &self,
         caption: &str,
         resource_class: &str,
         resource_name: &str,
     ) {
-        self.window_tracker.update(
-            caption.to_string(),
-            resource_class.to_string(),
-            resource_name.to_string(),
-        );
+        if let Some(ref kwin) = self.kwin_window_info {
+            kwin.update(
+                caption.to_string(),
+                resource_class.to_string(),
+                resource_name.to_string(),
+            );
+        }
     }
 
     #[zbus(property)]

@@ -1,7 +1,7 @@
 .PHONY: install-daemon restart-daemon logs dev build package install run uninstall
 
 install-daemon:
-	cargo install --path crates/rewindos-daemon
+	cargo install --path crates/rewindos-daemon --root ~/.local
 	mkdir -p ~/.config/systemd/user
 	cp systemd/rewindos-daemon.service ~/.config/systemd/user/
 	systemctl --user daemon-reload
@@ -14,7 +14,7 @@ install-daemon:
 	update-desktop-database ~/.local/share/applications/ 2>/dev/null || true
 
 restart-daemon:
-	cargo install --path crates/rewindos-daemon
+	cargo install --path crates/rewindos-daemon --root ~/.local
 	systemctl --user restart rewindos-daemon
 
 logs:

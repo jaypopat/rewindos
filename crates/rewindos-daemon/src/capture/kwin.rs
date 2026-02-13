@@ -1,13 +1,49 @@
 use std::collections::HashMap;
 use std::os::fd::{AsFd, AsRawFd};
 
+use async_trait::async_trait;
 use nix::unistd;
 use rewindos_core::schema::RawFrame;
 use tracing::{debug, info, warn};
 use zbus::zvariant::{Fd, OwnedValue, Value};
 use zbus::Connection;
 
-use crate::capture::CaptureError;
+use super::CaptureError;
+
+/// KWin ScreenShot2 D-Bus capture backend.
+pub struct KwinCaptureBackend {
+    conn: Connection,
+}
+
+impl KwinCaptureBackend {
+    pub fn new(conn: Connection) -> Self {
+        Self { conn }
+    }
+}
+
+#[async_trait]
+impl super::CaptureBackend for KwinCaptureBackend {
+    fn name(&self) -> &'static str {
+        "KWin ScreenShot2"
+    }
+
+    async fn initialize(&mut self) -> Result<(), CaptureError> {
+        if !is_available(&self.conn).await {
+            return Err(CaptureError::Unavailable(
+                "KWin ScreenShot2 D-Bus interface not found".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    async fn capture_frame(&mut self) -> Result<RawFrame, CaptureError> {
+        capture_workspace(&self.conn).await
+    }
+
+    async fn shutdown(&mut self) -> Result<(), CaptureError> {
+        Ok(())
+    }
+}
 
 /// Capture a full workspace screenshot via KWin's `org.kde.KWin.ScreenShot2` D-Bus API.
 ///
@@ -107,7 +143,6 @@ pub async fn capture_workspace(conn: &Connection) -> Result<RawFrame, CaptureErr
 
 /// Check if KWin ScreenShot2 D-Bus interface is available.
 pub async fn is_available(conn: &Connection) -> bool {
-    // Try to introspect the ScreenShot2 object path
     let result = conn
         .call_method(
             Some("org.kde.KWin"),
@@ -135,19 +170,14 @@ pub async fn is_available(conn: &Connection) -> bool {
 #[allow(non_camel_case_types, dead_code)]
 #[repr(u32)]
 enum QImageFormat {
-    // The formats KWin typically uses for screenshots
-    RGB32 = 4,                  // 0xffRRGGBB (stored as BGRA in memory on little-endian)
-    ARGB32 = 5,                 // 0xAARRGGBB (stored as BGRA in memory on little-endian)
-    ARGB32_Premultiplied = 6,   // Same byte layout as ARGB32
-    RGBX8888 = 25,              // R, G, B, 0xff in byte order
-    RGBA8888 = 26,              // R, G, B, A in byte order
+    RGB32 = 4,
+    ARGB32 = 5,
+    ARGB32_Premultiplied = 6,
+    RGBX8888 = 25,
+    RGBA8888 = 26,
 }
 
 /// Convert QImage raw pixels to RGBA byte order.
-///
-/// QImage stores pixels in "native" format which on little-endian x86 means:
-/// - RGB32/ARGB32: bytes are [B, G, R, A] in memory
-/// - RGBX8888/RGBA8888: bytes are [R, G, B, A] in memory
 fn convert_qimage_to_rgba(src: &[u8], width: u32, height: u32, stride: u32, format: u32) -> Vec<u8> {
     let pixel_count = (width * height) as usize;
     let mut rgba = Vec::with_capacity(pixel_count * 4);
@@ -194,20 +224,15 @@ fn convert_qimage_to_rgba(src: &[u8], width: u32, height: u32, stride: u32, form
 }
 
 /// Extract a u32 value from the KWin metadata dict.
-///
-/// KWin may return the value as various integer types, so we try several conversions.
 fn meta_u32(meta: &HashMap<String, OwnedValue>, key: &str) -> Option<u32> {
     let val = meta.get(key)?;
 
-    // Try direct u32
     if let Ok(v) = <u32>::try_from(val) {
         return Some(v);
     }
-    // Try i32
     if let Ok(v) = <i32>::try_from(val) {
         return Some(v as u32);
     }
-    // Try u64
     if let Ok(v) = <u64>::try_from(val) {
         return Some(v as u32);
     }

@@ -1,5 +1,5 @@
 mod capture;
-mod kwin_capture;
+mod detect;
 mod pipeline;
 mod service;
 mod window_info;
@@ -13,8 +13,6 @@ use rewindos_core::db::Database;
 use rewindos_core::embedding::OllamaClient;
 use rewindos_core::ocr;
 use tracing::{info, warn};
-
-use crate::window_info::WindowTracker;
 
 #[derive(Parser)]
 #[command(name = "rewindos-daemon", about = "RewindOS capture daemon")]
@@ -186,12 +184,21 @@ async fn run_daemon() -> anyhow::Result<()> {
     // Connect to D-Bus session bus
     let dbus_conn = zbus::Connection::session().await?;
 
-    // Create window tracker (shared between capture pipeline and D-Bus service)
-    let window_tracker = WindowTracker::new();
+    // Detect desktop environment and session type
+    let desktop = detect::detect_desktop();
+    let session = detect::detect_session();
+    info!(desktop = ?desktop, session = ?session, "detected environment");
+
+    // Create window info provider
+    let (window_info, kwin_window_info) =
+        detect::create_window_info_provider(&desktop, &session, &dbus_conn);
+
+    // Create capture backend
+    let capture_backend = detect::create_capture_backend(&desktop, &session, &dbus_conn)?;
 
     // Start the capture pipeline
     let pipeline_handle =
-        pipeline::start_pipeline(&config, db.clone(), dbus_conn.clone(), window_tracker.clone())
+        pipeline::start_pipeline(&config, db.clone(), capture_backend, window_info.clone())
             .await?;
 
     info!("capture pipeline started");
@@ -203,7 +210,7 @@ async fn run_daemon() -> anyhow::Result<()> {
         is_capturing: pipeline_handle.is_capturing.clone(),
         start_time: Instant::now(),
         ollama_client,
-        window_tracker: window_tracker.clone(),
+        kwin_window_info: kwin_window_info.clone(),
     };
 
     dbus_conn
@@ -214,9 +221,11 @@ async fn run_daemon() -> anyhow::Result<()> {
     dbus_conn.request_name("com.rewindos.Daemon").await?;
     info!("D-Bus service registered at com.rewindos.Daemon");
 
-    // Load KWin window tracking script (must be after D-Bus service registration
-    // so the script can call back to us)
-    window_tracker.load_kwin_script(&dbus_conn).await;
+    // Start window info provider (must be after D-Bus service registration
+    // so KWin script can call back to us)
+    if let Err(e) = window_info.start().await {
+        warn!(error = %e, "failed to start window info provider");
+    }
 
     // Wait for shutdown signal
     let mut sigterm =
@@ -232,7 +241,9 @@ async fn run_daemon() -> anyhow::Result<()> {
     }
 
     // Graceful shutdown
-    window_tracker.unload_kwin_script(&dbus_conn).await;
+    if let Err(e) = window_info.stop().await {
+        warn!(error = %e, "failed to stop window info provider");
+    }
     pipeline_handle.shutdown().await;
 
     info!("rewindos-daemon stopped");

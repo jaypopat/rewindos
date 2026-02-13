@@ -20,4 +20,5 @@ if [ -f "$RESOURCE_DIR/rewindos-daemon.service" ]; then
         "$RESOURCE_DIR/rewindos-daemon.service" > "$SYSTEMD_DIR/rewindos-daemon.service"
 fi
 
-systemctl --global daemon-reload || true
+# Enable the daemon for all users (takes effect on next login)
+systemctl --global enable rewindos-daemon.service 2>/dev/null || true

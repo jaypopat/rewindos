@@ -1,0 +1,95 @@
+name: Release
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "src-tauri/**"
+      - "crates/**"
+      - "src/**"
+      - "package.json"
+      - "Cargo.lock"
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read version from tauri.conf.json
+        id: version
+        run: |
+          VERSION=$(jq -r '.version' src-tauri/tauri.conf.json)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Check if tag already exists
+        id: check
+        run: |
+          if git rev-parse "v${{ steps.version.outputs.version }}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Skip if version already released
+        if: steps.check.outputs.exists == 'true'
+        run: echo "Version ${{ steps.version.outputs.version }} already released, skipping."
+
+      - name: Install system dependencies
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libpipewire-0.3-dev \
+            tesseract-ocr \
+            tesseract-ocr-eng \
+            libclang-dev \
+            libdbus-1-dev \
+            pkg-config \
+            build-essential \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            rpm
+
+      - name: Setup Rust
+        if: steps.check.outputs.exists == 'false'
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        if: steps.check.outputs.exists == 'false'
+        uses: swatinem/rust-cache@v2
+
+      - name: Setup Bun
+        if: steps.check.outputs.exists == 'false'
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install frontend dependencies
+        if: steps.check.outputs.exists == 'false'
+        run: bun install
+
+      - name: Build Tauri app (DEB + RPM)
+        if: steps.check.outputs.exists == 'false'
+        run: bun run tauri build
+
+      - name: Create tag and GitHub Release
+        if: steps.check.outputs.exists == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: RewindOS ${{ steps.version.outputs.tag }}
+          files: |
+            target/release/bundle/deb/*.deb
+            target/release/bundle/rpm/*.rpm
+          generate_release_notes: true

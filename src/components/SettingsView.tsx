@@ -170,14 +170,7 @@ export function SettingsView() {
           <div className="px-6 py-4 max-w-xl space-y-5">
             {tab === "general" && (
               <>
-                <SectionTitle>Appearance</SectionTitle>
-                <Field label="Theme">
-                  <Select
-                    value={config.ui.theme}
-                    options={["system", "dark", "light"]}
-                    onChange={(v) => update("ui", "theme", v)}
-                  />
-                </Field>
+                <SectionTitle>General</SectionTitle>
                 <Field label="Global Hotkey">
                   <TextInput
                     value={config.ui.global_hotkey}
@@ -490,30 +483,6 @@ function NumberInput({
   );
 }
 
-function Select({
-  value,
-  options,
-  onChange,
-}: {
-  value: string;
-  options: string[];
-  onChange: (v: string) => void;
-}) {
-  return (
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className="w-full px-2 py-1 bg-surface-raised border border-border/60 text-sm text-text-primary font-mono outline-none focus:border-accent/40 transition-colors"
-    >
-      {options.map((o) => (
-        <option key={o} value={o}>
-          {o}
-        </option>
-      ))}
-    </select>
-  );
-}
-
 function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
   return (
     <button
@@ -523,7 +492,7 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean
       }`}
     >
       <span
-        className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${
+        className={`absolute top-0.5 w-4 h-4 rounded-full bg-text-primary transition-all ${
           checked ? "left-4.5" : "left-0.5"
         }`}
       />

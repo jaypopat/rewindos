@@ -414,6 +414,38 @@ impl Database {
         rows.collect::<std::result::Result<Vec<_>, _>>().map_err(Into::into)
     }
 
+    /// Get OCR sessions with screenshot IDs and file paths for richer context.
+    /// Returns (id, app_name, window_title, timestamp, file_path, ocr_text) tuples.
+    pub fn get_ocr_sessions_with_ids(
+        &self,
+        start_time: i64,
+        end_time: i64,
+        limit: i64,
+    ) -> Result<Vec<(i64, Option<String>, Option<String>, i64, String, String)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT s.id, s.app_name, s.window_title, s.timestamp, s.file_path, o.text_content
+             FROM screenshots s
+             INNER JOIN ocr_text_content o ON o.screenshot_id = s.id
+             WHERE s.timestamp >= ?1 AND s.timestamp < ?2
+               AND o.text_content IS NOT NULL AND length(o.text_content) > 10
+             ORDER BY s.timestamp ASC
+             LIMIT ?3",
+        )?;
+
+        let rows = stmt.query_map(params![start_time, end_time, limit], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, String>(5)?,
+            ))
+        })?;
+
+        rows.collect::<std::result::Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
     /// Get app usage statistics since a given unix timestamp.
     pub fn get_app_usage_stats(&self, since: i64) -> Result<Vec<AppUsageStat>> {
         let total: f64 = self.conn.query_row(

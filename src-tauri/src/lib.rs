@@ -525,16 +525,29 @@ async fn ask(
     message: String,
 ) -> Result<AskResponse, String> {
     let config = state.config.lock().map_err(|e| format!("config lock: {e}"))?.clone();
+    let chat_client = OllamaChatClient::new(&config.chat);
 
-    // 1. Classify intent
-    let intent = IntentClassifier::classify(&message);
+    // 1. Classify intent — LLM-based, with regex fallback if Ollama fails
+    let intent = match chat_client.analyze_query(&message).await {
+        Ok(intent) => {
+            tracing::debug!("LLM classified query: {:?}", intent);
+            intent
+        }
+        Err(e) => {
+            tracing::warn!("LLM intent classification failed, falling back to regex: {e}");
+            IntentClassifier::classify(&message)
+        }
+    };
 
-    // 2. Retrieve context from DB
+    // 2. Retrieve context from DB with fallback strategy
     let (context, references) = {
         let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
 
         match intent.category {
-            IntentCategory::Recall | IntentCategory::General => {
+            IntentCategory::Recall
+            | IntentCategory::General
+            | IntentCategory::AppSpecific => {
+                // Try FTS5 search with extracted terms
                 let search_query = if intent.search_terms.is_empty() {
                     message.clone()
                 } else {
@@ -550,13 +563,54 @@ async fn ask(
                     offset: 0,
                 };
 
-                match db.search(&filters) {
-                    Ok(response) => {
+                let search_results = db.search(&filters).ok();
+                let has_results = search_results
+                    .as_ref()
+                    .map(|r| !r.results.is_empty())
+                    .unwrap_or(false);
+
+                if has_results {
+                    let response = search_results.unwrap();
+                    let results: Vec<_> = response
+                        .results
+                        .iter()
+                        .map(|r| {
+                            let ocr =
+                                db.get_ocr_text(r.id).unwrap_or(None).unwrap_or_default();
+                            (
+                                r.id,
+                                r.timestamp,
+                                r.app_name.clone(),
+                                r.window_title.clone(),
+                                r.file_path.clone(),
+                                ocr,
+                            )
+                        })
+                        .collect();
+                    ContextAssembler::from_search_results(&results)
+                } else if intent.search_terms.len() > 1 {
+                    // Fallback A: try OR query with individual terms
+                    let or_query = intent.search_terms.join(" OR ");
+                    let or_filters = SearchFilters {
+                        query: or_query,
+                        ..filters.clone()
+                    };
+                    let or_results = db.search(&or_filters).ok();
+                    let has_or = or_results
+                        .as_ref()
+                        .map(|r| !r.results.is_empty())
+                        .unwrap_or(false);
+
+                    if has_or {
+                        let response = or_results.unwrap();
                         let results: Vec<_> = response
                             .results
                             .iter()
                             .map(|r| {
-                                let ocr = db.get_ocr_text(r.id).unwrap_or(None).unwrap_or_default();
+                                let ocr = db
+                                    .get_ocr_text(r.id)
+                                    .unwrap_or(None)
+                                    .unwrap_or_default();
                                 (
                                     r.id,
                                     r.timestamp,
@@ -568,8 +622,24 @@ async fn ask(
                             })
                             .collect();
                         ContextAssembler::from_search_results(&results)
+                    } else {
+                        // Fallback B: recent activity timeline
+                        let now = chrono::Local::now().timestamp();
+                        let (start, end) =
+                            intent.time_range.unwrap_or((now - 86400, now));
+                        let sessions = db
+                            .get_ocr_sessions_with_ids(start, end, 100)
+                            .unwrap_or_default();
+                        ContextAssembler::from_sessions_with_refs(&sessions)
                     }
-                    Err(_) => ("No matching results found.".to_string(), Vec::new()),
+                } else {
+                    // Fallback B: recent activity timeline (single term or no terms)
+                    let now = chrono::Local::now().timestamp();
+                    let (start, end) = intent.time_range.unwrap_or((now - 86400, now));
+                    let sessions = db
+                        .get_ocr_sessions_with_ids(start, end, 100)
+                        .unwrap_or_default();
+                    ContextAssembler::from_sessions_with_refs(&sessions)
                 }
             }
             IntentCategory::TimeBased => {
@@ -578,9 +648,12 @@ async fn ask(
                     (now - 86400, now)
                 });
 
-                match db.get_ocr_sessions(start, end, 200) {
-                    Ok(sessions) => ContextAssembler::from_sessions(&sessions),
-                    Err(_) => ("No activity data found for this time range.".to_string(), Vec::new()),
+                match db.get_ocr_sessions_with_ids(start, end, 200) {
+                    Ok(sessions) => ContextAssembler::from_sessions_with_refs(&sessions),
+                    Err(_) => (
+                        "No activity data found for this time range.".to_string(),
+                        Vec::new(),
+                    ),
                 }
             }
             IntentCategory::Productivity => {
@@ -601,44 +674,6 @@ async fn ask(
                     .collect();
 
                 ContextAssembler::from_app_stats(&stat_tuples, &sessions)
-            }
-            IntentCategory::AppSpecific => {
-                let search_query = if intent.search_terms.is_empty() {
-                    message.clone()
-                } else {
-                    intent.search_terms.join(" ")
-                };
-
-                let filters = SearchFilters {
-                    query: search_query,
-                    start_time: intent.time_range.map(|(s, _)| s),
-                    end_time: intent.time_range.map(|(_, e)| e),
-                    app_name: intent.app_filter.clone(),
-                    limit: 10,
-                    offset: 0,
-                };
-
-                match db.search(&filters) {
-                    Ok(response) => {
-                        let results: Vec<_> = response
-                            .results
-                            .iter()
-                            .map(|r| {
-                                let ocr = db.get_ocr_text(r.id).unwrap_or(None).unwrap_or_default();
-                                (
-                                    r.id,
-                                    r.timestamp,
-                                    r.app_name.clone(),
-                                    r.window_title.clone(),
-                                    r.file_path.clone(),
-                                    ocr,
-                                )
-                            })
-                            .collect();
-                        ContextAssembler::from_search_results(&results)
-                    }
-                    Err(_) => ("No matching results found.".to_string(), Vec::new()),
-                }
             }
         }
     };

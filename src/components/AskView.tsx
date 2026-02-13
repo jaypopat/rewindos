@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { useAskStream } from "@/hooks/useAskStream";
+import { useAskChat } from "@/context/AskContext";
 import { AskEmptyState } from "./AskEmptyState";
 import { ChatMessage } from "./ChatMessage";
 import { cn } from "@/lib/utils";
@@ -10,7 +10,7 @@ interface AskViewProps {
 }
 
 export function AskView({ onSelectScreenshot }: AskViewProps) {
-  const { messages, isStreaming, error, sendMessage, newSession } = useAskStream();
+  const { messages, isStreaming, error, sendMessage, newSession } = useAskChat();
   const [input, setInput] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
