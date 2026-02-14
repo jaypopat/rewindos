@@ -817,6 +817,34 @@ async fn ask(
     })
 }
 
+// -- Delete commands --
+
+#[tauri::command]
+async fn delete_screenshots_in_range(
+    state: State<'_, AppState>,
+    start_time: i64,
+    end_time: i64,
+) -> Result<u64, String> {
+    let reply = state
+        .dbus
+        .call_method(
+            Some("com.rewindos.Daemon"),
+            "/com/rewindos/Daemon",
+            Some("com.rewindos.Daemon"),
+            "DeleteRange",
+            &(start_time, end_time),
+        )
+        .await
+        .map_err(|e| format!("dbus call: {e}"))?;
+
+    let deleted: u64 = reply
+        .body()
+        .deserialize()
+        .map_err(|e| format!("dbus deserialize: {e}"))?;
+
+    Ok(deleted)
+}
+
 // -- Settings commands --
 
 #[tauri::command]
@@ -1033,6 +1061,7 @@ pub fn run() {
             ask,
             ask_new_session,
             ask_health,
+            delete_screenshots_in_range,
             get_config,
             update_config,
         ])

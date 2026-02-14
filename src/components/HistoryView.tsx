@@ -1,10 +1,11 @@
-import { useState, useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useState, useMemo, useCallback } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   getActivity,
   getTaskBreakdown,
   getActiveBlocks,
   browseScreenshots,
+  deleteScreenshotsInRange,
   getImageUrl,
   type TaskUsageStat,
   type TimelineEntry,
@@ -14,7 +15,7 @@ import { formatDuration, formatNumber } from "@/lib/format";
 import { StatCard } from "./StatCard";
 import { AppDot } from "./AppDot";
 import { AppDonutChart } from "./charts/AppDonutChart";
-import { DailyActivityChart } from "./charts/DailyActivityChart";
+import { ScreenTimeChart } from "./charts/ScreenTimeChart";
 import { getAppColor } from "@/lib/app-colors";
 import { cn } from "@/lib/utils";
 import { parseWindowTitle } from "@/lib/window-title";
@@ -40,6 +41,17 @@ interface HourGroup {
   entries: TimelineEntry[];
   /** Top app names for the summary */
   topApps: string[];
+}
+
+interface DayGroup {
+  /** Date string like "2026-02-13" */
+  date: string;
+  /** Display label like "Thursday, Feb 13" */
+  label: string;
+  /** Hour groups within this day */
+  hours: HourGroup[];
+  /** Total screenshots this day */
+  totalEntries: number;
 }
 
 function groupTasksByApp(tasks: TaskUsageStat[]): AppTaskGroup[] {
@@ -68,27 +80,27 @@ function groupTasksByApp(tasks: TaskUsageStat[]): AppTaskGroup[] {
     .sort((a, b) => b.totalSeconds - a.totalSeconds);
 }
 
-function groupByHour(entries: TimelineEntry[]): HourGroup[] {
-  const map = new Map<string, TimelineEntry[]>();
+function groupByDay(entries: TimelineEntry[]): DayGroup[] {
+  // First group by hour key
+  const hourMap = new Map<string, TimelineEntry[]>();
 
   for (const entry of entries) {
     const d = new Date(entry.timestamp * 1000);
     const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
     const hour = d.getHours();
     const key = `${dateStr}T${String(hour).padStart(2, "0")}`;
-    const group = map.get(key) ?? [];
+    const group = hourMap.get(key) ?? [];
     group.push(entry);
-    map.set(key, group);
+    hourMap.set(key, group);
   }
 
-  return [...map.entries()]
+  const hourGroups: HourGroup[] = [...hourMap.entries()]
     .map(([key, items]) => {
       items.sort((a, b) => a.timestamp - b.timestamp);
       const hour = parseInt(key.slice(-2), 10);
       const nextHour = (hour + 1) % 24;
       const label = `${String(hour).padStart(2, "0")}:00 — ${String(nextHour).padStart(2, "0")}:00`;
 
-      // Top apps by frequency
       const appCounts = new Map<string, number>();
       for (const e of items) {
         if (e.app_name) {
@@ -102,7 +114,42 @@ function groupByHour(entries: TimelineEntry[]): HourGroup[] {
 
       return { key, label, entries: items, topApps };
     })
-    .sort((a, b) => b.key.localeCompare(a.key)); // Most recent first
+    .sort((a, b) => b.key.localeCompare(a.key));
+
+  // Group hours by day
+  const dayMap = new Map<string, HourGroup[]>();
+  for (const hg of hourGroups) {
+    const date = hg.key.slice(0, 10);
+    const existing = dayMap.get(date) ?? [];
+    existing.push(hg);
+    dayMap.set(date, existing);
+  }
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+  const yesterdayDate = new Date(today.getTime() - 86400_000);
+  const yesterdayStr = `${yesterdayDate.getFullYear()}-${String(yesterdayDate.getMonth() + 1).padStart(2, "0")}-${String(yesterdayDate.getDate()).padStart(2, "0")}`;
+
+  return [...dayMap.entries()]
+    .map(([date, hours]) => {
+      const d = new Date(date + "T00:00:00");
+      let label: string;
+      if (date === todayStr) {
+        label = "Today";
+      } else if (date === yesterdayStr) {
+        label = "Yesterday";
+      } else {
+        label = d.toLocaleDateString(undefined, {
+          weekday: "long",
+          month: "short",
+          day: "numeric",
+        });
+      }
+      const totalEntries = hours.reduce((sum, h) => sum + h.entries.length, 0);
+      return { date, label, hours, totalEntries };
+    })
+    .sort((a, b) => b.date.localeCompare(a.date));
 }
 
 /** Sample N evenly-spaced items from an array */
@@ -123,6 +170,15 @@ function formatSecs(secs: number): string {
 }
 
 const RANGE_PRESETS = [
+  {
+    label: "Today",
+    getRange: () => {
+      const d = new Date();
+      d.setHours(0, 0, 0, 0);
+      const todayStart = Math.floor(d.getTime() / 1000);
+      return { start: todayStart, end: todayStart + 86400 };
+    },
+  },
   {
     label: "Yesterday",
     getRange: () => {
@@ -170,16 +226,24 @@ const RANGE_PRESETS = [
   },
 ] as const;
 
+function getRangeForDate(dateStr: string): { start: number; end: number } {
+  const d = new Date(dateStr + "T00:00:00");
+  const start = Math.floor(d.getTime() / 1000);
+  return { start, end: start + 86400 };
+}
+
 export function HistoryView({ onSelectScreenshot }: HistoryViewProps) {
-  const [rangeIdx, setRangeIdx] = useState(0);
+  const [rangeIdx, setRangeIdx] = useState<number | null>(0);
+  const [customDate, setCustomDate] = useState<string | null>(null);
   const [mode, setMode] = useState<HistoryMode>("apps");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [expandedHours, setExpandedHours] = useState<Set<string>>(new Set());
+  const [showAllHours, setShowAllHours] = useState<Set<string>>(new Set());
 
-  const { start, end } = useMemo(
-    () => RANGE_PRESETS[rangeIdx].getRange(),
-    [rangeIdx],
-  );
+  const { start, end } = useMemo(() => {
+    if (customDate) return getRangeForDate(customDate);
+    return RANGE_PRESETS[rangeIdx ?? 0].getRange();
+  }, [rangeIdx, customDate]);
 
   const rangeDays = Math.max(1, Math.round((end - start) / 86400));
 
@@ -198,23 +262,40 @@ export function HistoryView({ onSelectScreenshot }: HistoryViewProps) {
     staleTime: 60_000,
   });
 
-  // Active blocks
+  // Active blocks (selected range — for stats)
   const { data: activeBlocks = [] } = useQuery({
     queryKey: ["activeBlocks", start, end],
     queryFn: () => getActiveBlocks(start, end),
     staleTime: 60_000,
   });
 
+  // Active blocks (last 14 days — for chart context)
+  const chartStart = useMemo(() => {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    return Math.floor(d.getTime() / 1000) - 13 * 86400;
+  }, []);
+  const chartEnd = useMemo(() => {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    return Math.floor(d.getTime() / 1000) + 86400;
+  }, []);
+  const { data: chartBlocks = [] } = useQuery({
+    queryKey: ["activeBlocks-chart", chartStart, chartEnd],
+    queryFn: () => getActiveBlocks(chartStart, chartEnd),
+    staleTime: 120_000,
+  });
+
   // Browse screenshots (for timeline mode)
   const { data: screenshots = [], isLoading: isLoadingScreenshots } = useQuery({
     queryKey: queryKeys.hourlyBrowse(start, end),
-    queryFn: () => browseScreenshots(start, end, undefined, 2000),
+    queryFn: () => browseScreenshots(start, end, undefined, 100000),
     staleTime: 60_000,
     enabled: mode === "timeline",
   });
 
-  const hourGroups = useMemo(
-    () => (mode === "timeline" ? groupByHour(screenshots) : []),
+  const dayGroups = useMemo(
+    () => (mode === "timeline" ? groupByDay(screenshots) : []),
     [screenshots, mode],
   );
 
@@ -265,6 +346,41 @@ export function HistoryView({ onSelectScreenshot }: HistoryViewProps) {
     });
   };
 
+  // Delete hour group
+  const [confirmDeleteKey, setConfirmDeleteKey] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const queryClient = useQueryClient();
+
+  const handleDeleteHour = useCallback(
+    async (group: HourGroup) => {
+      const first = group.entries[0];
+      if (!first) return;
+
+      // Compute the hour start/end from the key (e.g. "2026-02-13T14")
+      const datePart = group.key.slice(0, 10); // "2026-02-13"
+      const hourNum = parseInt(group.key.slice(-2), 10);
+      const hourStart = new Date(`${datePart}T${String(hourNum).padStart(2, "0")}:00:00`);
+      const hourEnd = new Date(hourStart.getTime() + 3600_000);
+
+      const startTs = Math.floor(hourStart.getTime() / 1000);
+      const endTs = Math.floor(hourEnd.getTime() / 1000);
+
+      setDeleting(true);
+      try {
+        await deleteScreenshotsInRange(startTs, endTs);
+        setConfirmDeleteKey(null);
+        // Invalidate queries so the UI refreshes
+        queryClient.invalidateQueries({ queryKey: queryKeys.hourlyBrowse(start, end) });
+        queryClient.invalidateQueries({ queryKey: queryKeys.activity(start) });
+      } catch (err) {
+        console.error("Failed to delete hour:", err);
+      } finally {
+        setDeleting(false);
+      }
+    },
+    [queryClient, start, end],
+  );
+
   return (
     <div className="flex-1 flex flex-col overflow-hidden px-5 py-4">
       {/* Header + Mode toggle + Range selector */}
@@ -288,21 +404,44 @@ export function HistoryView({ onSelectScreenshot }: HistoryViewProps) {
             ))}
           </div>
         </div>
-        <div className="flex gap-0.5 bg-surface-raised rounded-lg p-0.5">
-          {RANGE_PRESETS.map((r, i) => (
-            <button
-              key={r.label}
-              onClick={() => setRangeIdx(i)}
-              className={cn(
-                "px-3 py-1 text-xs rounded-md transition-colors",
-                i === rangeIdx
-                  ? "bg-accent/15 text-accent font-medium"
-                  : "text-text-muted hover:text-text-secondary",
-              )}
-            >
-              {r.label}
-            </button>
-          ))}
+        <div className="flex items-center gap-2">
+          <div className="flex gap-0.5 bg-surface-raised rounded-lg p-0.5">
+            {RANGE_PRESETS.map((r, i) => (
+              <button
+                key={r.label}
+                onClick={() => {
+                  setRangeIdx(i);
+                  setCustomDate(null);
+                }}
+                className={cn(
+                  "px-3 py-1 text-xs rounded-md transition-colors",
+                  i === rangeIdx && !customDate
+                    ? "bg-accent/15 text-accent font-medium"
+                    : "text-text-muted hover:text-text-secondary",
+                )}
+              >
+                {r.label}
+              </button>
+            ))}
+          </div>
+          <input
+            type="date"
+            value={customDate ?? ""}
+            max={new Date().toISOString().split("T")[0]}
+            onChange={(e) => {
+              if (e.target.value) {
+                setCustomDate(e.target.value);
+                setRangeIdx(null);
+              }
+            }}
+            className={cn(
+              "px-2 py-1 text-xs rounded-lg border bg-surface-raised transition-colors cursor-pointer",
+              customDate
+                ? "border-accent/50 text-accent"
+                : "border-border/50 text-text-muted",
+            )}
+            title="Pick a specific date"
+          />
         </div>
       </div>
 
@@ -331,8 +470,9 @@ export function HistoryView({ onSelectScreenshot }: HistoryViewProps) {
             <StatCard
               label="Captures"
               value={formatNumber(totalCaptures)}
-              detail="screenshots"
+              detail="View in timeline →"
               accentColor="#a78bfa"
+              onClick={() => setMode("timeline")}
             />
             <StatCard
               label="Active Apps"
@@ -350,8 +490,12 @@ export function HistoryView({ onSelectScreenshot }: HistoryViewProps) {
 
           {/* Charts row — compact */}
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-            <ChartCard title="Captures by Day" compact>
-              <DailyActivityChart data={activity.daily_activity} />
+            <ChartCard title="Screen Time" compact>
+              <ScreenTimeChart
+                blocks={(end - start) <= 86400 ? chartBlocks : activeBlocks}
+                selectedStart={start}
+                selectedEnd={end}
+              />
             </ChartCard>
             <ChartCard title="App Distribution" compact>
               <AppDonutChart data={activity.app_usage} />
@@ -436,114 +580,203 @@ export function HistoryView({ onSelectScreenshot }: HistoryViewProps) {
             <div className="flex items-center justify-center py-20">
               <div className="w-6 h-6 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
             </div>
-          ) : hourGroups.length === 0 ? (
+          ) : dayGroups.length === 0 ? (
             <div className="text-center py-20 text-text-muted text-sm">
               No screenshots found in this time range.
             </div>
           ) : (
-            <div className="flex-1 overflow-y-auto space-y-1">
-              {hourGroups.map((group) => {
-                const isOpen = expandedHours.has(group.key);
-                const previews = sampleEvenly(group.entries, 4);
-                const allIds = group.entries.map((e) => e.id);
-
+            <div className="flex-1 overflow-y-auto space-y-4 relative">
+              {/* Confirm delete modal */}
+              {confirmDeleteKey && (() => {
+                let targetGroup: HourGroup | undefined;
+                for (const dg of dayGroups) {
+                  targetGroup = dg.hours.find((g) => g.key === confirmDeleteKey);
+                  if (targetGroup) break;
+                }
+                if (!targetGroup) return null;
                 return (
-                  <div key={group.key} className="border border-border/50 rounded-lg overflow-hidden">
-                    {/* Hour header */}
-                    <button
-                      onClick={() => toggleHour(group.key)}
-                      className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-surface-raised/40 transition-colors text-left"
-                    >
-                      <svg
-                        className={cn(
-                          "size-3.5 text-text-muted transition-transform shrink-0",
-                          isOpen && "rotate-90",
-                        )}
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        strokeWidth={2}
-                        stroke="currentColor"
-                      >
-                        <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
-                      </svg>
-                      <span className="text-sm text-text-primary font-medium font-mono tabular-nums">
-                        {group.label}
-                      </span>
-                      <span className="text-xs text-text-muted">
-                        {group.entries.length} capture{group.entries.length !== 1 ? "s" : ""}
-                      </span>
-                      {group.topApps.length > 0 && (
-                        <span className="text-xs text-text-muted truncate">
-                          {group.topApps.join(", ")}
-                        </span>
-                      )}
-                      <span className="flex-1" />
-                      {/* Preview thumbnails (collapsed only) */}
-                      {!isOpen && (
-                        <div className="flex gap-1.5 shrink-0">
-                          {previews.map((entry) => (
-                            <div
-                              key={entry.id}
-                              className="w-16 h-10 rounded overflow-hidden bg-surface-raised border border-border/30"
-                            >
-                              {entry.thumbnail_path ? (
-                                <img
-                                  src={getImageUrl(entry.thumbnail_path)}
-                                  alt=""
-                                  className="w-full h-full object-cover"
-                                  loading="lazy"
-                                />
-                              ) : (
-                                <div className="w-full h-full flex items-center justify-center">
-                                  <span className="text-[8px] text-text-muted font-mono">
-                                    {new Date(entry.timestamp * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                                  </span>
-                                </div>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </button>
-
-                    {/* Expanded grid */}
-                    {isOpen && (
-                      <div className="px-4 pb-3 pt-1">
-                        <div className="grid grid-cols-4 xl:grid-cols-6 gap-2">
-                          {group.entries.map((entry) => (
-                            <button
-                              key={entry.id}
-                              onClick={() => onSelectScreenshot?.(entry.id, allIds)}
-                              className="group relative aspect-video rounded-lg overflow-hidden border border-border/30 hover:border-accent/50 bg-surface-raised transition-all hover:scale-[1.02]"
-                            >
-                              {entry.thumbnail_path ? (
-                                <img
-                                  src={getImageUrl(entry.thumbnail_path)}
-                                  alt=""
-                                  className="w-full h-full object-cover opacity-75 group-hover:opacity-100 transition-opacity"
-                                  loading="lazy"
-                                />
-                              ) : (
-                                <div className="w-full h-full flex items-center justify-center">
-                                  <span className="text-[9px] text-text-muted font-mono">No preview</span>
-                                </div>
-                              )}
-                              <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent px-2 py-1.5">
-                                <span className="text-[10px] text-white/90 font-mono tabular-nums">
-                                  {new Date(entry.timestamp * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                                </span>
-                                {entry.app_name && (
-                                  <span className="text-[9px] text-white/50 ml-1.5">{entry.app_name}</span>
-                                )}
-                              </div>
-                            </button>
-                          ))}
-                        </div>
+                  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+                    <div className="bg-surface-base border border-border rounded-xl p-5 max-w-sm w-full mx-4 shadow-2xl">
+                      <h3 className="text-base font-medium text-text-primary mb-2">Delete captures?</h3>
+                      <p className="text-sm text-text-secondary mb-4">
+                        This will permanently delete <span className="font-medium text-text-primary">{targetGroup.entries.length}</span> screenshot{targetGroup.entries.length !== 1 ? "s" : ""} from{" "}
+                        <span className="font-mono font-medium text-text-primary">{targetGroup.label}</span>, including their OCR data and files on disk.
+                      </p>
+                      <div className="flex gap-2 justify-end">
+                        <button
+                          onClick={() => setConfirmDeleteKey(null)}
+                          disabled={deleting}
+                          className="px-3 py-1.5 text-sm rounded-lg border border-border text-text-secondary hover:bg-surface-raised transition-colors"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          onClick={() => handleDeleteHour(targetGroup!)}
+                          disabled={deleting}
+                          className="px-3 py-1.5 text-sm rounded-lg bg-red-500/90 hover:bg-red-500 text-white font-medium transition-colors disabled:opacity-50"
+                        >
+                          {deleting ? "Deleting..." : "Delete"}
+                        </button>
                       </div>
-                    )}
+                    </div>
                   </div>
                 );
-              })}
+              })()}
+
+              {dayGroups.map((day) => (
+                <div key={day.date}>
+                  {/* Day header */}
+                  <div className="flex items-center gap-3 mb-1.5 px-1">
+                    <h3 className="text-sm font-medium text-text-primary">{day.label}</h3>
+                    <span className="text-xs text-text-muted">
+                      {day.totalEntries} capture{day.totalEntries !== 1 ? "s" : ""} across {day.hours.length} hour{day.hours.length !== 1 ? "s" : ""}
+                    </span>
+                    <div className="flex-1 h-px bg-border/30" />
+                  </div>
+
+                  {/* Hour groups for this day */}
+                  <div className="space-y-1">
+                    {day.hours.map((group) => {
+                      const isOpen = expandedHours.has(group.key);
+                      const previews = sampleEvenly(group.entries, 4);
+                      const allIds = group.entries.map((e) => e.id);
+
+                      return (
+                        <div key={group.key} className="border border-border/50 rounded-lg overflow-hidden">
+                          {/* Hour header */}
+                          <div className="flex items-center">
+                            <button
+                              onClick={() => toggleHour(group.key)}
+                              className="flex-1 min-w-0 flex items-center gap-3 px-4 py-2.5 hover:bg-surface-raised/40 transition-colors text-left"
+                            >
+                              <svg
+                                className={cn(
+                                  "size-3.5 text-text-muted transition-transform shrink-0",
+                                  isOpen && "rotate-90",
+                                )}
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                strokeWidth={2}
+                                stroke="currentColor"
+                              >
+                                <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
+                              </svg>
+                              <span className="text-sm text-text-primary font-medium font-mono tabular-nums">
+                                {group.label}
+                              </span>
+                              <span className="text-xs text-text-muted">
+                                {group.entries.length} capture{group.entries.length !== 1 ? "s" : ""}
+                              </span>
+                              {group.topApps.length > 0 && (
+                                <span className="text-xs text-text-muted truncate">
+                                  {group.topApps.join(", ")}
+                                </span>
+                              )}
+                              <span className="flex-1" />
+                              {/* Preview thumbnails (collapsed only) */}
+                              {!isOpen && (
+                                <div className="flex gap-1.5 shrink-0">
+                                  {previews.map((entry) => (
+                                    <div
+                                      key={entry.id}
+                                      className="w-16 h-10 rounded overflow-hidden bg-surface-raised border border-border/30"
+                                    >
+                                      {entry.thumbnail_path ? (
+                                        <img
+                                          src={getImageUrl(entry.thumbnail_path)}
+                                          alt=""
+                                          className="w-full h-full object-cover"
+                                          loading="lazy"
+                                        />
+                                      ) : (
+                                        <div className="w-full h-full flex items-center justify-center">
+                                          <span className="text-[8px] text-text-muted font-mono">
+                                            {new Date(entry.timestamp * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                                          </span>
+                                        </div>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </button>
+                            {/* Delete hour button */}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setConfirmDeleteKey(group.key);
+                              }}
+                              className="px-3 py-2.5 text-red-400/60 hover:text-red-400 transition-colors shrink-0"
+                              title={`Delete all captures from ${group.label}`}
+                            >
+                              <svg className="size-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
+                              </svg>
+                            </button>
+                          </div>
+
+                          {/* Expanded grid */}
+                          {isOpen && (() => {
+                            const INITIAL_LIMIT = 30;
+                            const showAll = showAllHours.has(group.key);
+                            const visible = showAll ? group.entries : group.entries.slice(0, INITIAL_LIMIT);
+                            const remaining = group.entries.length - INITIAL_LIMIT;
+
+                            return (
+                              <div className="px-4 pb-3 pt-1">
+                                <div className="grid grid-cols-4 xl:grid-cols-6 gap-2">
+                                  {visible.map((entry) => (
+                                    <button
+                                      key={entry.id}
+                                      onClick={() => onSelectScreenshot?.(entry.id, allIds)}
+                                      className="group relative aspect-video rounded-lg overflow-hidden border border-border/30 hover:border-accent/50 bg-surface-raised transition-all hover:scale-[1.02]"
+                                    >
+                                      {entry.thumbnail_path ? (
+                                        <img
+                                          src={getImageUrl(entry.thumbnail_path)}
+                                          alt=""
+                                          className="w-full h-full object-cover opacity-75 group-hover:opacity-100 transition-opacity"
+                                          loading="lazy"
+                                        />
+                                      ) : (
+                                        <div className="w-full h-full flex items-center justify-center">
+                                          <span className="text-[9px] text-text-muted font-mono">No preview</span>
+                                        </div>
+                                      )}
+                                      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent px-2 py-1.5">
+                                        <span className="text-[10px] text-white/90 font-mono tabular-nums">
+                                          {new Date(entry.timestamp * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                                        </span>
+                                        {entry.app_name && (
+                                          <span className="text-[9px] text-white/50 ml-1.5">{entry.app_name}</span>
+                                        )}
+                                      </div>
+                                    </button>
+                                  ))}
+                                </div>
+                                {!showAll && remaining > 0 && (
+                                  <button
+                                    onClick={() =>
+                                      setShowAllHours((prev) => {
+                                        const next = new Set(prev);
+                                        next.add(group.key);
+                                        return next;
+                                      })
+                                    }
+                                    className="mt-2 w-full py-1.5 text-xs text-accent hover:text-accent/80 font-medium transition-colors"
+                                  >
+                                    Load {remaining} more screenshot{remaining !== 1 ? "s" : ""}
+                                  </button>
+                                )}
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
             </div>
           )}
         </div>

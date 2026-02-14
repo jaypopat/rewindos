@@ -12,14 +12,13 @@ import {
 } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import { type AppConfig } from "@/lib/config";
-import { useFocusScore } from "@/hooks/useFocusScore";
 import { formatDuration } from "@/lib/format";
 import { StatCard } from "./StatCard";
 import { AppDot } from "./AppDot";
 import { getAppColor } from "@/lib/app-colors";
 import { HourlyActivityChart } from "./charts/HourlyActivityChart";
 import { AppDonutChart } from "./charts/AppDonutChart";
-import { buildCategoryRules, getCategoryColor, type ActivityCategory } from "@/lib/app-categories";
+import { buildCategoryRules, categorizeApp, getCategoryColor, type ActivityCategory } from "@/lib/app-categories";
 import { parseWindowTitle } from "@/lib/window-title";
 
 interface DashboardViewProps {
@@ -306,16 +305,14 @@ function CapturesCarousel({
 }
 
 export function DashboardView({ onSelectScreenshot }: DashboardViewProps) {
-  const [distractionApps, setDistractionApps] = useState<string[]>([]);
   const [categoryRules, setCategoryRules] = useState<Record<string, string[]> | undefined>();
 
-  // Load focus config
+  // Load category config
   useEffect(() => {
     getConfig()
       .then((c) => {
         const { focus } = c as unknown as AppConfig;
         if (focus) {
-          setDistractionApps(focus.distraction_apps ?? []);
           const userRules = focus.category_rules ?? {};
           if (Object.keys(userRules).length > 0) {
             setCategoryRules(buildCategoryRules(userRules));
@@ -371,8 +368,6 @@ export function DashboardView({ onSelectScreenshot }: DashboardViewProps) {
     refetchOnWindowFocus: false,
   });
 
-  const focus = useFocusScore(distractionApps, categoryRules);
-
   // ---- Derived data ----
 
   const totalScreenTime = useMemo(
@@ -396,11 +391,22 @@ export function DashboardView({ onSelectScreenshot }: DashboardViewProps) {
 
   const topTasks = useMemo(() => getTopTasks(taskStats, 5), [taskStats]);
 
+  const topApp = useMemo(() => {
+    if (topTasks.length === 0) return null;
+    return topTasks[0].appName;
+  }, [topTasks]);
+
   const categoryEntries = useMemo(() => {
-    return Object.entries(focus.categoryBreakdown)
+    const catMins: Record<string, number> = {};
+    for (const t of taskStats) {
+      const cat = categorizeApp(t.app_name, categoryRules);
+      const mins = Math.round(t.estimated_seconds / 60);
+      catMins[cat] = (catMins[cat] ?? 0) + mins;
+    }
+    return Object.entries(catMins)
       .filter(([, mins]) => mins > 0)
       .sort((a, b) => b[1] - a[1]) as [ActivityCategory, number][];
-  }, [focus.categoryBreakdown]);
+  }, [taskStats, categoryRules]);
 
   const totalCategoryMins = useMemo(
     () => categoryEntries.reduce((sum, [, mins]) => sum + mins, 0),
@@ -444,14 +450,14 @@ export function DashboardView({ onSelectScreenshot }: DashboardViewProps) {
           accentColor="#a78bfa"
         />
         <StatCard
-          label="Focus Score"
-          value={focus.isLoading ? "\u2014" : String(focus.focusScore)}
-          detail="/100"
-          accentColor={focus.focusScore >= 70 ? "#34d399" : focus.focusScore >= 40 ? "#fbbf24" : "#f87171"}
+          label="Active Apps"
+          value={screenshotsLoading ? "\u2014" : String(new Set(taskStats.map(t => t.app_name)).size)}
+          detail={topApp ? `Top: ${topApp}` : undefined}
+          accentColor="#34d399"
         />
         <StatCard
           label="Top App"
-          value={focus.isLoading ? "\u2014" : (focus.topApp ?? "\u2014")}
+          value={topApp ?? "\u2014"}
           detail="most used today"
           accentColor="#fb923c"
         />
@@ -565,26 +571,6 @@ export function DashboardView({ onSelectScreenshot }: DashboardViewProps) {
                 </div>
               </div>
 
-              {/* Focus stats row */}
-              <div className="border-t border-border/30 pt-3 grid grid-cols-3 gap-3">
-                <div>
-                  <span className="text-[10px] text-text-muted uppercase tracking-wider block mb-0.5">App Switches</span>
-                  <span className="text-lg text-text-primary font-display leading-none">{focus.appSwitches}</span>
-                  <span className="text-[10px] text-text-muted ml-1">today</span>
-                </div>
-                <div>
-                  <span className="text-[10px] text-text-muted uppercase tracking-wider block mb-0.5">Sessions</span>
-                  <span className="text-lg text-text-primary font-display leading-none">{focus.sessionCount}</span>
-                  <span className="text-[10px] text-text-muted ml-1">blocks</span>
-                </div>
-                <div>
-                  <span className="text-[10px] text-text-muted uppercase tracking-wider block mb-0.5">Productive</span>
-                  <span className="text-lg text-text-primary font-display leading-none">{focus.productiveMinutes}m</span>
-                  <span className="text-[10px] text-text-muted ml-1">
-                    / {focus.productiveMinutes + focus.distractionMinutes}m
-                  </span>
-                </div>
-              </div>
             </section>
           )}
 

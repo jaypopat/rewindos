@@ -154,6 +154,7 @@ impl Default for PrivacyConfig {
         Self {
             excluded_apps: vec![
                 "rewindos".to_string(),
+                "com.jay.rewindos".to_string(),
                 "keepassxc".to_string(),
                 "1password".to_string(),
                 "bitwarden".to_string(),

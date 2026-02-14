@@ -34,7 +34,8 @@ MVP: capture → OCR → full-text search.
 - `docs/frontend-spec.md` — UI layout, components, Tauri IPC
 
 ## Target Platform
-KDE Plasma 6+ on Ubuntu 24.04+ (Wayland)
+KDE Plasma 6+ on Ubuntu 24.04+
+Trying to get full Linux support (Wayland)
 
 ## System Dependencies
 ```bash

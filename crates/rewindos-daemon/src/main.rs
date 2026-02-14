@@ -164,21 +164,30 @@ async fn run_daemon() -> anyhow::Result<()> {
     info!(path = %db_path.display(), "database opened");
     let db = Arc::new(Mutex::new(db));
 
-    // Construct OllamaClient if semantic search is enabled
-    let ollama_client = if config.semantic.enabled {
+    // Auto-detect Ollama: always probe regardless of config.semantic.enabled
+    let ollama_client = {
         let client = OllamaClient::new(&config.semantic.ollama_url, &config.semantic.model);
         if client.health_check().await {
-            info!("Ollama connected for semantic search");
+            let model = config.semantic.model.clone();
+            if !client.has_model(&model).await {
+                info!(model = %model, "embedding model not found, pulling...");
+                match client.pull_model(&model).await {
+                    Ok(true) => info!(model = %model, "embedding model pulled successfully"),
+                    Ok(false) => {
+                        warn!(model = %model, "failed to pull embedding model (timeout or unreachable)")
+                    }
+                    Err(e) => warn!(model = %model, error = %e, "error pulling embedding model"),
+                }
+            }
+            info!(url = %config.semantic.ollama_url, "Ollama detected — semantic search enabled");
             Some(Arc::new(client))
         } else {
-            warn!(
-                "Ollama not reachable at {}, semantic search will fall back to keyword-only",
+            info!(
+                "Ollama not reachable at {} — using keyword-only search",
                 config.semantic.ollama_url
             );
-            Some(Arc::new(client))
+            None
         }
-    } else {
-        None
     };
 
     // Connect to D-Bus session bus
@@ -201,6 +210,57 @@ async fn run_daemon() -> anyhow::Result<()> {
         pipeline::start_pipeline(&config, db.clone(), capture_backend, window_info.clone()).await?;
 
     info!("capture pipeline started");
+
+    // Spawn background embedding backfill if Ollama is available
+    if let Some(ref client) = ollama_client {
+        let backfill_db = db.clone();
+        let backfill_client = client.clone();
+        tokio::spawn(async move {
+            info!("starting background embedding backfill");
+            let mut total = 0u64;
+            loop {
+                let pending = {
+                    let db = backfill_db.lock().unwrap_or_else(|e| e.into_inner());
+                    match db.get_pending_embeddings(50) {
+                        Ok(p) => p,
+                        Err(e) => {
+                            warn!(error = %e, "backfill: failed to get pending embeddings");
+                            break;
+                        }
+                    }
+                };
+
+                if pending.is_empty() {
+                    if total > 0 {
+                        info!(total, "background embedding backfill complete");
+                    }
+                    break;
+                }
+
+                for (screenshot_id, text) in pending {
+                    match backfill_client.embed(&text).await {
+                        Ok(Some(embedding)) => {
+                            let db = backfill_db.lock().unwrap_or_else(|e| e.into_inner());
+                            if let Err(e) = db.insert_embedding(screenshot_id, &embedding) {
+                                warn!(screenshot_id, error = %e, "backfill: failed to store embedding");
+                            } else {
+                                total += 1;
+                            }
+                        }
+                        Ok(None) => {
+                            warn!("backfill: Ollama became unavailable, stopping");
+                            return;
+                        }
+                        Err(e) => {
+                            warn!(screenshot_id, error = %e, "backfill: failed to embed");
+                        }
+                    }
+                    // Small delay to avoid overwhelming Ollama
+                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                }
+            }
+        });
+    }
 
     // Register D-Bus service
     let dbus_service = service::DaemonService {

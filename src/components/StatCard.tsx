@@ -8,11 +8,16 @@ interface StatCardProps {
   accentColor?: string;
   trend?: number;
   trendLabel?: string;
+  onClick?: () => void;
 }
 
-export function StatCard({ label, value, sparklineData, detail, accentColor, trend, trendLabel }: StatCardProps) {
+export function StatCard({ label, value, sparklineData, detail, accentColor, trend, trendLabel, onClick }: StatCardProps) {
   return (
-    <div className="bg-surface-raised rounded-xl border border-border/50 p-4 flex flex-col gap-2">
+    <div
+      className={`bg-surface-raised rounded-xl border border-border/50 p-4 flex flex-col gap-2${onClick ? " cursor-pointer hover:border-accent/30 transition-colors" : ""}`}
+      onClick={onClick}
+      role={onClick ? "button" : undefined}
+    >
       <span className="text-xs font-medium text-text-muted uppercase tracking-wider">{label}</span>
       <div className="flex items-end justify-between gap-3">
         <div>

@@ -29,6 +29,17 @@ export function DailyActivityChart({ data, height = 240 }: Props) {
     );
   }
 
+  if (data.length === 1) {
+    const d = data[0];
+    return (
+      <div className="flex flex-col items-center justify-center gap-1" style={{ height }}>
+        <span className="text-3xl font-display text-text-primary">{d.screenshot_count}</span>
+        <span className="text-xs text-text-muted">captures on {formatDateShort(d.date)}</span>
+        <span className="text-xs text-text-muted">{d.unique_apps} app{d.unique_apps !== 1 ? "s" : ""}</span>
+      </div>
+    );
+  }
+
   const formatted = data.map((d) => ({
     ...d,
     label: formatDateShort(d.date),

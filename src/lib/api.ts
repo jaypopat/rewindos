@@ -17,6 +17,8 @@ export interface SearchResult {
   file_path: string;
   matched_text: string;
   rank: number;
+  group_count?: number;
+  group_screenshot_ids?: number[];
 }
 
 export interface SearchResponse {
@@ -226,6 +228,15 @@ export async function ask(
   message: string,
 ): Promise<AskResponse> {
   return invoke("ask", { sessionId, message });
+}
+
+// -- Delete --
+
+export async function deleteScreenshotsInRange(
+  startTime: number,
+  endTime: number,
+): Promise<number> {
+  return invoke("delete_screenshots_in_range", { startTime, endTime });
 }
 
 // -- Settings --

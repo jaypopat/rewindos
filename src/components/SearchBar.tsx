@@ -117,7 +117,7 @@ export const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(
                 >
                   All apps
                 </button>
-                {appNames.slice(0, 8).map((name) => (
+                {appNames.slice(0, 12).map((name) => (
                   <button
                     key={name}
                     onClick={() => onAppFilterChange(appFilter === name ? undefined : name)}
@@ -132,9 +132,9 @@ export const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(
                     {name}
                   </button>
                 ))}
-                {appNames.length > 8 && (
+                {appNames.length > 12 && (
                   <select
-                    value={appFilter && !appNames.slice(0, 8).includes(appFilter) ? appFilter : ""}
+                    value={appFilter && !appNames.slice(0, 12).includes(appFilter) ? appFilter : ""}
                     onChange={(e) => onAppFilterChange(e.target.value || undefined)}
                     className="px-2 py-1 text-xs font-mono bg-surface-raised border border-border/50 text-text-muted cursor-pointer focus:outline-none focus:border-accent/50 appearance-none pr-5"
                     style={{
@@ -145,7 +145,7 @@ export const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(
                     }}
                   >
                     <option value="">More...</option>
-                    {appNames.slice(8).map((name) => (
+                    {appNames.slice(12).map((name) => (
                       <option key={name} value={name}>{name}</option>
                     ))}
                   </select>

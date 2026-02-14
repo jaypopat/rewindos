@@ -207,27 +207,7 @@ export function FocusView() {
         </div>
 
         {/* Stats grid */}
-        <div className="w-full max-w-md grid grid-cols-2 gap-3 animate-fade-in" style={{ animationDelay: "100ms" }}>
-          {/* Focus score */}
-          <div className="border border-border/50 bg-surface-raised/30 px-4 py-3">
-            <div className="flex items-center gap-2 mb-2">
-              <div className={cn(
-                "w-1.5 h-1.5",
-                focus.focusScore >= 70 ? "bg-signal-active" : focus.focusScore >= 40 ? "bg-semantic" : "bg-signal-error",
-              )} />
-              <span className="font-mono text-[10px] text-text-muted uppercase tracking-wider">focus score</span>
-            </div>
-            <div className="flex items-baseline gap-1">
-              <span className={cn(
-                "font-display text-3xl",
-                focus.focusScore >= 70 ? "text-signal-active" : focus.focusScore >= 40 ? "text-semantic" : "text-signal-error",
-              )}>
-                {focus.isLoading ? "--" : focus.focusScore}
-              </span>
-              <span className="font-mono text-xs text-text-muted">/100</span>
-            </div>
-          </div>
-
+        <div className="w-full max-w-md grid grid-cols-3 gap-3 animate-fade-in" style={{ animationDelay: "100ms" }}>
           {/* App switches */}
           <div className="border border-border/50 bg-surface-raised/30 px-4 py-3">
             <div className="flex items-center gap-2 mb-2">

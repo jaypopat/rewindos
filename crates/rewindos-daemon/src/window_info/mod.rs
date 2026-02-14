@@ -54,14 +54,16 @@ pub fn is_excluded(
         let excluded_lower = excluded.to_lowercase();
 
         if let Some(ref app) = info.app_name {
-            if app.to_lowercase() == excluded_lower {
+            let app_lower = app.to_lowercase();
+            if app_lower == excluded_lower || app_lower.contains(&excluded_lower) {
                 debug!(app = %app, "excluding by app_name");
                 return true;
             }
         }
 
         if let Some(ref class) = info.window_class {
-            if class.to_lowercase() == excluded_lower {
+            let class_lower = class.to_lowercase();
+            if class_lower == excluded_lower || class_lower.contains(&excluded_lower) {
                 debug!(class = %class, "excluding by window_class");
                 return true;
             }
@@ -148,6 +150,16 @@ mod tests {
         let patterns = vec!["Private Browsing".to_string()];
 
         assert!(!is_excluded(&info, &excluded_apps, &patterns));
+    }
+
+    #[test]
+    fn is_excluded_should_match_substring_app_id() {
+        // Tauri apps report identifier like "com.jay.rewindos" while
+        // excluded_apps may contain just "rewindos"
+        let info = make_info("com.jay.rewindos", "RewindOS", "com.jay.rewindos");
+        let excluded_apps = vec!["rewindos".to_string()];
+
+        assert!(is_excluded(&info, &excluded_apps, &[]));
     }
 
     #[test]

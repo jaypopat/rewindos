@@ -1,4 +1,5 @@
 use crate::error::{CoreError, Result};
+use crate::hasher::PerceptualHasher;
 use crate::schema::{
     ActiveBlock, ActivityResponse, AppUsageStat, BoundingBox, DailyActivity, HourlyActivity,
     NewBoundingBox, NewScreenshot, OcrStatus, Screenshot, SearchFilters, SearchResponse,
@@ -12,6 +13,10 @@ mod embedded {
     use refinery::embed_migrations;
     embed_migrations!("migrations");
 }
+
+/// Default hamming distance threshold for scene deduplication.
+/// Two screenshots with distance ≤ this value are considered the same "scene".
+const DEDUP_THRESHOLD: u32 = 5;
 
 pub struct Database {
     conn: Connection,
@@ -344,10 +349,31 @@ impl Database {
         Ok(names)
     }
 
-    /// Full-text search with filters, pagination, and snippet highlighting.
+    /// Full-text search with filters, pagination, snippet highlighting, and scene dedup.
     pub fn search(&self, filters: &SearchFilters) -> Result<SearchResponse> {
+        self.search_deduped(filters, DEDUP_THRESHOLD)
+    }
+
+    /// Internal: FTS search with configurable dedup threshold (0 = no dedup).
+    fn search_deduped(
+        &self,
+        filters: &SearchFilters,
+        dedup_threshold: u32,
+    ) -> Result<SearchResponse> {
         // Count total matches first
         let total_count = self.search_count(filters)?;
+
+        // Over-fetch to allow dedup to collapse groups and still fill the page
+        let overfetch_limit = if dedup_threshold > 0 {
+            (filters.limit * 3).min(300)
+        } else {
+            filters.limit
+        };
+        let overfetch_offset = if dedup_threshold > 0 {
+            0
+        } else {
+            filters.offset
+        };
 
         let mut stmt = self.conn.prepare(
             "SELECT s.id, s.timestamp, s.app_name, s.window_title,
@@ -370,8 +396,8 @@ impl Database {
                 filters.start_time,
                 filters.end_time,
                 filters.app_name,
-                filters.limit,
-                filters.offset,
+                overfetch_limit,
+                overfetch_offset,
             ],
             |row| {
                 Ok(SearchResult {
@@ -383,6 +409,8 @@ impl Database {
                     file_path: row.get(5)?,
                     matched_text: row.get(6)?,
                     rank: row.get(7)?,
+                    group_count: None,
+                    group_screenshot_ids: None,
                 })
             },
         )?;
@@ -392,10 +420,31 @@ impl Database {
             results.push(row?);
         }
 
+        // Apply scene dedup
+        if dedup_threshold > 0 {
+            results = self.deduplicate_results(results, dedup_threshold)?;
+            let deduped_total = results.len() as i64;
+
+            // Paginate the deduped set
+            let start = filters.offset as usize;
+            let end = (start + filters.limit as usize).min(results.len());
+            let paged = if start < results.len() {
+                results[start..end].to_vec()
+            } else {
+                Vec::new()
+            };
+
+            return Ok(SearchResponse {
+                results: paged,
+                total_count: deduped_total,
+                search_mode: Some("keyword".to_string()),
+            });
+        }
+
         Ok(SearchResponse {
             results,
             total_count,
-            search_mode: None,
+            search_mode: Some("keyword".to_string()),
         })
     }
 
@@ -687,7 +736,7 @@ impl Database {
     }
 
     /// Hybrid search combining FTS5 and vector similarity using
-    /// Reciprocal Rank Fusion (RRF, k=60).
+    /// Reciprocal Rank Fusion (RRF, k=60), with scene deduplication.
     pub fn hybrid_search(
         &self,
         filters: &SearchFilters,
@@ -696,9 +745,9 @@ impl Database {
         use std::collections::HashMap;
 
         const RRF_K: f64 = 60.0;
-        const FUSION_LIMIT: i64 = 100;
+        const FUSION_LIMIT: i64 = 300;
 
-        // Get FTS5 results (up to 100)
+        // Get FTS5 results (no dedup, no pagination — raw for fusion)
         let fts_filters = SearchFilters {
             query: filters.query.clone(),
             start_time: filters.start_time,
@@ -707,29 +756,30 @@ impl Database {
             limit: FUSION_LIMIT,
             offset: 0,
         };
-        let fts_results = self.search(&fts_filters)?;
+        let fts_results = self.search_deduped(&fts_filters, 0)?;
 
-        // If no embedding provided, just return FTS results with pagination
+        // If no embedding provided, dedup the FTS results and paginate
         let query_embedding = match query_embedding {
             Some(e) => e,
             None => {
-                // Apply original pagination
+                let deduped = self.deduplicate_results(fts_results.results, DEDUP_THRESHOLD)?;
+                let deduped_total = deduped.len() as i64;
                 let start = filters.offset as usize;
-                let end = (start + filters.limit as usize).min(fts_results.results.len());
-                let paged = if start < fts_results.results.len() {
-                    fts_results.results[start..end].to_vec()
+                let end = (start + filters.limit as usize).min(deduped.len());
+                let paged = if start < deduped.len() {
+                    deduped[start..end].to_vec()
                 } else {
                     Vec::new()
                 };
                 return Ok(SearchResponse {
                     results: paged,
-                    total_count: fts_results.total_count,
+                    total_count: deduped_total,
                     search_mode: Some("keyword".to_string()),
                 });
             }
         };
 
-        // Get vector results (up to 100)
+        // Get vector results (up to 300)
         let vec_results = self.vector_search(query_embedding, FUSION_LIMIT as usize)?;
 
         // RRF fusion
@@ -746,32 +796,20 @@ impl Database {
         let mut ranked: Vec<(i64, f64)> = scores.into_iter().collect();
         ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
-        let total_count = ranked.len() as i64;
-
-        // Apply pagination
-        let start = filters.offset as usize;
-        let end = (start + filters.limit as usize).min(ranked.len());
-        let page_ids: Vec<i64> = if start < ranked.len() {
-            ranked[start..end].iter().map(|(id, _)| *id).collect()
-        } else {
-            Vec::new()
-        };
-
         // Build a map from FTS results for quick lookup
         let fts_map: HashMap<i64, &SearchResult> =
             fts_results.results.iter().map(|r| (r.id, r)).collect();
 
-        // Fetch full data for each result
-        let mut results = Vec::new();
-        for id in &page_ids {
+        // Fetch full data for each ranked result
+        let mut all_results = Vec::new();
+        for (id, _score) in &ranked {
             if let Some(fts_result) = fts_map.get(id) {
-                results.push((*fts_result).clone());
+                all_results.push((*fts_result).clone());
             } else {
                 // This result came from vector search only — construct a SearchResult
                 if let Some(ss) = self.get_screenshot(*id)? {
                     let matched_text = self.get_ocr_text(*id)?.unwrap_or_default();
                     let snippet = if matched_text.len() > 200 {
-                        // Find a valid char boundary at or before byte 200
                         let end = matched_text
                             .char_indices()
                             .map(|(i, _)| i)
@@ -782,7 +820,7 @@ impl Database {
                     } else {
                         matched_text
                     };
-                    results.push(SearchResult {
+                    all_results.push(SearchResult {
                         id: ss.id,
                         timestamp: ss.timestamp,
                         app_name: ss.app_name,
@@ -791,14 +829,29 @@ impl Database {
                         file_path: ss.file_path,
                         matched_text: snippet,
                         rank: 0.0,
+                        group_count: None,
+                        group_screenshot_ids: None,
                     });
                 }
             }
         }
 
+        // Apply scene dedup
+        let deduped = self.deduplicate_results(all_results, DEDUP_THRESHOLD)?;
+        let deduped_total = deduped.len() as i64;
+
+        // Paginate
+        let start = filters.offset as usize;
+        let end = (start + filters.limit as usize).min(deduped.len());
+        let paged = if start < deduped.len() {
+            deduped[start..end].to_vec()
+        } else {
+            Vec::new()
+        };
+
         Ok(SearchResponse {
-            results,
-            total_count,
+            results: paged,
+            total_count: deduped_total,
             search_mode: Some("hybrid".to_string()),
         })
     }
@@ -907,6 +960,101 @@ impl Database {
         Ok(())
     }
 
+    /// Batch fetch perceptual hashes for a set of screenshot IDs.
+    pub fn get_hashes_for_ids(&self, ids: &[i64]) -> Result<Vec<(i64, Vec<u8>)>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Build a parameterized IN clause
+        let placeholders: Vec<String> = (1..=ids.len()).map(|i| format!("?{i}")).collect();
+        let sql = format!(
+            "SELECT id, perceptual_hash FROM screenshots WHERE id IN ({})",
+            placeholders.join(", ")
+        );
+
+        let mut stmt = self.conn.prepare(&sql)?;
+        let params: Vec<&dyn rusqlite::types::ToSql> = ids
+            .iter()
+            .map(|id| id as &dyn rusqlite::types::ToSql)
+            .collect();
+
+        let rows = stmt.query_map(params.as_slice(), |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, Vec<u8>>(1)?))
+        })?;
+
+        let mut results = Vec::new();
+        for row in rows {
+            results.push(row?);
+        }
+        Ok(results)
+    }
+
+    /// Deduplicate search results by grouping visually similar screenshots.
+    ///
+    /// Uses greedy grouping: iterate results in rank order, assign each to the
+    /// first existing group whose representative has hamming distance ≤ threshold,
+    /// or start a new group. The representative (best-ranked) carries
+    /// `group_count` and `group_screenshot_ids`.
+    pub fn deduplicate_results(
+        &self,
+        results: Vec<SearchResult>,
+        threshold: u32,
+    ) -> Result<Vec<SearchResult>> {
+        if results.is_empty() || threshold == 0 {
+            return Ok(results);
+        }
+
+        // Fetch hashes for all result IDs
+        let ids: Vec<i64> = results.iter().map(|r| r.id).collect();
+        let hash_pairs = self.get_hashes_for_ids(&ids)?;
+        let hash_map: std::collections::HashMap<i64, Vec<u8>> = hash_pairs.into_iter().collect();
+
+        // Greedy grouping: groups[i] = (representative_index, member_ids)
+        let mut groups: Vec<(usize, Vec<i64>)> = Vec::new();
+
+        for (i, result) in results.iter().enumerate() {
+            let hash_a = match hash_map.get(&result.id) {
+                Some(h) => h,
+                None => {
+                    // No hash found — treat as its own group
+                    groups.push((i, vec![result.id]));
+                    continue;
+                }
+            };
+
+            let mut assigned = false;
+            for group in &mut groups {
+                let rep_id = results[group.0].id;
+                if let Some(hash_b) = hash_map.get(&rep_id) {
+                    if PerceptualHasher::hamming_distance(hash_a, hash_b) <= threshold {
+                        group.1.push(result.id);
+                        assigned = true;
+                        break;
+                    }
+                }
+            }
+
+            if !assigned {
+                groups.push((i, vec![result.id]));
+            }
+        }
+
+        // Build deduplicated results
+        let mut deduped = Vec::with_capacity(groups.len());
+        for (rep_idx, member_ids) in groups {
+            let mut result = results[rep_idx].clone();
+            let count = member_ids.len() as i64;
+            if count > 1 {
+                result.group_count = Some(count);
+                result.group_screenshot_ids = Some(member_ids);
+            }
+            deduped.push(result);
+        }
+
+        Ok(deduped)
+    }
+
     fn search_count(&self, filters: &SearchFilters) -> Result<i64> {
         let mut stmt = self.conn.prepare(
             "SELECT COUNT(*)
@@ -942,6 +1090,11 @@ mod tests {
     }
 
     fn make_screenshot(ts: i64) -> NewScreenshot {
+        // Derive a unique hash from timestamp so dedup doesn't group unrelated test screenshots.
+        // Multiply by a large prime to spread bits and ensure adjacent timestamps produce
+        // very different hashes (hamming distance > 5).
+        let scrambled = ts.wrapping_mul(6364136223846793005);
+        let ts_bytes = scrambled.to_le_bytes();
         NewScreenshot {
             timestamp: ts,
             timestamp_ms: ts * 1000,
@@ -953,7 +1106,7 @@ mod tests {
             width: 1920,
             height: 1080,
             file_size_bytes: 75000,
-            perceptual_hash: vec![0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08],
+            perceptual_hash: ts_bytes.to_vec(),
         }
     }
 
@@ -983,7 +1136,10 @@ mod tests {
         assert_eq!(got.ocr_status, OcrStatus::Pending);
         assert_eq!(
             got.perceptual_hash,
-            vec![0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08]
+            1706137200_i64
+                .wrapping_mul(6364136223846793005)
+                .to_le_bytes()
+                .to_vec()
         );
     }
 
@@ -1407,5 +1563,84 @@ mod tests {
             })
             .unwrap();
         assert_eq!(bbox_count, 0);
+    }
+
+    #[test]
+    fn test_deduplicate_results_groups_identical_hashes() {
+        let db = make_test_db();
+
+        // Insert 3 screenshots with the same hash
+        let hash = vec![0xAA; 8];
+        for i in 0..3 {
+            let mut ss = make_screenshot(1000 + i);
+            ss.perceptual_hash = hash.clone();
+            let id = db.insert_screenshot(&ss).unwrap();
+            db.insert_ocr_text(id, &format!("test text {i}"), 2)
+                .unwrap();
+        }
+
+        let filters = SearchFilters {
+            query: "test text".to_string(),
+            start_time: None,
+            end_time: None,
+            app_name: None,
+            limit: 10,
+            offset: 0,
+        };
+
+        // Search without dedup
+        let raw = db.search_deduped(&filters, 0).unwrap();
+        assert_eq!(raw.results.len(), 3);
+
+        // Search with dedup
+        let deduped = db.search(&filters).unwrap();
+        assert_eq!(deduped.results.len(), 1);
+        assert_eq!(deduped.results[0].group_count, Some(3));
+        assert_eq!(
+            deduped.results[0]
+                .group_screenshot_ids
+                .as_ref()
+                .unwrap()
+                .len(),
+            3
+        );
+    }
+
+    #[test]
+    fn test_deduplicate_results_keeps_distinct_hashes() {
+        let db = make_test_db();
+
+        // Insert 3 screenshots with very different hashes
+        let hashes: Vec<Vec<u8>> = vec![vec![0x00; 8], vec![0xFF; 8], vec![0x55; 8]];
+        for (i, hash) in hashes.iter().enumerate() {
+            let mut ss = make_screenshot(1000 + i as i64);
+            ss.perceptual_hash = hash.clone();
+            let id = db.insert_screenshot(&ss).unwrap();
+            db.insert_ocr_text(id, &format!("distinct content {i}"), 2)
+                .unwrap();
+        }
+
+        let filters = SearchFilters {
+            query: "distinct content".to_string(),
+            start_time: None,
+            end_time: None,
+            app_name: None,
+            limit: 10,
+            offset: 0,
+        };
+
+        let deduped = db.search(&filters).unwrap();
+        assert_eq!(deduped.results.len(), 3);
+        // None of them should have group_count set
+        for r in &deduped.results {
+            assert!(r.group_count.is_none());
+        }
+    }
+
+    #[test]
+    fn test_deduplicate_results_empty() {
+        let db = make_test_db();
+        let results = db.deduplicate_results(Vec::new(), 5).unwrap();
+        assert!(results.is_empty());
     }
 }

@@ -18,13 +18,18 @@ export function SearchResultCard({ result, index, onClick }: SearchResultCardPro
     >
       {/* Thumbnail */}
       {result.thumbnail_path && (
-        <div className="shrink-0 w-28 h-[72px] overflow-hidden bg-surface-overlay">
+        <div className="shrink-0 w-28 h-[72px] overflow-hidden bg-surface-overlay relative">
           <img
             src={getImageUrl(result.thumbnail_path)}
             alt=""
             className="w-full h-full object-cover"
             loading="lazy"
           />
+          {result.group_count && result.group_count > 1 && (
+            <span className="absolute top-1 right-1 px-1 py-0.5 bg-surface/80 backdrop-blur-sm border border-border/40 text-[9px] font-mono text-text-secondary leading-none">
+              +{result.group_count - 1}
+            </span>
+          )}
         </div>
       )}
 

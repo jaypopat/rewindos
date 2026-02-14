@@ -78,6 +78,10 @@ pub struct SearchResult {
     pub file_path: String,
     pub matched_text: String,
     pub rank: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub group_count: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub group_screenshot_ids: Option<Vec<i64>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
