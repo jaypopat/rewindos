@@ -234,3 +234,17 @@ pub struct EmbedRequest {
     pub screenshot_id: i64,
     pub text: String,
 }
+
+// -- Daily summary cache --
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CachedDailySummary {
+    pub date_key: String,
+    pub summary_text: Option<String>,
+    pub app_breakdown: String, // JSON array of {app_name, minutes, session_count}
+    pub total_sessions: i64,
+    pub time_range: String,
+    pub model_name: Option<String>,
+    pub generated_at: String,
+    pub screenshot_count: i64,
+}

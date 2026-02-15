@@ -8,6 +8,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { RefreshCw } from "lucide-react";
 
 export function DaemonPanel() {
   const queryClient = useQueryClient();
@@ -51,9 +52,7 @@ export function DaemonPanel() {
             >
               <span className="h-2 w-2 bg-signal-error" />
               daemon offline
-              <svg className="size-3 text-text-muted" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182" />
-              </svg>
+              <RefreshCw className="size-3 text-text-muted" strokeWidth={2} />
             </button>
           </TooltipTrigger>
           <TooltipContent>

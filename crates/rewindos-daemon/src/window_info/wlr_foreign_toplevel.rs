@@ -214,6 +214,7 @@ fn run_toplevel_loop(
 
 // -- Probe-only state (used in probe()) --
 
+#[allow(dead_code)]
 struct ProbeState {
     found: bool,
 }

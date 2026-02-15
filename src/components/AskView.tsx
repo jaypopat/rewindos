@@ -4,6 +4,7 @@ import { useAskChat } from "@/context/AskContext";
 import { AskEmptyState } from "./AskEmptyState";
 import { ChatMessage } from "./ChatMessage";
 import { cn } from "@/lib/utils";
+import { Plus } from "lucide-react";
 
 interface AskViewProps {
   onSelectScreenshot: (id: number) => void;
@@ -74,9 +75,7 @@ export function AskView({ onSelectScreenshot }: AskViewProps) {
             onClick={handleNewSession}
             className="flex items-center gap-1.5 px-2 py-1 font-mono text-[11px] text-text-muted hover:text-text-secondary border border-border/50 hover:border-border transition-all"
           >
-            <svg className="size-3" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-            </svg>
+            <Plus className="size-3" strokeWidth={2} />
             new chat
           </button>
         )}

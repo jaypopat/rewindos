@@ -34,12 +34,20 @@ pub enum IntentCategory {
     General,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum QueryConfidence {
+    High,
+    Medium,
+    Low,
+}
+
 #[derive(Debug, Clone)]
 pub struct QueryIntent {
     pub category: IntentCategory,
     pub search_terms: Vec<String>,
     pub time_range: Option<(i64, i64)>,
     pub app_filter: Option<String>,
+    pub confidence: QueryConfidence,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -55,17 +63,25 @@ pub struct ScreenshotReference {
 
 pub const SYSTEM_PROMPT: &str = r#"You are RewindOS, a local AI assistant with access to the user's screen capture history. You answer questions about what the user has seen, done, and worked on — based on OCR text extracted from periodic screenshots.
 
-Rules:
-- Answer the user's question directly. Analyze the provided context to give a useful, specific answer.
-- NEVER just rephrase or repeat the user's question back. Always provide concrete information from the context.
-- Ignore any screenshots that show the RewindOS app itself (e.g. screenshots containing "RewindOS", "ask about your screen history", or this chat interface). Those are self-referential and not useful.
+## Core Rules
+- Answer the user's question directly. Start with the answer, not preamble.
 - When referencing a specific screenshot, use [REF:ID] format (e.g. [REF:42]) so the UI can make it clickable.
-- Be specific: mention timestamps, window titles, and app names when available.
-- For "what did I work on" or productivity questions: list the actual apps and tasks visible in the context with time estimates. Group by activity, not by individual screenshot.
+- Be specific: mention timestamps, window titles, and app names from the context.
 - Use markdown for formatting (bold, lists, code blocks).
-- Keep answers concise and direct. No filler.
-- If the context has no relevant data, say "I don't have enough screen history for that time period" rather than guessing.
-- Never fabricate information not present in the context."#;
+- Never fabricate information not present in the context.
+- Ignore screenshots showing the RewindOS app itself.
+- If the context has no relevant data, say "I don't have enough screen history for that time period."
+
+## Response Strategy by Query Type
+- **Productivity** ("what did I work on", "how long"): Group activities by task/project, not individual screenshots. Estimate time spent per task. Highlight the most significant work.
+- **Recall** ("last time I saw", "find"): Lead with the best matching screenshot. Quote the relevant OCR text. Present matches chronologically.
+- **Time-based** ("what happened yesterday"): Describe the activity flow with transitions between apps/tasks. Note significant gaps in activity.
+- **App-specific** ("what was I doing in VS Code"): Focus on what was done in the app — files edited, pages visited, messages sent. Summarize by activity, not timestamp.
+
+## Format
+- Keep answers under 300 words. Be conversational but precise.
+- No filler phrases like "Based on the provided context" or "Let me analyze".
+- NEVER just rephrase or repeat the user's question back."#;
 
 // -- Ollama client --
 
@@ -78,9 +94,10 @@ pub struct OllamaChatClient {
 
 impl OllamaChatClient {
     pub fn new(config: &ChatConfig) -> Self {
+        // Only set connect_timeout — no global timeout so streaming responses
+        // aren't killed when generation takes longer than a fixed duration.
         let client = reqwest::Client::builder()
-            .connect_timeout(std::time::Duration::from_secs(10))
-            .timeout(std::time::Duration::from_secs(120))
+            .connect_timeout(std::time::Duration::from_secs(30))
             .build()
             .unwrap_or_default();
         Self {
@@ -192,12 +209,15 @@ Output ONLY valid JSON (no markdown fences, no explanation) with these fields:
 - "search_terms": array of distinctive keywords to search in OCR text. Focus on specific nouns, proper nouns, and technical terms that would appear on screen. Omit common verbs like "played", "used", "opened", "visited". Example: "last time I played chess" → ["chess"]
 - "time_range_seconds": how far back to search in seconds, or null if not specified. Common values: 3600 (1 hour), 86400 (1 day/today/yesterday), 604800 (1 week), 2592000 (30 days). For "last time" / "when did" / "when was" queries use 2592000.
 - "app_filter": lowercase process name if query targets a specific app, or null. Known mappings: "vs code"/"vscode" → "code", "chrome" → "google-chrome", "brave" → "brave-browser". Others use lowercase name directly (firefox, konsole, kitty, slack, discord, obsidian, spotify).
+- "confidence": how confident you are in the search parameters: "high" (specific query with clear terms), "medium" (reasonable interpretation), "low" (vague or ambiguous query)
 
 Examples:
-User: "last time I played chess?" → {"category":"recall","search_terms":["chess"],"time_range_seconds":2592000,"app_filter":null}
-User: "what was I doing yesterday?" → {"category":"time_based","search_terms":[],"time_range_seconds":86400,"app_filter":null}
-User: "errors in vs code today" → {"category":"app_specific","search_terms":["error"],"time_range_seconds":86400,"app_filter":"code"}
-User: "how long on firefox this week?" → {"category":"productivity","search_terms":[],"time_range_seconds":604800,"app_filter":"firefox"}"#;
+User: "last time I played chess?" → {"category":"recall","search_terms":["chess"],"time_range_seconds":2592000,"app_filter":null,"confidence":"high"}
+User: "what was I doing yesterday?" → {"category":"time_based","search_terms":[],"time_range_seconds":86400,"app_filter":null,"confidence":"high"}
+User: "errors in vs code today" → {"category":"app_specific","search_terms":["error"],"time_range_seconds":86400,"app_filter":"code","confidence":"high"}
+User: "how long on firefox this week?" → {"category":"productivity","search_terms":[],"time_range_seconds":604800,"app_filter":"firefox","confidence":"high"}
+User: "that thing I was looking at" → {"category":"recall","search_terms":[],"time_range_seconds":86400,"app_filter":null,"confidence":"low"}
+User: "something about databases" → {"category":"recall","search_terms":["database","sql","postgres","mysql"],"time_range_seconds":2592000,"app_filter":null,"confidence":"medium"}"#;
 
 impl OllamaChatClient {
     /// Use the LLM to analyze a user query and extract structured search parameters.
@@ -210,7 +230,7 @@ impl OllamaChatClient {
             "stream": false,
             "options": {
                 "temperature": 0.0,
-                "num_predict": 256,
+                "num_predict": 300,
             }
         });
 
@@ -218,6 +238,7 @@ impl OllamaChatClient {
         let response = self
             .client
             .post(&url)
+            .timeout(std::time::Duration::from_secs(120))
             .json(&body)
             .send()
             .await
@@ -284,11 +305,18 @@ impl OllamaChatClient {
             .filter(|s| !s.is_empty())
             .map(String::from);
 
+        let confidence = match v["confidence"].as_str().unwrap_or("medium") {
+            "high" => QueryConfidence::High,
+            "low" => QueryConfidence::Low,
+            _ => QueryConfidence::Medium,
+        };
+
         Ok(QueryIntent {
             category,
             search_terms,
             time_range,
             app_filter,
+            confidence,
         })
     }
 }
@@ -321,6 +349,7 @@ impl IntentClassifier {
             search_terms,
             time_range,
             app_filter,
+            confidence: QueryConfidence::Medium,
         }
     }
 
@@ -525,6 +554,23 @@ impl IntentClassifier {
 
 // -- Context assembler --
 
+/// Simple content hash for deduplication. Hashes the first 30 whitespace-normalized words.
+fn simple_content_hash(text: &str) -> u64 {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    let normalized: String = text
+        .split_whitespace()
+        .take(30)
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase();
+
+    let mut hasher = DefaultHasher::new();
+    normalized.hash(&mut hasher);
+    hasher.finish()
+}
+
 pub struct ContextAssembler;
 
 impl ContextAssembler {
@@ -533,10 +579,23 @@ impl ContextAssembler {
         results: &[(i64, i64, Option<String>, Option<String>, String, String)],
         // (id, timestamp, app_name, window_title, file_path, ocr_text)
     ) -> (String, Vec<ScreenshotReference>) {
-        let mut context = String::from("## Relevant Screenshots\n\n");
+        let mut seen_hashes = std::collections::HashSet::new();
+        let mut deduped_results = Vec::new();
+
+        for entry in results {
+            let hash = simple_content_hash(&entry.5);
+            if seen_hashes.insert(hash) {
+                deduped_results.push(entry);
+            }
+        }
+
+        let mut context = format!(
+            "## Relevant Screenshots (showing {} results)\n\n",
+            deduped_results.len()
+        );
         let mut refs = Vec::new();
 
-        for (id, timestamp, app_name, window_title, file_path, ocr_text) in results {
+        for (id, timestamp, app_name, window_title, file_path, ocr_text) in deduped_results {
             let time_str = chrono::DateTime::from_timestamp(*timestamp, 0)
                 .map(|dt| {
                     dt.with_timezone(&chrono::Local)
@@ -547,7 +606,7 @@ impl ContextAssembler {
 
             let app = app_name.as_deref().unwrap_or("Unknown");
             let title = window_title.as_deref().unwrap_or("Untitled");
-            let snippet: String = ocr_text.chars().take(500).collect();
+            let snippet: String = ocr_text.chars().take(1000).collect();
 
             context.push_str(&format!(
                 "### [Screenshot ID:{id}] — {time_str}\n\
@@ -567,11 +626,84 @@ impl ContextAssembler {
         (context, refs)
     }
 
+    /// Build context with token budgeting from search results.
+    /// Dynamically sizes OCR snippets to fit within `max_context_tokens`.
+    pub fn from_search_results_budgeted(
+        results: &[(i64, i64, Option<String>, Option<String>, String, String)],
+        max_context_tokens: usize,
+    ) -> (String, Vec<ScreenshotReference>) {
+        let mut seen_hashes = std::collections::HashSet::new();
+        let mut deduped_results = Vec::new();
+
+        for entry in results {
+            let hash = simple_content_hash(&entry.5);
+            if seen_hashes.insert(hash) {
+                deduped_results.push(entry);
+            }
+        }
+
+        let header = format!(
+            "## Relevant Screenshots (showing {} results)\n\n",
+            deduped_results.len()
+        );
+        let mut context = header.clone();
+        let mut refs = Vec::new();
+        // Estimate tokens as chars / 4
+        let mut budget_remaining = max_context_tokens.saturating_sub(header.len() / 4);
+
+        for (id, timestamp, app_name, window_title, file_path, ocr_text) in deduped_results {
+            if budget_remaining < 100 {
+                break;
+            }
+
+            let time_str = chrono::DateTime::from_timestamp(*timestamp, 0)
+                .map(|dt| {
+                    dt.with_timezone(&chrono::Local)
+                        .format("%Y-%m-%d %H:%M:%S")
+                        .to_string()
+                })
+                .unwrap_or_else(|| timestamp.to_string());
+
+            let app = app_name.as_deref().unwrap_or("Unknown");
+            let title = window_title.as_deref().unwrap_or("Untitled");
+
+            // Dynamic snippet size: use remaining budget, capped at 1000 chars
+            let max_snippet_chars = (budget_remaining * 4).min(1000);
+            let snippet: String = ocr_text.chars().take(max_snippet_chars).collect();
+
+            let entry_text = format!(
+                "### [Screenshot ID:{id}] — {time_str}\n\
+                 App: {app} | Window: {title}\n\
+                 Content: {snippet}\n\n"
+            );
+
+            let entry_tokens = entry_text.len() / 4;
+            budget_remaining = budget_remaining.saturating_sub(entry_tokens);
+
+            context.push_str(&entry_text);
+
+            refs.push(ScreenshotReference {
+                id: *id,
+                timestamp: *timestamp,
+                app_name: app_name.clone(),
+                window_title: window_title.clone(),
+                file_path: file_path.clone(),
+            });
+        }
+
+        (context, refs)
+    }
+
     /// Build context from OCR sessions (for time-based queries).
     pub fn from_sessions(
         sessions: &[(Option<String>, Option<String>, i64, String)],
     ) -> (String, Vec<ScreenshotReference>) {
-        let mut context = String::from("## Activity Timeline\n\n");
+        let now_str = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+        let mut context = format!(
+            "## Activity Timeline (current time: {}, {} entries)\n\n",
+            now_str,
+            sessions.len()
+        );
         let refs = Vec::new();
 
         let mut current_app: Option<&str> = None;
@@ -602,7 +734,7 @@ impl ContextAssembler {
                 current_app = Some(app);
             }
 
-            let snippet: String = ocr_text.chars().take(150).collect();
+            let snippet: String = ocr_text.chars().take(400).collect();
             if !snippet.trim().is_empty() {
                 group_content.push(format!("[{time_str}] {title}: {snippet}"));
             }
@@ -623,17 +755,38 @@ impl ContextAssembler {
 
     /// Build context from OCR sessions that include screenshot IDs and file paths.
     /// Produces `ScreenshotReference` entries so the LLM can output `[REF:ID]` tags.
+    /// Caps references at `max_refs` (default 20) and applies token budgeting.
     pub fn from_sessions_with_refs(
         sessions: &[(i64, Option<String>, Option<String>, i64, String, String)],
         // (id, app_name, window_title, timestamp, file_path, ocr_text)
     ) -> (String, Vec<ScreenshotReference>) {
-        let mut context = String::from("## Activity Timeline\n\n");
+        Self::from_sessions_with_refs_budgeted(sessions, 4096, 20)
+    }
+
+    /// Token-budgeted variant of `from_sessions_with_refs`.
+    pub fn from_sessions_with_refs_budgeted(
+        sessions: &[(i64, Option<String>, Option<String>, i64, String, String)],
+        max_context_tokens: usize,
+        max_refs: usize,
+    ) -> (String, Vec<ScreenshotReference>) {
+        let now_str = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+        let header = format!(
+            "## Activity Timeline (current time: {}, {} entries)\n\n",
+            now_str,
+            sessions.len()
+        );
+        let mut context = header.clone();
         let mut refs = Vec::new();
+        let mut budget_remaining = max_context_tokens.saturating_sub(header.len() / 4);
 
         let mut current_app: Option<&str> = None;
         let mut group_content = Vec::new();
 
         for (id, app_name, window_title, ts, file_path, ocr_text) in sessions {
+            if budget_remaining < 50 {
+                break;
+            }
+
             let app = app_name.as_deref().unwrap_or("Unknown");
             let title = window_title.as_deref().unwrap_or("");
             let time_str = chrono::DateTime::from_timestamp(*ts, 0)
@@ -647,28 +800,37 @@ impl ContextAssembler {
             if current_app != Some(app) {
                 if !group_content.is_empty() {
                     let prev_app = current_app.unwrap_or("Unknown");
-                    context.push_str(&format!("**{prev_app}**:\n"));
-                    for line in &group_content {
-                        context.push_str(&format!("  - {line}\n"));
-                    }
+                    let group_text = format!("**{prev_app}**:\n");
+                    let lines_text: String = group_content
+                        .iter()
+                        .map(|line| format!("  - {line}\n"))
+                        .collect();
+                    let block_tokens = (group_text.len() + lines_text.len()) / 4;
+                    budget_remaining = budget_remaining.saturating_sub(block_tokens);
+                    context.push_str(&group_text);
+                    context.push_str(&lines_text);
                     context.push('\n');
                     group_content.clear();
                 }
                 current_app = Some(app);
             }
 
-            let snippet: String = ocr_text.chars().take(150).collect();
+            // Dynamic snippet size based on remaining budget, capped at 400
+            let max_snippet = (budget_remaining * 4 / 4).min(400); // conservative
+            let snippet: String = ocr_text.chars().take(max_snippet).collect();
             if !snippet.trim().is_empty() {
                 group_content.push(format!("[{time_str}] [REF:{id}] {title}: {snippet}"));
             }
 
-            refs.push(ScreenshotReference {
-                id: *id,
-                timestamp: *ts,
-                app_name: app_name.clone(),
-                window_title: window_title.clone(),
-                file_path: file_path.clone(),
-            });
+            if refs.len() < max_refs {
+                refs.push(ScreenshotReference {
+                    id: *id,
+                    timestamp: *ts,
+                    app_name: app_name.clone(),
+                    window_title: window_title.clone(),
+                    file_path: file_path.clone(),
+                });
+            }
         }
 
         // Flush last group
@@ -692,6 +854,7 @@ impl ContextAssembler {
         // (app_name, minutes, session_count)
         sessions: &[(i64, Option<String>, Option<String>, i64, String, String)],
         // (id, app_name, window_title, timestamp, file_path, ocr_text)
+        max_context_tokens: usize,
     ) -> (String, Vec<ScreenshotReference>) {
         let mut context = String::from("## App Usage Breakdown\n\n");
 
@@ -704,8 +867,12 @@ impl ContextAssembler {
         let total: f64 = stats.iter().map(|(_, m, _)| m).sum();
         context.push_str(&format!("\n**Total tracked time**: {total:.0} minutes\n\n"));
 
-        // Add session detail for context (with screenshot references)
-        let (session_context, refs) = Self::from_sessions_with_refs(sessions);
+        // Reserve remaining budget for session detail
+        let used_tokens = context.len() / 4;
+        let remaining_budget = max_context_tokens.saturating_sub(used_tokens);
+
+        let (session_context, refs) =
+            Self::from_sessions_with_refs_budgeted(sessions, remaining_budget, 20);
         context.push_str(&session_context);
 
         (context, refs)

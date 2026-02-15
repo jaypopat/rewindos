@@ -16,6 +16,7 @@ pub struct WindowInfo {
 #[derive(Debug, thiserror::Error)]
 pub enum WindowInfoError {
     #[error("D-Bus error: {0}")]
+    #[allow(dead_code)]
     DBus(String),
 
     #[error("provider error: {0}")]
@@ -26,9 +27,11 @@ pub enum WindowInfoError {
 #[async_trait]
 pub trait WindowInfoProvider: Send + Sync + 'static {
     /// Human-readable name for logging.
+    #[allow(dead_code)]
     fn name(&self) -> &'static str;
 
     /// Check if this provider is available on the current system.
+    #[allow(dead_code)]
     async fn probe(&self) -> bool;
 
     /// Start tracking the active window.

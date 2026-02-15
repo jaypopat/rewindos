@@ -20,6 +20,7 @@ import { HourlyActivityChart } from "./charts/HourlyActivityChart";
 import { AppDonutChart } from "./charts/AppDonutChart";
 import { buildCategoryRules, categorizeApp, getCategoryColor, type ActivityCategory } from "@/lib/app-categories";
 import { parseWindowTitle } from "@/lib/window-title";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 
 interface DashboardViewProps {
   onSelectScreenshot: (id: number, siblingIds?: number[]) => void;
@@ -254,9 +255,7 @@ function CapturesCarousel({
             className="p-1 rounded text-text-muted hover:text-text-primary disabled:opacity-20 disabled:cursor-default transition-colors"
             aria-label="Scroll left"
           >
-            <svg className="size-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
-            </svg>
+            <ChevronLeft className="size-4" strokeWidth={2} />
           </button>
           <button
             onClick={() => scroll(1)}
@@ -264,9 +263,7 @@ function CapturesCarousel({
             className="p-1 rounded text-text-muted hover:text-text-primary disabled:opacity-20 disabled:cursor-default transition-colors"
             aria-label="Scroll right"
           >
-            <svg className="size-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-            </svg>
+            <ChevronRight className="size-4" strokeWidth={2} />
           </button>
           <span className="text-[10px] text-text-muted font-mono tabular-nums">
             {captures.length} captures
@@ -338,8 +335,8 @@ export function DashboardView({ onSelectScreenshot }: DashboardViewProps) {
   // ---- Data fetching ----
 
   const { data: todayActivity } = useQuery({
-    queryKey: queryKeys.activity(todayStart),
-    queryFn: () => getActivity(todayStart),
+    queryKey: queryKeys.activity(todayStart, todayEnd),
+    queryFn: () => getActivity(todayStart, todayEnd),
     staleTime: 30_000,
   });
 
@@ -435,7 +432,7 @@ export function DashboardView({ onSelectScreenshot }: DashboardViewProps) {
       </h2>
 
       {/* Stats row */}
-      <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <StatCard
           label="Screen Time"
           value={screenshotsLoading ? "\u2014" : formatDuration(totalActiveTime)}
@@ -470,10 +467,10 @@ export function DashboardView({ onSelectScreenshot }: DashboardViewProps) {
 
       {/* Two-column: Top Tasks + Hourly Activity */}
       {(topTasks.length > 0 || (todayActivity && todayActivity.total_screenshots > 0)) && (
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {/* Top Tasks */}
           {topTasks.length > 0 && (
-            <section className="flex flex-col">
+            <section className="flex flex-col min-h-0">
               <h2 className="font-mono text-[10px] text-text-muted uppercase tracking-[0.2em] mb-2">
                 Top Tasks
               </h2>
@@ -513,25 +510,24 @@ export function DashboardView({ onSelectScreenshot }: DashboardViewProps) {
 
           {/* Hourly Activity */}
           {todayActivity && todayActivity.total_screenshots > 0 && (
-            <section className="flex flex-col">
+            <section className="flex flex-col min-h-0">
               <h2 className="font-mono text-[10px] text-text-muted uppercase tracking-[0.2em] mb-2">
                 Hourly Activity
               </h2>
-              <div className="border border-border/50 p-3 flex-1 flex items-end">
-                <HourlyActivityChart data={todayActivity.hourly_activity} height={160} />
+              <div className="border border-border/50 p-3 flex-1 flex items-end min-h-[200px]">
+                <HourlyActivityChart data={todayActivity.hourly_activity} />
               </div>
             </section>
           )}
         </div>
       )}
 
-      {/* Two-column: Categories + Focus / App Usage */}
+      {/* Two-column: Categories + App Usage */}
       {(categoryEntries.length > 0 || todayActivity) && (
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-          {/* Categories + Focus Stats */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {/* Categories */}
           {categoryEntries.length > 0 && totalCategoryMins > 0 && (
             <section className="border border-border/50 px-4 py-3 flex flex-col gap-4">
-              {/* Category bar + legend */}
               <div>
                 <div className="flex items-center gap-4 mb-3">
                   <h2 className="font-mono text-[10px] text-text-muted uppercase tracking-[0.2em] shrink-0">
@@ -570,7 +566,6 @@ export function DashboardView({ onSelectScreenshot }: DashboardViewProps) {
                   })}
                 </div>
               </div>
-
             </section>
           )}
 

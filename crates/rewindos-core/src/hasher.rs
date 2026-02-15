@@ -1,8 +1,7 @@
 use std::fs;
 use std::path::Path;
 
-use image::codecs::webp::WebPEncoder;
-use image::{DynamicImage, ImageError, RgbaImage};
+use image::{DynamicImage, RgbaImage};
 use image_hasher::{HashAlg, HasherConfig, ImageHash};
 
 use crate::error::{CoreError, Result};
@@ -62,24 +61,28 @@ impl Default for PerceptualHasher {
     }
 }
 
-/// Save an image as lossless WebP to the given path.
+/// Save an image as lossy WebP to the given path.
 ///
-/// `_quality` is accepted for API compatibility but currently unused
-/// because `image` 0.25 only supports lossless WebP encoding.
-pub fn save_webp(image: &DynamicImage, path: &Path, _quality: u8) -> Result<u64> {
+/// `quality` controls lossy compression (0-100, higher = better quality).
+pub fn save_webp(image: &DynamicImage, path: &Path, quality: u8) -> Result<u64> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
+    let encoder =
+        webp::Encoder::from_image(image).map_err(|e| CoreError::Io(std::io::Error::other(e)))?;
+    let webp_data = encoder.encode(quality as f32);
+    fs::write(path, &*webp_data)?;
+    Ok(webp_data.len() as u64)
+}
 
-    let file = fs::File::create(path)?;
-    let encoder = WebPEncoder::new_lossless(file);
-
-    image
-        .write_with_encoder(encoder)
-        .map_err(|e: ImageError| CoreError::Io(std::io::Error::other(e)))?;
-
-    let metadata = fs::metadata(path)?;
-    Ok(metadata.len())
+/// Downscale an image for storage, capping width at `max_width` while preserving aspect ratio.
+pub fn downscale_for_storage(image: &DynamicImage, max_width: u32) -> DynamicImage {
+    let (w, h) = (image.width(), image.height());
+    if w <= max_width {
+        return image.clone();
+    }
+    let new_height = (h as f64 * max_width as f64 / w as f64) as u32;
+    image.resize(max_width, new_height, image::imageops::FilterType::Lanczos3)
 }
 
 /// Create a thumbnail from an image, scaled to `max_width` preserving aspect ratio.

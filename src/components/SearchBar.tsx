@@ -4,6 +4,7 @@ import { getAppNames } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
 import { AppDot } from "./AppDot";
+import { Search, X } from "lucide-react";
 
 const DATE_PRESETS = [
   { label: "All", value: undefined },
@@ -49,15 +50,7 @@ export const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(
       <div className="px-5 pt-4 pb-3 space-y-3">
         {/* Search input */}
         <div className="relative group">
-          <svg
-            className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted group-focus-within:text-accent transition-colors"
-            fill="none"
-            viewBox="0 0 24 24"
-            strokeWidth={2}
-            stroke="currentColor"
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
-          </svg>
+          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted group-focus-within:text-accent transition-colors" strokeWidth={2} />
           <input
             ref={ref}
             type="text"
@@ -74,9 +67,7 @@ export const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(
               onClick={() => onQueryChange("")}
               className="absolute right-3 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-secondary transition-colors"
             >
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
-              </svg>
+              <X className="h-4 w-4" strokeWidth={2} />
             </button>
           )}
         </div>

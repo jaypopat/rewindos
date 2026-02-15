@@ -1,9 +1,9 @@
 use crate::error::{CoreError, Result};
 use crate::hasher::PerceptualHasher;
 use crate::schema::{
-    ActiveBlock, ActivityResponse, AppUsageStat, BoundingBox, DailyActivity, HourlyActivity,
-    NewBoundingBox, NewScreenshot, OcrStatus, Screenshot, SearchFilters, SearchResponse,
-    SearchResult, TaskUsageStat,
+    ActiveBlock, ActivityResponse, AppUsageStat, BoundingBox, CachedDailySummary, DailyActivity,
+    HourlyActivity, NewBoundingBox, NewScreenshot, OcrStatus, Screenshot, SearchFilters,
+    SearchResponse, SearchResult, TaskUsageStat,
 };
 use rusqlite::{ffi::sqlite3_auto_extension, params, Connection};
 use std::path::Path;
@@ -141,6 +141,40 @@ impl Database {
         }
         tx.commit()?;
         Ok(())
+    }
+
+    /// Update screenshot file metadata after recompression.
+    pub fn update_screenshot_file(
+        &self,
+        screenshot_id: i64,
+        width: i32,
+        height: i32,
+        file_size_bytes: i64,
+    ) -> Result<()> {
+        self.conn.execute(
+            "UPDATE screenshots SET width = ?1, height = ?2, file_size_bytes = ?3 WHERE id = ?4",
+            params![width, height, file_size_bytes, screenshot_id],
+        )?;
+        Ok(())
+    }
+
+    /// Get all screenshot ids and file paths, ordered by id.
+    pub fn get_all_screenshot_paths(&self) -> Result<Vec<(i64, String, Option<String>)>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, file_path, thumbnail_path FROM screenshots ORDER BY id")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+            ))
+        })?;
+        let mut results = Vec::new();
+        for row in rows {
+            results.push(row?);
+        }
+        Ok(results)
     }
 
     /// Update the OCR status of a screenshot.
@@ -555,11 +589,13 @@ impl Database {
             .map_err(Into::into)
     }
 
-    /// Get app usage statistics since a given unix timestamp.
-    pub fn get_app_usage_stats(&self, since: i64) -> Result<Vec<AppUsageStat>> {
+    /// Get app usage statistics in a time range [since, until).
+    /// If `until` is `None`, no upper bound is applied (open-ended).
+    pub fn get_app_usage_stats(&self, since: i64, until: Option<i64>) -> Result<Vec<AppUsageStat>> {
         let total: f64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM screenshots WHERE timestamp >= ?1 AND app_name IS NOT NULL",
-            params![since],
+            "SELECT COUNT(*) FROM screenshots
+             WHERE timestamp >= ?1 AND (?2 IS NULL OR timestamp < ?2) AND app_name IS NOT NULL",
+            params![since, until],
             |row| row.get(0),
         )?;
 
@@ -570,12 +606,12 @@ impl Database {
         let mut stmt = self.conn.prepare(
             "SELECT app_name, COUNT(*) as cnt
              FROM screenshots
-             WHERE timestamp >= ?1 AND app_name IS NOT NULL
+             WHERE timestamp >= ?1 AND (?2 IS NULL OR timestamp < ?2) AND app_name IS NOT NULL
              GROUP BY app_name
              ORDER BY cnt DESC",
         )?;
 
-        let rows = stmt.query_map(params![since], |row| {
+        let rows = stmt.query_map(params![since, until], |row| {
             let count: i64 = row.get(1)?;
             Ok(AppUsageStat {
                 app_name: row.get(0)?,
@@ -591,19 +627,19 @@ impl Database {
         Ok(results)
     }
 
-    /// Get daily activity (screenshot count + unique apps) since a given unix timestamp.
-    pub fn get_daily_activity(&self, since: i64) -> Result<Vec<DailyActivity>> {
+    /// Get daily activity (screenshot count + unique apps) in a time range [since, until).
+    pub fn get_daily_activity(&self, since: i64, until: Option<i64>) -> Result<Vec<DailyActivity>> {
         let mut stmt = self.conn.prepare(
             "SELECT date(timestamp, 'unixepoch', 'localtime') as day,
                     COUNT(*) as cnt,
                     COUNT(DISTINCT app_name) as apps
              FROM screenshots
-             WHERE timestamp >= ?1
+             WHERE timestamp >= ?1 AND (?2 IS NULL OR timestamp < ?2)
              GROUP BY day
              ORDER BY day",
         )?;
 
-        let rows = stmt.query_map(params![since], |row| {
+        let rows = stmt.query_map(params![since, until], |row| {
             Ok(DailyActivity {
                 date: row.get(0)?,
                 screenshot_count: row.get(1)?,
@@ -618,18 +654,22 @@ impl Database {
         Ok(results)
     }
 
-    /// Get hourly activity distribution since a given unix timestamp.
-    pub fn get_hourly_activity(&self, since: i64) -> Result<Vec<HourlyActivity>> {
+    /// Get hourly activity distribution in a time range [since, until).
+    pub fn get_hourly_activity(
+        &self,
+        since: i64,
+        until: Option<i64>,
+    ) -> Result<Vec<HourlyActivity>> {
         let mut stmt = self.conn.prepare(
             "SELECT CAST(strftime('%H', timestamp, 'unixepoch', 'localtime') AS INTEGER) as hr,
                     COUNT(*) as cnt
              FROM screenshots
-             WHERE timestamp >= ?1
+             WHERE timestamp >= ?1 AND (?2 IS NULL OR timestamp < ?2)
              GROUP BY hr
              ORDER BY hr",
         )?;
 
-        let rows = stmt.query_map(params![since], |row| {
+        let rows = stmt.query_map(params![since, until], |row| {
             Ok(HourlyActivity {
                 hour: row.get(0)?,
                 screenshot_count: row.get(1)?,
@@ -643,21 +683,24 @@ impl Database {
         Ok(results)
     }
 
-    /// Get composite activity data since a given unix timestamp.
-    pub fn get_activity(&self, since: i64) -> Result<ActivityResponse> {
-        let app_usage = self.get_app_usage_stats(since)?;
-        let daily_activity = self.get_daily_activity(since)?;
-        let hourly_activity = self.get_hourly_activity(since)?;
+    /// Get composite activity data in a time range [since, until).
+    /// If `until` is `None`, no upper bound is applied.
+    pub fn get_activity(&self, since: i64, until: Option<i64>) -> Result<ActivityResponse> {
+        let app_usage = self.get_app_usage_stats(since, until)?;
+        let daily_activity = self.get_daily_activity(since, until)?;
+        let hourly_activity = self.get_hourly_activity(since, until)?;
 
         let total_screenshots: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM screenshots WHERE timestamp >= ?1",
-            params![since],
+            "SELECT COUNT(*) FROM screenshots
+             WHERE timestamp >= ?1 AND (?2 IS NULL OR timestamp < ?2)",
+            params![since, until],
             |row| row.get(0),
         )?;
 
         let total_apps: i64 = self.conn.query_row(
-            "SELECT COUNT(DISTINCT app_name) FROM screenshots WHERE timestamp >= ?1 AND app_name IS NOT NULL",
-            params![since],
+            "SELECT COUNT(DISTINCT app_name) FROM screenshots
+             WHERE timestamp >= ?1 AND (?2 IS NULL OR timestamp < ?2) AND app_name IS NOT NULL",
+            params![since, until],
             |row| row.get(0),
         )?;
 
@@ -1055,6 +1098,64 @@ impl Database {
         Ok(deduped)
     }
 
+    /// Get a cached daily summary by date key (YYYY-MM-DD).
+    pub fn get_daily_summary_cache(&self, date_key: &str) -> Result<Option<CachedDailySummary>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT date_key, summary_text, app_breakdown, total_sessions,
+                    time_range, model_name, generated_at, screenshot_count
+             FROM daily_summaries WHERE date_key = ?1",
+        )?;
+
+        let mut rows = stmt.query_map(params![date_key], |row| {
+            Ok(CachedDailySummary {
+                date_key: row.get(0)?,
+                summary_text: row.get(1)?,
+                app_breakdown: row.get(2)?,
+                total_sessions: row.get(3)?,
+                time_range: row.get(4)?,
+                model_name: row.get(5)?,
+                generated_at: row.get(6)?,
+                screenshot_count: row.get(7)?,
+            })
+        })?;
+
+        match rows.next() {
+            Some(row) => Ok(Some(row?)),
+            None => Ok(None),
+        }
+    }
+
+    /// Insert or replace a cached daily summary.
+    pub fn set_daily_summary_cache(&self, summary: &CachedDailySummary) -> Result<()> {
+        self.conn.execute(
+            "INSERT OR REPLACE INTO daily_summaries
+             (date_key, summary_text, app_breakdown, total_sessions,
+              time_range, model_name, generated_at, screenshot_count)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                summary.date_key,
+                summary.summary_text,
+                summary.app_breakdown,
+                summary.total_sessions,
+                summary.time_range,
+                summary.model_name,
+                summary.generated_at,
+                summary.screenshot_count,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Get the count of screenshots in a time range [start, end).
+    pub fn get_screenshot_count_in_range(&self, start: i64, end: i64) -> Result<i64> {
+        let count: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM screenshots WHERE timestamp >= ?1 AND timestamp < ?2",
+            params![start, end],
+            |row| row.get(0),
+        )?;
+        Ok(count)
+    }
+
     fn search_count(&self, filters: &SearchFilters) -> Result<i64> {
         let mut stmt = self.conn.prepare(
             "SELECT COUNT(*)
@@ -1430,7 +1531,7 @@ mod tests {
         ss3.app_name = Some("code".to_string());
         db.insert_screenshot(&ss3).unwrap();
 
-        let stats = db.get_app_usage_stats(0).unwrap();
+        let stats = db.get_app_usage_stats(0, None).unwrap();
         assert_eq!(stats.len(), 2);
         // firefox should be first (most screenshots)
         assert_eq!(stats[0].app_name, "firefox");
@@ -1443,7 +1544,7 @@ mod tests {
     #[test]
     fn test_get_app_usage_stats_empty() {
         let db = make_test_db();
-        let stats = db.get_app_usage_stats(0).unwrap();
+        let stats = db.get_app_usage_stats(0, None).unwrap();
         assert!(stats.is_empty());
     }
 
@@ -1465,7 +1566,7 @@ mod tests {
         ss3.app_name = Some("firefox".to_string());
         db.insert_screenshot(&ss3).unwrap();
 
-        let daily = db.get_daily_activity(0).unwrap();
+        let daily = db.get_daily_activity(0, None).unwrap();
         assert_eq!(daily.len(), 2);
         assert_eq!(daily[0].screenshot_count + daily[1].screenshot_count, 3);
     }
@@ -1482,7 +1583,7 @@ mod tests {
         db.insert_screenshot(&make_screenshot(1706140800 + 3600 + 60))
             .unwrap();
 
-        let hourly = db.get_hourly_activity(0).unwrap();
+        let hourly = db.get_hourly_activity(0, None).unwrap();
         assert!(!hourly.is_empty());
         // Total should be 3
         let total: i64 = hourly.iter().map(|h| h.screenshot_count).sum();
@@ -1501,7 +1602,7 @@ mod tests {
         ss2.app_name = Some("code".to_string());
         db.insert_screenshot(&ss2).unwrap();
 
-        let activity = db.get_activity(0).unwrap();
+        let activity = db.get_activity(0, None).unwrap();
         assert_eq!(activity.total_screenshots, 2);
         assert_eq!(activity.total_apps, 2);
         assert_eq!(activity.app_usage.len(), 2);
@@ -1520,7 +1621,7 @@ mod tests {
         ss2.app_name = Some("code".to_string());
         db.insert_screenshot(&ss2).unwrap();
 
-        let activity = db.get_activity(3000).unwrap();
+        let activity = db.get_activity(3000, None).unwrap();
         assert_eq!(activity.total_screenshots, 1);
         assert_eq!(activity.total_apps, 1);
         assert_eq!(activity.app_usage.len(), 1);

@@ -30,6 +30,7 @@ pub enum CaptureError {
     Io(#[from] std::io::Error),
 
     #[error("D-Bus error: {0}")]
+    #[allow(dead_code)]
     DBus(String),
 }
 
@@ -46,6 +47,7 @@ pub trait CaptureBackend: Send + Sync + 'static {
     async fn capture_frame(&mut self) -> Result<RawFrame, CaptureError>;
 
     /// Clean up resources.
+    #[allow(dead_code)]
     async fn shutdown(&mut self) -> Result<(), CaptureError>;
 }
 

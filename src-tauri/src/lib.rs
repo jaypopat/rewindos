@@ -4,12 +4,14 @@ use std::sync::{Arc, Mutex};
 use futures::StreamExt;
 use rewindos_core::chat::{
     ChatMessage, ChatRole, ChatStreamChunk, ContextAssembler, IntentCategory, IntentClassifier,
-    OllamaChatClient, ScreenshotReference, SYSTEM_PROMPT,
+    OllamaChatClient, QueryConfidence, ScreenshotReference, SYSTEM_PROMPT,
 };
 use rewindos_core::config::AppConfig;
 use rewindos_core::db::Database;
+use rewindos_core::embedding::OllamaClient as EmbeddingClient;
 use rewindos_core::schema::{
-    ActiveBlock, ActivityResponse, BoundingBox, SearchFilters, SearchResponse, TaskUsageStat,
+    ActiveBlock, ActivityResponse, BoundingBox, CachedDailySummary, SearchFilters, SearchResponse,
+    TaskUsageStat,
 };
 use serde::{Deserialize, Serialize};
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
@@ -23,6 +25,7 @@ struct AppState {
     db: Mutex<Database>,
     config: Mutex<AppConfig>,
     chat_sessions: Arc<Mutex<HashMap<String, Vec<ChatMessage>>>>,
+    embedding_client: Option<EmbeddingClient>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -232,9 +235,10 @@ fn get_app_names(state: State<'_, AppState>) -> Result<Vec<String>, String> {
 fn get_activity(
     state: State<'_, AppState>,
     since_timestamp: i64,
+    until_timestamp: Option<i64>,
 ) -> Result<ActivityResponse, String> {
     let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
-    db.get_activity(since_timestamp)
+    db.get_activity(since_timestamp, until_timestamp)
         .map_err(|e| format!("db error: {e}"))
 }
 
@@ -273,15 +277,18 @@ fn get_active_blocks(
         .map_err(|e| format!("db error: {e}"))
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct DailySummary {
-    summary: String,
+    summary: Option<String>,
     app_breakdown: Vec<AppTimeEntry>,
     total_sessions: usize,
     time_range: String,
+    cached: bool,
+    generated_at: Option<String>,
+    screenshot_count: i64,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct AppTimeEntry {
     app_name: String,
     minutes: f64,
@@ -293,20 +300,86 @@ async fn get_daily_summary(
     state: State<'_, AppState>,
     start_time: i64,
     end_time: i64,
+    force_regenerate: Option<bool>,
 ) -> Result<DailySummary, String> {
+    let force = force_regenerate.unwrap_or(false);
+
+    // Compute date_key from start_time
+    let date_key = {
+        let dt =
+            chrono::DateTime::from_timestamp(start_time, 0).unwrap_or_else(|| chrono::Utc::now());
+        let local = dt.with_timezone(&chrono::Local);
+        local.format("%Y-%m-%d").to_string()
+    };
+
+    // Check cache first
+    if !force {
+        let cached = {
+            let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+            db.get_daily_summary_cache(&date_key)
+                .map_err(|e| format!("db error: {e}"))?
+        };
+
+        if let Some(cached) = cached.filter(|c| c.summary_text.is_some()) {
+            // For past days, always use cache. For today, check staleness.
+            let now = chrono::Local::now();
+            let is_today = date_key == now.format("%Y-%m-%d").to_string();
+
+            let use_cache = if is_today {
+                // Check if screenshot count changed significantly (>10% or >5 new)
+                let current_count = {
+                    let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+                    db.get_screenshot_count_in_range(start_time, end_time)
+                        .map_err(|e| format!("db error: {e}"))?
+                };
+                let diff = (current_count - cached.screenshot_count).abs();
+                let pct = if cached.screenshot_count > 0 {
+                    diff as f64 / cached.screenshot_count as f64
+                } else {
+                    1.0
+                };
+                diff <= 5 && pct <= 0.1
+            } else {
+                true
+            };
+
+            if use_cache {
+                let app_breakdown: Vec<AppTimeEntry> =
+                    serde_json::from_str(&cached.app_breakdown).unwrap_or_default();
+                return Ok(DailySummary {
+                    summary: cached.summary_text,
+                    app_breakdown,
+                    total_sessions: cached.total_sessions as usize,
+                    time_range: cached.time_range,
+                    cached: true,
+                    generated_at: Some(cached.generated_at),
+                    screenshot_count: cached.screenshot_count,
+                });
+            }
+        }
+    }
+
     // 1. Fetch OCR sessions from DB
-    let sessions = {
+    let (sessions, screenshot_count) = {
         let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
-        db.get_ocr_sessions(start_time, end_time, 500)
-            .map_err(|e| format!("db error: {e}"))?
+        let sessions = db
+            .get_ocr_sessions(start_time, end_time, 500)
+            .map_err(|e| format!("db error: {e}"))?;
+        let count = db
+            .get_screenshot_count_in_range(start_time, end_time)
+            .map_err(|e| format!("db error: {e}"))?;
+        (sessions, count)
     };
 
     if sessions.is_empty() {
         return Ok(DailySummary {
-            summary: "No activity data available for this day.".to_string(),
+            summary: None,
             app_breakdown: Vec::new(),
             total_sessions: 0,
             time_range: String::new(),
+            cached: false,
+            generated_at: None,
+            screenshot_count: 0,
         });
     }
 
@@ -328,7 +401,6 @@ async fn get_daily_summary(
         let is_same = current_app.as_deref() == Some(&name);
         let gap = ts - last_ts;
 
-        // Count time: if same app and gap < 60s, attribute the gap; otherwise use capture interval
         let secs = if is_same && gap < 60 && gap > 0 {
             gap as f64
         } else {
@@ -367,7 +439,6 @@ async fn get_daily_summary(
         let name = app_name.clone().unwrap_or_else(|| "Unknown".to_string());
 
         if current_group_app.as_deref() != Some(&name) {
-            // Flush previous group
             if let Some(prev_app) = &current_group_app {
                 let titles: Vec<&str> = group_titles.iter().take(3).map(|s| s.as_str()).collect();
                 let snippet = group_ocr_snippets
@@ -391,13 +462,11 @@ async fn get_daily_summary(
                 group_titles.push(title.clone());
             }
         }
-        // Take first 100 chars of OCR text for the snippet
         let snippet: String = ocr_text.chars().take(100).collect();
         if !snippet.trim().is_empty() {
             group_ocr_snippets.push(snippet);
         }
     }
-    // Flush last group
     if let Some(prev_app) = &current_group_app {
         let titles: Vec<&str> = group_titles.iter().take(3).map(|s| s.as_str()).collect();
         let snippet = group_ocr_snippets
@@ -436,7 +505,7 @@ async fn get_daily_summary(
         context_lines.join("\n"),
     );
 
-    // 4. Call Ollama (using config URL and model)
+    // 4. Call Ollama — graceful failure
     let (ollama_url, ollama_model) = {
         let cfg = state
             .config
@@ -447,68 +516,101 @@ async fn get_daily_summary(
             cfg.chat.model.clone(),
         )
     };
-    let client = reqwest::Client::builder()
+
+    let summary_text: Option<String> = match reqwest::Client::builder()
         .connect_timeout(std::time::Duration::from_secs(10))
         .timeout(std::time::Duration::from_secs(120))
         .build()
-        .map_err(|e| format!("Failed to build HTTP client: {e}"))?;
-    let ollama_resp = client
-        .post(&ollama_url)
-        .json(&serde_json::json!({
-            "model": ollama_model,
-            "prompt": prompt,
-            "stream": false,
-            "options": {
-                "temperature": 0.7,
-                "num_predict": 512,
+    {
+        Ok(client) => {
+            match client
+                .post(&ollama_url)
+                .json(&serde_json::json!({
+                    "model": ollama_model,
+                    "prompt": prompt,
+                    "stream": false,
+                    "options": {
+                        "temperature": 0.7,
+                        "num_predict": 512,
+                    }
+                }))
+                .send()
+                .await
+            {
+                Ok(resp) if resp.status().is_success() => {
+                    match resp.json::<serde_json::Value>().await {
+                        Ok(json) => {
+                            let raw = json["response"].as_str().unwrap_or("").trim();
+                            if raw.is_empty() {
+                                None
+                            } else {
+                                // Strip <think>...</think> blocks
+                                let cleaned = if let Some(after) = raw.strip_prefix("<think>") {
+                                    after
+                                        .find("</think>")
+                                        .map(|end| after[end + 8..].trim())
+                                        .unwrap_or(raw)
+                                        .to_string()
+                                } else {
+                                    let re =
+                                        regex_lite::Regex::new(r"(?s)<think>.*?</think>").unwrap();
+                                    re.replace_all(raw, "").trim().to_string()
+                                };
+                                Some(cleaned)
+                            }
+                        }
+                        Err(e) => {
+                            warn!("Failed to parse Ollama response: {e}");
+                            None
+                        }
+                    }
+                }
+                Ok(resp) => {
+                    warn!(
+                        "Ollama returned {}: {}",
+                        resp.status(),
+                        resp.text().await.unwrap_or_default()
+                    );
+                    None
+                }
+                Err(e) => {
+                    warn!("Ollama request failed: {e}");
+                    None
+                }
             }
-        }))
-        .send()
-        .await
-        .map_err(|e| {
-            if e.is_connect() {
-                format!("Cannot connect to Ollama at {ollama_url} — is the server running?")
-            } else if e.is_timeout() {
-                format!("Ollama timed out (model may still be loading). Try again in a minute.")
-            } else {
-                format!("Ollama request failed: {e}")
-            }
-        })?;
-
-    if !ollama_resp.status().is_success() {
-        let status = ollama_resp.status();
-        let body = ollama_resp.text().await.unwrap_or_default();
-        return Err(format!("Ollama returned {status}: {body}"));
-    }
-
-    let resp_json: serde_json::Value = ollama_resp
-        .json()
-        .await
-        .map_err(|e| format!("Failed to parse Ollama response: {e}"))?;
-
-    let raw_response = resp_json["response"]
-        .as_str()
-        .unwrap_or("Could not generate summary.")
-        .trim();
-
-    // Strip <think>...</think> blocks from reasoning models (e.g. deepseek-r1)
-    let summary = if let Some(after_think) = raw_response.strip_prefix("<think>") {
-        after_think
-            .find("</think>")
-            .map(|end| after_think[end + 8..].trim())
-            .unwrap_or(raw_response)
-            .to_string()
-    } else {
-        // Handle case where <think> appears mid-response
-        let re = regex_lite::Regex::new(r"(?s)<think>.*?</think>").unwrap();
-        re.replace_all(raw_response, "").trim().to_string()
+        }
+        Err(e) => {
+            warn!("Failed to build HTTP client: {e}");
+            None
+        }
     };
 
+    let generated_at = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
+
+    // 5. Only cache if Ollama produced a summary — don't persist failures
+    if summary_text.is_some() {
+        let app_breakdown_json = serde_json::to_string(&app_breakdown).unwrap_or_default();
+        let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+        let _ = db.set_daily_summary_cache(&CachedDailySummary {
+            date_key: date_key.clone(),
+            summary_text: summary_text.clone(),
+            app_breakdown: app_breakdown_json,
+            total_sessions: total_sessions as i64,
+            time_range: format!("{start_time}-{end_time}"),
+            model_name: Some(ollama_model),
+            generated_at: generated_at.clone(),
+            screenshot_count,
+        });
+    }
+
     Ok(DailySummary {
-        summary,
+        summary: summary_text,
         app_breakdown,
         total_sessions,
         time_range: format!("{start_time}-{end_time}"),
+        cached: false,
+        generated_at: Some(generated_at),
+        screenshot_count,
     })
 }
 
@@ -589,145 +691,165 @@ async fn ask(
         }
     };
 
-    // 2. Retrieve context from DB with fallback strategy
-    let (context, references) = {
-        let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+    // 2. Retrieve context from DB with fallback strategy (hybrid search when available)
+    let max_context_tokens = config.chat.max_context_tokens;
 
-        match intent.category {
-            IntentCategory::Recall | IntentCategory::General | IntentCategory::AppSpecific => {
-                // Try FTS5 search with extracted terms
-                let search_query = if intent.search_terms.is_empty() {
-                    message.clone()
-                } else {
-                    intent.search_terms.join(" ")
-                };
+    let (context, references) = match intent.category {
+        IntentCategory::Recall | IntentCategory::General | IntentCategory::AppSpecific => {
+            let search_query = if intent.search_terms.is_empty() {
+                message.clone()
+            } else {
+                intent.search_terms.join(" ")
+            };
 
-                let filters = SearchFilters {
-                    query: search_query,
-                    start_time: intent.time_range.map(|(s, _)| s),
-                    end_time: intent.time_range.map(|(_, e)| e),
-                    app_name: intent.app_filter.clone(),
-                    limit: 10,
-                    offset: 0,
-                };
+            let filters = SearchFilters {
+                query: search_query.clone(),
+                start_time: intent.time_range.map(|(s, _)| s),
+                end_time: intent.time_range.map(|(_, e)| e),
+                app_name: intent.app_filter.clone(),
+                limit: 15,
+                offset: 0,
+            };
 
-                let search_results = db.search(&filters).ok();
-                let has_results = search_results
-                    .as_ref()
-                    .map(|r| !r.results.is_empty())
-                    .unwrap_or(false);
+            // Layer 1: Try hybrid search if embedding client is available
+            let mut search_response = None;
+            if let Some(ref embed_client) = state.embedding_client {
+                // Must NOT hold db lock across async embed() call
+                let embedding = embed_client.embed(&search_query).await.ok().flatten();
+                if let Some(ref emb) = embedding {
+                    let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+                    search_response = db.hybrid_search(&filters, Some(emb)).ok();
+                }
+            }
 
-                if has_results {
-                    let response = search_results.unwrap();
-                    let results: Vec<_> = response
-                        .results
-                        .iter()
-                        .map(|r| {
-                            let ocr = db.get_ocr_text(r.id).unwrap_or(None).unwrap_or_default();
-                            (
-                                r.id,
-                                r.timestamp,
-                                r.app_name.clone(),
-                                r.window_title.clone(),
-                                r.file_path.clone(),
-                                ocr,
-                            )
-                        })
-                        .collect();
-                    ContextAssembler::from_search_results(&results)
-                } else if intent.search_terms.len() > 1 {
-                    // Fallback A: try OR query with individual terms
-                    let or_query = intent.search_terms.join(" OR ");
-                    let or_filters = SearchFilters {
-                        query: or_query,
-                        ..filters.clone()
-                    };
-                    let or_results = db.search(&or_filters).ok();
-                    let has_or = or_results
-                        .as_ref()
-                        .map(|r| !r.results.is_empty())
-                        .unwrap_or(false);
+            let result_count = search_response
+                .as_ref()
+                .map(|r| r.results.len())
+                .unwrap_or(0);
 
-                    if has_or {
-                        let response = or_results.unwrap();
-                        let results: Vec<_> = response
-                            .results
-                            .iter()
-                            .map(|r| {
-                                let ocr = db.get_ocr_text(r.id).unwrap_or(None).unwrap_or_default();
-                                (
-                                    r.id,
-                                    r.timestamp,
-                                    r.app_name.clone(),
-                                    r.window_title.clone(),
-                                    r.file_path.clone(),
-                                    ocr,
-                                )
-                            })
-                            .collect();
-                        ContextAssembler::from_search_results(&results)
-                    } else {
-                        // Fallback B: recent activity timeline
-                        let now = chrono::Local::now().timestamp();
-                        let (start, end) = intent.time_range.unwrap_or((now - 86400, now));
-                        let sessions = db
-                            .get_ocr_sessions_with_ids(start, end, 100)
-                            .unwrap_or_default();
-                        ContextAssembler::from_sessions_with_refs(&sessions)
+            // Layer 2: FTS5 exact if hybrid returned < 3 or unavailable
+            if result_count < 3 {
+                let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+                if let Ok(fts_response) = db.search(&filters) {
+                    if fts_response.results.len() > result_count {
+                        search_response = Some(fts_response);
                     }
-                } else {
-                    // Fallback B: recent activity timeline (single term or no terms)
-                    let now = chrono::Local::now().timestamp();
-                    let (start, end) = intent.time_range.unwrap_or((now - 86400, now));
-                    let sessions = db
-                        .get_ocr_sessions_with_ids(start, end, 100)
-                        .unwrap_or_default();
-                    ContextAssembler::from_sessions_with_refs(&sessions)
                 }
             }
-            IntentCategory::TimeBased => {
-                let (start, end) = intent.time_range.unwrap_or_else(|| {
-                    let now = chrono::Local::now().timestamp();
-                    (now - 86400, now)
-                });
 
-                match db.get_ocr_sessions_with_ids(start, end, 200) {
-                    Ok(sessions) => ContextAssembler::from_sessions_with_refs(&sessions),
-                    Err(_) => (
-                        "No activity data found for this time range.".to_string(),
-                        Vec::new(),
-                    ),
+            let result_count = search_response
+                .as_ref()
+                .map(|r| r.results.len())
+                .unwrap_or(0);
+
+            // Layer 3: FTS5 OR query if confidence is Low OR < 3 results and > 1 term
+            if (intent.confidence == QueryConfidence::Low || result_count < 3)
+                && intent.search_terms.len() > 1
+            {
+                let or_query = intent.search_terms.join(" OR ");
+                let or_filters = SearchFilters {
+                    query: or_query,
+                    ..filters.clone()
+                };
+                let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+                if let Ok(or_response) = db.search(&or_filters) {
+                    if or_response.results.len() > result_count {
+                        search_response = Some(or_response);
+                    }
                 }
             }
-            IntentCategory::Productivity => {
-                let (start, end) = intent.time_range.unwrap_or_else(|| {
-                    let now = chrono::Local::now().timestamp();
-                    (now - 86400, now)
-                });
 
-                let stats = db.get_app_usage_stats(start).unwrap_or_default();
-                let sessions = db
-                    .get_ocr_sessions_with_ids(start, end, 200)
-                    .unwrap_or_default();
+            let has_results = search_response
+                .as_ref()
+                .map(|r| !r.results.is_empty())
+                .unwrap_or(false);
 
-                let capture_secs = config.capture.interval_seconds as f64;
-                let stat_tuples: Vec<_> = stats
+            if has_results {
+                let response = search_response.unwrap();
+                let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+                let results: Vec<_> = response
+                    .results
                     .iter()
-                    .map(|s| {
-                        let minutes = s.screenshot_count as f64 * capture_secs / 60.0;
-                        (s.app_name.clone(), minutes, s.screenshot_count as usize)
+                    .map(|r| {
+                        let ocr = db.get_ocr_text(r.id).unwrap_or(None).unwrap_or_default();
+                        (
+                            r.id,
+                            r.timestamp,
+                            r.app_name.clone(),
+                            r.window_title.clone(),
+                            r.file_path.clone(),
+                            ocr,
+                        )
                     })
                     .collect();
-
-                ContextAssembler::from_app_stats(&stat_tuples, &sessions)
+                ContextAssembler::from_search_results_budgeted(&results, max_context_tokens)
+            } else {
+                // Layer 4: Timeline fallback — recent sessions
+                let now = chrono::Local::now().timestamp();
+                let (start, end) = intent.time_range.unwrap_or((now - 86400, now));
+                let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+                let sessions = db
+                    .get_ocr_sessions_with_ids(start, end, 80)
+                    .unwrap_or_default();
+                ContextAssembler::from_sessions_with_refs_budgeted(
+                    &sessions,
+                    max_context_tokens,
+                    20,
+                )
             }
+        }
+        IntentCategory::TimeBased => {
+            let (start, end) = intent.time_range.unwrap_or_else(|| {
+                let now = chrono::Local::now().timestamp();
+                (now - 86400, now)
+            });
+
+            let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+            match db.get_ocr_sessions_with_ids(start, end, 80) {
+                Ok(sessions) => ContextAssembler::from_sessions_with_refs_budgeted(
+                    &sessions,
+                    max_context_tokens,
+                    20,
+                ),
+                Err(_) => (
+                    "No activity data found for this time range.".to_string(),
+                    Vec::new(),
+                ),
+            }
+        }
+        IntentCategory::Productivity => {
+            let (start, end) = intent.time_range.unwrap_or_else(|| {
+                let now = chrono::Local::now().timestamp();
+                (now - 86400, now)
+            });
+
+            let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+            let stats = db.get_app_usage_stats(start, Some(end)).unwrap_or_default();
+            let sessions = db
+                .get_ocr_sessions_with_ids(start, end, 80)
+                .unwrap_or_default();
+
+            let capture_secs = config.capture.interval_seconds as f64;
+            let stat_tuples: Vec<_> = stats
+                .iter()
+                .map(|s| {
+                    let minutes = s.screenshot_count as f64 * capture_secs / 60.0;
+                    (s.app_name.clone(), minutes, s.screenshot_count as usize)
+                })
+                .collect();
+
+            ContextAssembler::from_app_stats(&stat_tuples, &sessions, max_context_tokens)
         }
     };
 
-    // 3. Build messages array
+    // 3. Build messages array with timestamp injection
+    let now_str = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
     let system_message = ChatMessage {
         role: ChatRole::System,
-        content: format!("{}\n\n{}", SYSTEM_PROMPT, context),
+        content: format!(
+            "{}\n\nCurrent time: {}\n\n{}",
+            SYSTEM_PROMPT, now_str, context
+        ),
     };
 
     let user_message = ChatMessage {
@@ -919,11 +1041,21 @@ pub fn run() {
             let db =
                 Database::open(&db_path).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
 
+            let embedding_client = if config.semantic.enabled {
+                Some(EmbeddingClient::new(
+                    &config.semantic.ollama_url,
+                    &config.semantic.model,
+                ))
+            } else {
+                None
+            };
+
             app.manage(AppState {
                 dbus,
                 db: Mutex::new(db),
                 config: Mutex::new(config),
                 chat_sessions: Arc::new(Mutex::new(HashMap::new())),
+                embedding_client,
             });
 
             // Register Ctrl+Shift+Space global shortcut

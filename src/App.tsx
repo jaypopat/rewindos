@@ -12,6 +12,7 @@ import { DaemonPanel } from "@/components/DaemonPanel";
 import { AskView } from "@/components/AskView";
 import { SettingsView } from "@/components/SettingsView";
 import { FocusView } from "@/components/FocusView";
+import { RewindView } from "@/components/RewindView";
 
 type SubView = "list" | "detail";
 
@@ -124,7 +125,11 @@ function App() {
           </div>
         )}
 
-        {(view === "search" || view === "dashboard" || view === "history" || view === "ask") && subView === "detail" && selectedScreenshotId !== null && (
+        {view === "rewind" && subView === "list" && (
+          <RewindView onSelectScreenshot={handleSelectResult} />
+        )}
+
+        {(view === "search" || view === "dashboard" || view === "history" || view === "rewind" || view === "ask") && subView === "detail" && selectedScreenshotId !== null && (
           <ScreenshotDetail
             screenshotId={selectedScreenshotId}
             onBack={handleBack}

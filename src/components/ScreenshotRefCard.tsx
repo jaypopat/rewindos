@@ -1,6 +1,7 @@
 import { getImageUrl } from "@/lib/api";
 import type { ScreenshotRef } from "@/lib/api";
 import { formatRelativeTime } from "@/lib/format";
+import { ArrowUpRight } from "lucide-react";
 
 interface ScreenshotRefCardProps {
   reference: ScreenshotRef;
@@ -38,9 +39,7 @@ export function ScreenshotRefCard({ reference, onClick }: ScreenshotRefCardProps
       </div>
 
       {/* Arrow indicator */}
-      <svg className="size-3 text-text-muted group-hover:text-accent shrink-0 transition-colors" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 19.5 15-15m0 0H8.25m11.25 0v11.25" />
-      </svg>
+      <ArrowUpRight className="size-3 text-text-muted group-hover:text-accent shrink-0 transition-colors" strokeWidth={2} />
     </button>
   );
 }

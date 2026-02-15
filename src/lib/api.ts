@@ -115,8 +115,12 @@ export interface ActivityResponse {
 
 export async function getActivity(
   sinceTimestamp: number,
+  untilTimestamp?: number,
 ): Promise<ActivityResponse> {
-  return invoke("get_activity", { sinceTimestamp });
+  return invoke("get_activity", {
+    sinceTimestamp,
+    untilTimestamp: untilTimestamp ?? null,
+  });
 }
 
 export interface TimelineEntry {
@@ -149,17 +153,25 @@ export interface AppTimeEntry {
 }
 
 export interface DailySummary {
-  summary: string;
+  summary: string | null;
   app_breakdown: AppTimeEntry[];
   total_sessions: number;
   time_range: string;
+  cached: boolean;
+  generated_at: string | null;
+  screenshot_count: number;
 }
 
 export async function getDailySummary(
   startTime: number,
   endTime: number,
+  forceRegenerate?: boolean,
 ): Promise<DailySummary> {
-  return invoke("get_daily_summary", { startTime, endTime });
+  return invoke("get_daily_summary", {
+    startTime,
+    endTime,
+    forceRegenerate: forceRegenerate ?? false,
+  });
 }
 
 export function getImageUrl(path: string): string {

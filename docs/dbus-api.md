@@ -141,11 +141,20 @@ All filter fields are optional. Defaults: limit=50, offset=0, no time/app filter
       "thumbnail_path": "screenshots/2025-01-25/thumbs/1706137200.webp",
       "file_path": "screenshots/2025-01-25/1706137200.webp",
       "matched_text": "...the <mark>PostgreSQL</mark> connection pool was...",
-      "rank": -12.5
+      "rank": -12.5,
+      "group_count": 5,
+      "group_screenshot_ids": [12345, 12340, 12335, 12330, 12325]
     }
   ],
-  "total_count": 142
+  "total_count": 142,
+  "search_mode": "hybrid"
 }
+```
+
+**New fields (scene deduplication):**
+- `group_count` (optional): Number of visually similar screenshots grouped under this result. Only present when > 1.
+- `group_screenshot_ids` (optional): IDs of all screenshots in the group. Only present when grouped.
+- `search_mode`: `"keyword"` (FTS5 only) or `"hybrid"` (FTS5 + vector + RRF). Always present.
 ```
 
 ### DeleteRange(start_timestamp, end_timestamp) → u64

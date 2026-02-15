@@ -24,8 +24,8 @@ export function AppDonutChart({ data }: Props) {
   }
 
   return (
-    <div className="flex items-center gap-4">
-      <div className="relative w-44 h-44 shrink-0">
+    <div className="flex items-center gap-6 w-full">
+      <div className="relative w-44 h-44 shrink-0 min-w-[140px]">
         <ResponsiveContainer width="100%" height="100%">
           <PieChart>
             <Pie

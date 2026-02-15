@@ -203,6 +203,7 @@ async fn run_hash_stage(
     let threshold = config.capture.change_threshold;
     let quality = config.storage.screenshot_quality;
     let thumb_width = config.storage.thumbnail_width;
+    let max_capture_width = config.storage.max_capture_width;
 
     info!("hash stage started");
 
@@ -252,6 +253,9 @@ async fn run_hash_stage(
             continue;
         }
 
+        // Downscale for storage (hash was computed on original resolution)
+        let image = hasher::downscale_for_storage(&image, max_capture_width);
+
         // Save WebP screenshot and thumbnail
         let file_path = hasher::screenshot_path(&screenshots_dir, timestamp_ms);
         let thumb_path = hasher::thumbnail_path(&screenshots_dir, timestamp_ms);
@@ -290,8 +294,8 @@ async fn run_hash_stage(
             window_class: frame.window_class,
             file_path: file_path.to_string_lossy().to_string(),
             thumbnail_path: Some(thumb_path.to_string_lossy().to_string()),
-            width: width as i32,
-            height: height as i32,
+            width: image.width() as i32,
+            height: image.height() as i32,
             file_size_bytes: file_size as i64,
             perceptual_hash: hash,
         };

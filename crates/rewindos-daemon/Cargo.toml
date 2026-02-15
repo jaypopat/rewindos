@@ -15,6 +15,8 @@ thiserror = { workspace = true }
 zbus = { version = "5", default-features = false, features = ["tokio"] }
 nix = { version = "0.29", features = ["fs", "poll"] }
 clap = { version = "4", features = ["derive"] }
+image = "0.25"
+webp = "0.3"
 async-trait = "0.1"
 ashpd = { version = "0.10", features = ["tokio"] }
 pipewire = "0.9"

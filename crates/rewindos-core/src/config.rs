@@ -33,6 +33,7 @@ pub struct StorageConfig {
     pub retention_days: u32,
     pub screenshot_quality: u8,
     pub thumbnail_width: u32,
+    pub max_capture_width: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -120,10 +121,10 @@ impl Default for ChatConfig {
         Self {
             enabled: true,
             ollama_url: "http://localhost:11434".to_string(),
-            model: "qwen2.5:3b".to_string(),
-            max_context_tokens: 4096,
+            model: "qwen2.5:7b".to_string(),
+            max_context_tokens: 6144,
             max_history_messages: 20,
-            temperature: 0.3,
+            temperature: 0.5,
         }
     }
 }
@@ -145,6 +146,7 @@ impl Default for StorageConfig {
             retention_days: 90,
             screenshot_quality: 80,
             thumbnail_width: 320,
+            max_capture_width: 1920,
         }
     }
 }

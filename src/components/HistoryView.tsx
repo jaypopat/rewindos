@@ -19,6 +19,10 @@ import { ScreenTimeChart } from "./charts/ScreenTimeChart";
 import { getAppColor } from "@/lib/app-colors";
 import { cn } from "@/lib/utils";
 import { parseWindowTitle } from "@/lib/window-title";
+import { DailyDigestCard } from "./DailyDigestCard";
+import { Calendar } from "@/components/ui/calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { CalendarIcon, ChevronDown, ChevronRight, Trash2 } from "lucide-react";
 
 type HistoryMode = "apps" | "timeline";
 
@@ -249,8 +253,8 @@ export function HistoryView({ onSelectScreenshot }: HistoryViewProps) {
 
   // Activity data (for charts)
   const { data: activity, isLoading } = useQuery({
-    queryKey: queryKeys.activity(start),
-    queryFn: () => getActivity(start),
+    queryKey: queryKeys.activity(start, end),
+    queryFn: () => getActivity(start, end),
     staleTime: 60_000,
     refetchOnWindowFocus: false,
   });
@@ -328,6 +332,18 @@ export function HistoryView({ onSelectScreenshot }: HistoryViewProps) {
 
   const avgDaily = rangeDays > 0 ? Math.round(totalActiveTime / rangeDays) : 0;
 
+  // Compute digest for single-day views only
+  const digestDay = useMemo(() => {
+    if (rangeDays !== 1) return null;
+    const d = new Date(start * 1000);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const todayStr = (() => {
+      const t = new Date();
+      return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`;
+    })();
+    return { dateKey: key, start, end, isToday: key === todayStr };
+  }, [start, end, rangeDays]);
+
   const toggle = (app: string) => {
     setExpanded((prev) => {
       const next = new Set(prev);
@@ -371,7 +387,7 @@ export function HistoryView({ onSelectScreenshot }: HistoryViewProps) {
         setConfirmDeleteKey(null);
         // Invalidate queries so the UI refreshes
         queryClient.invalidateQueries({ queryKey: queryKeys.hourlyBrowse(start, end) });
-        queryClient.invalidateQueries({ queryKey: queryKeys.activity(start) });
+        queryClient.invalidateQueries({ queryKey: queryKeys.activity(start, end) });
       } catch (err) {
         console.error("Failed to delete hour:", err);
       } finally {
@@ -424,24 +440,41 @@ export function HistoryView({ onSelectScreenshot }: HistoryViewProps) {
               </button>
             ))}
           </div>
-          <input
-            type="date"
-            value={customDate ?? ""}
-            max={new Date().toISOString().split("T")[0]}
-            onChange={(e) => {
-              if (e.target.value) {
-                setCustomDate(e.target.value);
-                setRangeIdx(null);
-              }
-            }}
-            className={cn(
-              "px-2 py-1 text-xs rounded-lg border bg-surface-raised transition-colors cursor-pointer",
-              customDate
-                ? "border-accent/50 text-accent"
-                : "border-border/50 text-text-muted",
-            )}
-            title="Pick a specific date"
-          />
+          <Popover>
+            <PopoverTrigger asChild>
+              <button
+                className={cn(
+                  "flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-lg border bg-surface-raised transition-colors cursor-pointer",
+                  customDate
+                    ? "border-accent/50 text-accent"
+                    : "border-border/50 text-text-muted hover:text-text-secondary",
+                )}
+              >
+                <CalendarIcon className="size-3" />
+                {customDate
+                  ? new Date(customDate + "T00:00:00").toLocaleDateString(undefined, {
+                      month: "short",
+                      day: "numeric",
+                    })
+                  : "Pick date"}
+              </button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="end">
+              <Calendar
+                mode="single"
+                selected={customDate ? new Date(customDate + "T00:00:00") : undefined}
+                onSelect={(date) => {
+                  if (date) {
+                    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+                    setCustomDate(key);
+                    setRangeIdx(null);
+                  }
+                }}
+                disabled={{ after: new Date() }}
+                defaultMonth={customDate ? new Date(customDate + "T00:00:00") : undefined}
+              />
+            </PopoverContent>
+          </Popover>
         </div>
       </div>
 
@@ -460,7 +493,7 @@ export function HistoryView({ onSelectScreenshot }: HistoryViewProps) {
       {activity && activity.total_screenshots > 0 && mode === "apps" && (
         <div className="flex-1 flex flex-col min-h-0 space-y-4">
           {/* Stats */}
-          <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+          <div className={`grid gap-3 ${rangeDays > 1 ? "grid-cols-2 xl:grid-cols-4" : "grid-cols-3"}`}>
             <StatCard
               label="Screen Time"
               value={formatDuration(totalActiveTime)}
@@ -480,13 +513,26 @@ export function HistoryView({ onSelectScreenshot }: HistoryViewProps) {
               detail={topAppNames}
               accentColor="#34d399"
             />
-            <StatCard
-              label="Avg Daily"
-              value={formatDuration(avgDaily)}
-              detail={`over ${rangeDays} day${rangeDays > 1 ? "s" : ""}`}
-              accentColor="#fb923c"
-            />
+            {rangeDays > 1 && (
+              <StatCard
+                label="Avg Daily"
+                value={formatDuration(avgDaily)}
+                detail={`over ${rangeDays} day${rangeDays > 1 ? "s" : ""}`}
+                accentColor="#fb923c"
+              />
+            )}
           </div>
+
+          {/* Daily Digest — single-day only */}
+          {digestDay && (
+            <DailyDigestCard
+              dateKey={digestDay.dateKey}
+              startTime={digestDay.start}
+              endTime={digestDay.end}
+              isToday={digestDay.isToday}
+              defaultExpanded={false}
+            />
+          )}
 
           {/* Charts row — compact */}
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
@@ -536,15 +582,7 @@ export function HistoryView({ onSelectScreenshot }: HistoryViewProps) {
                           />
                         </div>
                         {group.titles.length > 0 && (
-                          <svg
-                            className={`size-3.5 text-text-muted transition-transform shrink-0 ${isOpen ? "rotate-180" : ""}`}
-                            fill="none"
-                            viewBox="0 0 24 24"
-                            strokeWidth={2}
-                            stroke="currentColor"
-                          >
-                            <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
-                          </svg>
+                          <ChevronDown className={`size-3.5 text-text-muted transition-transform shrink-0 ${isOpen ? "rotate-180" : ""}`} strokeWidth={2} />
                         )}
                       </button>
                       {isOpen && group.titles.length > 0 && (
@@ -649,18 +687,10 @@ export function HistoryView({ onSelectScreenshot }: HistoryViewProps) {
                               onClick={() => toggleHour(group.key)}
                               className="flex-1 min-w-0 flex items-center gap-3 px-4 py-2.5 hover:bg-surface-raised/40 transition-colors text-left"
                             >
-                              <svg
-                                className={cn(
+                              <ChevronRight className={cn(
                                   "size-3.5 text-text-muted transition-transform shrink-0",
                                   isOpen && "rotate-90",
-                                )}
-                                fill="none"
-                                viewBox="0 0 24 24"
-                                strokeWidth={2}
-                                stroke="currentColor"
-                              >
-                                <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
-                              </svg>
+                                )} strokeWidth={2} />
                               <span className="text-sm text-text-primary font-medium font-mono tabular-nums">
                                 {group.label}
                               </span>
@@ -709,9 +739,7 @@ export function HistoryView({ onSelectScreenshot }: HistoryViewProps) {
                               className="px-3 py-2.5 text-red-400/60 hover:text-red-400 transition-colors shrink-0"
                               title={`Delete all captures from ${group.label}`}
                             >
-                              <svg className="size-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
-                              </svg>
+                              <Trash2 className="size-4" strokeWidth={1.5} />
                             </button>
                           </div>
 

@@ -29,7 +29,7 @@ export function ActivityView() {
   }, [range.days]);
 
   const { data, isLoading, isError } = useQuery({
-    queryKey: queryKeys.activity(sinceTimestamp),
+    queryKey: queryKeys.activity(sinceTimestamp, undefined),
     queryFn: () => getActivity(sinceTimestamp),
     staleTime: 60_000,
     refetchOnWindowFocus: false,

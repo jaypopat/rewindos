@@ -15,6 +15,7 @@ interface DayData {
   dateLabel: string;
   minutes: number;
   highlighted: boolean;
+  isToday: boolean;
 }
 
 function toDateStr(ts: number): string {
@@ -63,6 +64,7 @@ function groupBlocksByDay(
         dateLabel: `${d.getDate()}/${d.getMonth() + 1}`,
         minutes: Math.round(secs / 60),
         highlighted: isSingleDay && date >= selStartDate && date <= selEndDate,
+        isToday: date === todayStr,
       };
     });
 
@@ -106,6 +108,7 @@ export function ScreenTimeChart({ blocks, selectedStart, selectedEnd }: Props) {
   const avgBarH = Math.round((avg / maxMinutes) * BAR_AREA_HEIGHT);
 
   const hasHighlight = data.some((d) => d.highlighted);
+  const hasToday = data.some((d) => d.isToday);
   const [hovered, setHovered] = useState<string | null>(null);
 
   // Insights for highlighted days (single-day view)
@@ -144,10 +147,13 @@ export function ScreenTimeChart({ blocks, selectedStart, selectedEnd }: Props) {
           {data.map((day) => {
             const barH = Math.max(Math.round((day.minutes / maxMinutes) * BAR_AREA_HEIGHT), 3);
             const isHovered = hovered === day.date;
-            const isDimmed = hasHighlight && !day.highlighted && !isHovered;
+            const isAccented = day.highlighted || (!hasHighlight && day.isToday);
+            const isDimmed = (hasHighlight || hasToday) && !isAccented && !isHovered;
 
             let barClass: string;
             if (day.highlighted) {
+              barClass = "bg-cyan-400 shadow-[0_0_12px_rgba(34,211,238,0.35)]";
+            } else if (day.isToday && !hasHighlight) {
               barClass = "bg-cyan-400 shadow-[0_0_12px_rgba(34,211,238,0.35)]";
             } else if (isHovered) {
               barClass = "bg-violet-400/80 shadow-[0_0_10px_rgba(167,139,250,0.3)]";
@@ -168,11 +174,13 @@ export function ScreenTimeChart({ blocks, selectedStart, selectedEnd }: Props) {
                 {/* Value on top of bar */}
                 <span
                   className={`text-[9px] font-mono tabular-nums mb-1 transition-colors ${
-                    isHovered
-                      ? "text-violet-300 font-medium"
-                      : isDimmed
-                        ? "text-text-muted/40"
-                        : "text-text-secondary"
+                    isAccented
+                      ? "text-cyan-300 font-medium"
+                      : isHovered
+                        ? "text-violet-300 font-medium"
+                        : isDimmed
+                          ? "text-text-muted/40"
+                          : "text-text-secondary"
                   }`}
                 >
                   {fmtMins(day.minutes)}
@@ -192,12 +200,13 @@ export function ScreenTimeChart({ blocks, selectedStart, selectedEnd }: Props) {
       <div className="flex gap-1.5 px-0.5">
         {data.map((day) => {
           const isHovered = hovered === day.date;
-          const isDimmed = hasHighlight && !day.highlighted && !isHovered;
+          const isAccented = day.highlighted || (!hasHighlight && day.isToday);
+          const isDimmed = (hasHighlight || hasToday) && !isAccented && !isHovered;
           return (
             <div key={day.date} className="flex-1 flex flex-col items-center">
               <span
                 className={`text-[10px] leading-tight font-medium transition-colors ${
-                  day.highlighted
+                  isAccented
                     ? "text-cyan-300"
                     : isHovered
                       ? "text-violet-300"
@@ -210,7 +219,7 @@ export function ScreenTimeChart({ blocks, selectedStart, selectedEnd }: Props) {
               </span>
               <span
                 className={`text-[9px] leading-tight font-mono transition-colors ${
-                  day.highlighted
+                  isAccented
                     ? "text-cyan-300/70"
                     : isHovered
                       ? "text-violet-300/70"

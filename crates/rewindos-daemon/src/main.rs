@@ -4,6 +4,7 @@ mod pipeline;
 mod service;
 mod window_info;
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -11,6 +12,7 @@ use clap::{Parser, Subcommand};
 use rewindos_core::config::{init_logging, AppConfig};
 use rewindos_core::db::Database;
 use rewindos_core::embedding::OllamaClient;
+use rewindos_core::hasher;
 use rewindos_core::ocr;
 use tracing::{info, warn};
 
@@ -37,6 +39,21 @@ enum Command {
         #[arg(long, default_value = "50")]
         batch_size: usize,
     },
+    /// Recompress existing screenshots with lossy WebP + downscaling
+    Recompress {
+        /// WebP quality (0-100)
+        #[arg(long, default_value = "80")]
+        quality: u8,
+        /// Maximum image width in pixels
+        #[arg(long, default_value = "1920")]
+        max_width: u32,
+        /// Thumbnail width in pixels
+        #[arg(long, default_value = "320")]
+        thumb_width: u32,
+        /// Perform a dry run without modifying files
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 #[tokio::main]
@@ -49,6 +66,12 @@ async fn main() -> anyhow::Result<()> {
         Command::Resume => dbus_client_call("Resume").await,
         Command::Status => dbus_client_status().await,
         Command::Backfill { batch_size } => run_backfill(batch_size).await,
+        Command::Recompress {
+            quality,
+            max_width,
+            thumb_width,
+            dry_run,
+        } => run_recompress(quality, max_width, thumb_width, dry_run).await,
     }
 }
 
@@ -139,6 +162,165 @@ async fn run_backfill(batch_size: usize) -> anyhow::Result<()> {
 
     println!("\nBackfill complete. Processed {total_processed} screenshots.");
     Ok(())
+}
+
+async fn run_recompress(
+    quality: u8,
+    max_width: u32,
+    thumb_width: u32,
+    dry_run: bool,
+) -> anyhow::Result<()> {
+    init_logging();
+
+    let config = AppConfig::load()?;
+    let db_path = config.db_path()?;
+    let db = Arc::new(Mutex::new(Database::open(&db_path)?));
+
+    let all = db.lock().unwrap().get_all_screenshot_paths()?;
+    let total = all.len();
+
+    if total == 0 {
+        println!("No screenshots found.");
+        return Ok(());
+    }
+
+    let workers = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4);
+
+    println!(
+        "Recompressing {total} screenshots (quality={quality}, max_width={max_width}, workers={workers}, dry_run={dry_run})"
+    );
+
+    let processed = Arc::new(AtomicU64::new(0));
+    let skipped = Arc::new(AtomicU64::new(0));
+    let errors = Arc::new(AtomicU64::new(0));
+    let saved_bytes = Arc::new(std::sync::atomic::AtomicI64::new(0));
+    let done_count = Arc::new(AtomicU64::new(0));
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(workers));
+
+    let mut handles = Vec::with_capacity(total);
+
+    for (_i, (id, file_path, thumb_path)) in all.into_iter().enumerate() {
+        let permit = semaphore.clone().acquire_owned().await.unwrap();
+        let db = db.clone();
+        let processed = processed.clone();
+        let skipped = skipped.clone();
+        let errors = errors.clone();
+        let saved_bytes = saved_bytes.clone();
+        let done_count = done_count.clone();
+        let total = total;
+
+        let handle = tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            let path = std::path::PathBuf::from(&file_path);
+            if !path.exists() {
+                skipped.fetch_add(1, Ordering::Relaxed);
+                done_count.fetch_add(1, Ordering::Relaxed);
+                return;
+            }
+
+            let original_size = match std::fs::metadata(&path) {
+                Ok(m) => m.len() as i64,
+                Err(_) => {
+                    skipped.fetch_add(1, Ordering::Relaxed);
+                    done_count.fetch_add(1, Ordering::Relaxed);
+                    return;
+                }
+            };
+
+            let img = match image::open(&path) {
+                Ok(img) => img,
+                Err(_e) => {
+                    errors.fetch_add(1, Ordering::Relaxed);
+                    done_count.fetch_add(1, Ordering::Relaxed);
+                    return;
+                }
+            };
+
+            let downscaled = hasher::downscale_for_storage(&img, max_width);
+
+            if dry_run {
+                let encoder = match webp::Encoder::from_image(&downscaled) {
+                    Ok(e) => e,
+                    Err(_) => {
+                        errors.fetch_add(1, Ordering::Relaxed);
+                        done_count.fetch_add(1, Ordering::Relaxed);
+                        return;
+                    }
+                };
+                let webp_data = encoder.encode(quality as f32);
+                let new_size = webp_data.len() as i64;
+                saved_bytes.fetch_add(original_size - new_size, Ordering::Relaxed);
+                processed.fetch_add(1, Ordering::Relaxed);
+            } else {
+                let new_size = match hasher::save_webp(&downscaled, &path, quality) {
+                    Ok(s) => s as i64,
+                    Err(_e) => {
+                        errors.fetch_add(1, Ordering::Relaxed);
+                        done_count.fetch_add(1, Ordering::Relaxed);
+                        return;
+                    }
+                };
+
+                if let Some(ref tp) = thumb_path {
+                    let thumb = hasher::create_thumbnail(&downscaled, thumb_width);
+                    let _ = hasher::save_webp(&thumb, std::path::Path::new(tp), 75);
+                }
+
+                if let Ok(db) = db.lock() {
+                    let _ = db.update_screenshot_file(
+                        id,
+                        downscaled.width() as i32,
+                        downscaled.height() as i32,
+                        new_size,
+                    );
+                }
+
+                saved_bytes.fetch_add(original_size - new_size, Ordering::Relaxed);
+                processed.fetch_add(1, Ordering::Relaxed);
+            }
+
+            let n = done_count.fetch_add(1, Ordering::Relaxed) + 1;
+            if n % 100 == 0 || n as usize == total {
+                eprint!("\r[{n}/{total}] ...");
+            }
+        });
+
+        handles.push(handle);
+    }
+
+    for h in handles {
+        let _ = h.await;
+    }
+
+    let processed = processed.load(Ordering::Relaxed);
+    let skipped = skipped.load(Ordering::Relaxed);
+    let errors = errors.load(Ordering::Relaxed);
+    let saved_bytes = saved_bytes.load(Ordering::Relaxed);
+
+    println!("\n\nDone. Processed: {processed}, Skipped: {skipped}, Errors: {errors}");
+    println!(
+        "Total space saved: {} ({})",
+        format_bytes(saved_bytes),
+        if dry_run { "estimated" } else { "actual" }
+    );
+
+    Ok(())
+}
+
+fn format_bytes(bytes: i64) -> String {
+    let abs = bytes.unsigned_abs();
+    let sign = if bytes < 0 { "-" } else { "" };
+    if abs < 1024 {
+        format!("{sign}{abs} B")
+    } else if abs < 1024 * 1024 {
+        format!("{sign}{:.1} KB", abs as f64 / 1024.0)
+    } else if abs < 1024 * 1024 * 1024 {
+        format!("{sign}{:.1} MB", abs as f64 / (1024.0 * 1024.0))
+    } else {
+        format!("{sign}{:.2} GB", abs as f64 / (1024.0 * 1024.0 * 1024.0))
+    }
 }
 
 async fn run_daemon() -> anyhow::Result<()> {

@@ -6,10 +6,12 @@ export const queryKeys = {
   screenshot: (id: number) => ["screenshot", id] as const,
   daemonStatus: () => ["daemon-status"] as const,
   appNames: () => ["app-names"] as const,
-  activity: (sinceTimestamp: number) => ["activity", sinceTimestamp] as const,
+  activity: (sinceTimestamp: number, untilTimestamp?: number) =>
+    ["activity", sinceTimestamp, untilTimestamp] as const,
   timeline: (startTime: number) => ["timeline", startTime] as const,
-  dailySummary: (startTime: number) => ["daily-summary", startTime] as const,
+  dailySummary: (dateKey: string) => ["daily-summary", dateKey] as const,
   askHealth: () => ["ask-health"] as const,
   hourlyBrowse: (startTime: number, endTime: number) =>
     ["hourly-browse", startTime, endTime] as const,
+  rewind: (start: number, end: number) => ["rewind", start, end] as const,
 };

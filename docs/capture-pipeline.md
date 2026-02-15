@@ -2,7 +2,7 @@
 
 ## Overview
 
-The capture pipeline is the heart of the daemon. It runs as 4 async tasks connected by bounded tokio mpsc channels, forming a linear processing chain with backpressure.
+The capture pipeline is the heart of the daemon. It runs as 4 async tasks connected by bounded tokio mpsc channels, forming a linear processing chain with backpressure. A separate background embedding task runs alongside when Ollama is available.
 
 ## Pipeline Stages
 
@@ -16,6 +16,15 @@ The capture pipeline is the heart of the daemon. It runs as 4 async tasks connec
 └──────────────┘    └──────────────┘    └──────────────┘    └──────────────┘
       ↓                    ↓                   ↓                   ↓
   mpsc(32)            mpsc(32)            mpsc(32)           (terminal)
+
+                                                    ┌──────────────────────┐
+                                                    │ Background Backfill  │
+                                                    │ (optional, if Ollama)│
+                                                    │                      │
+                                                    │ Reads pending from DB│
+                                                    │ → Ollama embed       │
+                                                    │ → Store in sqlite-vec│
+                                                    └──────────────────────┘
 ```
 
 ## Data Types Flowing Through Channels
@@ -321,6 +330,40 @@ loop {
     }
 }
 ```
+
+## Background Embedding Backfill
+
+**Runs on:** tokio task (async, spawned after pipeline start)
+**Input:** Polls `screenshots` table for `embedding_status = 'pending'`
+**Output:** Writes to `ocr_embeddings` (sqlite-vec) table
+**Prerequisite:** Ollama detected and reachable on daemon startup
+
+### Behavior
+
+```
+// Spawned once on daemon startup if Ollama is available
+loop {
+    pending = db.get_pending_embeddings(batch_size=50)
+    if pending.is_empty() { break }  // All caught up
+
+    for (screenshot_id, text) in pending {
+        embedding = ollama_client.embed(text).await
+        if embedding is None { return }  // Ollama went away
+        db.insert_embedding(screenshot_id, embedding)
+        sleep(50ms)  // Don't overwhelm Ollama
+    }
+}
+log("backfill complete, processed N screenshots")
+```
+
+### Key Details
+
+- **Batch size**: 50 screenshots per DB query
+- **Rate limiting**: 50ms delay between individual embeddings
+- **Graceful degradation**: If Ollama becomes unavailable mid-backfill, stops silently
+- **Idempotent**: Only processes `embedding_status = 'pending'` rows
+- **Non-blocking**: Runs independently of the capture pipeline
+- **CLI alternative**: `cargo run -p rewindos-daemon -- backfill --batch-size 50`
 
 ## Shutdown Sequence
 

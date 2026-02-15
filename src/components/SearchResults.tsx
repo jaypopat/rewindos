@@ -9,6 +9,7 @@ import { SearchResultGrid } from "./SearchResultGrid";
 import { ViewToggle } from "./ViewToggle";
 import { SemanticBadge } from "./SemanticBadge";
 import { formatNumber } from "@/lib/format";
+import { Search } from "lucide-react";
 
 interface SearchResultsProps {
   query: string;
@@ -30,9 +31,7 @@ export function SearchResults({ query, filters, onSelectResult, resultView, onRe
     return (
       <div className="flex-1 flex items-center justify-center px-6">
         <div className="text-center space-y-3 animate-fade-in">
-          <svg className="h-12 w-12 mx-auto text-accent/20" fill="none" viewBox="0 0 24 24" strokeWidth={0.8} stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
-          </svg>
+          <Search className="h-12 w-12 mx-auto text-accent/20" strokeWidth={0.8} />
           <p className="text-sm text-text-secondary">
             Search your screen history
           </p>

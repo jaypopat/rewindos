@@ -18,7 +18,7 @@ interface Props {
   height?: number;
 }
 
-export function HourlyActivityChart({ data, height = 240 }: Props) {
+export function HourlyActivityChart({ data, height }: Props) {
   // Auto-trim: only show hours from first activity to current hour (or last activity + 1)
   const now = new Date();
   const currentHour = now.getHours();
@@ -54,7 +54,7 @@ export function HourlyActivityChart({ data, height = 240 }: Props) {
   }
 
   return (
-    <ResponsiveContainer width="100%" height={height}>
+    <ResponsiveContainer width="100%" height={height ?? "100%"}>
       <BarChart
         data={full}
         margin={{ top: 8, right: 12, bottom: 0, left: 0 }}
