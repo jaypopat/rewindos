@@ -31,39 +31,41 @@ function formatTimer(seconds: number): string {
 }
 
 export function FocusView() {
-  const [config, setConfig] = useState<PomodoroConfig>({
-    workMinutes: 25,
-    shortBreakMinutes: 5,
-    longBreakMinutes: 15,
-    sessionsBeforeLongBreak: 4,
-    autoStartBreaks: true,
-    autoStartWork: false,
+  const [focusSettings, setFocusSettings] = useState({
+    config: {
+      workMinutes: 25,
+      shortBreakMinutes: 5,
+      longBreakMinutes: 15,
+      sessionsBeforeLongBreak: 4,
+      autoStartBreaks: true,
+      autoStartWork: false,
+    } as PomodoroConfig,
+    distractionApps: [] as string[],
+    categoryRules: undefined as Record<string, string[]> | undefined,
+    dailyGoalMinutes: 480,
   });
-  const [distractionApps, setDistractionApps] = useState<string[]>([]);
-  const [categoryRules, setCategoryRules] = useState<Record<string, string[]> | undefined>();
-  const [dailyGoalMinutes, setDailyGoalMinutes] = useState(480);
+
+  const { config, distractionApps, categoryRules, dailyGoalMinutes } = focusSettings;
 
   // Load config from backend (single fetch)
   useEffect(() => {
     getConfig().then((c) => {
       const { focus } = c as unknown as AppConfig;
       if (focus) {
-        setConfig({
-          workMinutes: focus.work_minutes ?? 25,
-          shortBreakMinutes: focus.short_break_minutes ?? 5,
-          longBreakMinutes: focus.long_break_minutes ?? 15,
-          sessionsBeforeLongBreak: focus.sessions_before_long_break ?? 4,
-          autoStartBreaks: focus.auto_start_breaks ?? true,
-          autoStartWork: focus.auto_start_work ?? false,
-        });
-        setDistractionApps(focus.distraction_apps ?? []);
-        if (focus.daily_goal_minutes) {
-          setDailyGoalMinutes(focus.daily_goal_minutes);
-        }
         const userRules = focus.category_rules ?? {};
-        if (Object.keys(userRules).length > 0) {
-          setCategoryRules(buildCategoryRules(userRules));
-        }
+        setFocusSettings({
+          config: {
+            workMinutes: focus.work_minutes ?? 25,
+            shortBreakMinutes: focus.short_break_minutes ?? 5,
+            longBreakMinutes: focus.long_break_minutes ?? 15,
+            sessionsBeforeLongBreak: focus.sessions_before_long_break ?? 4,
+            autoStartBreaks: focus.auto_start_breaks ?? true,
+            autoStartWork: focus.auto_start_work ?? false,
+          },
+          distractionApps: focus.distraction_apps ?? [],
+          categoryRules: Object.keys(userRules).length > 0 ? buildCategoryRules(userRules) : undefined,
+          dailyGoalMinutes: focus.daily_goal_minutes ?? 480,
+        });
       }
     }).catch(() => {});
   }, []);

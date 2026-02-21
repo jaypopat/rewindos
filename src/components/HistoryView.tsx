@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   getActivity,
@@ -6,6 +6,7 @@ import {
   getActiveBlocks,
   browseScreenshots,
   deleteScreenshotsInRange,
+  createCollection,
   getImageUrl,
   type TaskUsageStat,
   type TimelineEntry,
@@ -22,7 +23,7 @@ import { parseWindowTitle } from "@/lib/window-title";
 import { DailyDigestCard } from "./DailyDigestCard";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { CalendarIcon, ChevronDown, ChevronRight, Trash2 } from "lucide-react";
+import { CalendarIcon, ChevronDown, ChevronRight, Crosshair, FolderPlus, Trash2, X } from "lucide-react";
 
 type HistoryMode = "apps" | "timeline";
 
@@ -236,6 +237,13 @@ function getRangeForDate(dateStr: string): { start: number; end: number } {
   return { start, end: start + 86400 };
 }
 
+function hourKeyToTimestamp(key: string): number {
+  const datePart = key.slice(0, 10);
+  const hourNum = parseInt(key.slice(-2), 10);
+  const d = new Date(`${datePart}T${String(hourNum).padStart(2, "0")}:00:00`);
+  return Math.floor(d.getTime() / 1000);
+}
+
 export function HistoryView({ onSelectScreenshot }: HistoryViewProps) {
   const [rangeIdx, setRangeIdx] = useState<number | null>(0);
   const [customDate, setCustomDate] = useState<string | null>(null);
@@ -243,6 +251,14 @@ export function HistoryView({ onSelectScreenshot }: HistoryViewProps) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [expandedHours, setExpandedHours] = useState<Set<string>>(new Set());
   const [showAllHours, setShowAllHours] = useState<Set<string>>(new Set());
+
+  // Range selection state
+  const [rangeSelectMode, setRangeSelectMode] = useState(false);
+  const [rangeStart, setRangeStart] = useState<number | null>(null);
+  const [rangeEnd, setRangeEnd] = useState<number | null>(null);
+  const [rangeSaveName, setRangeSaveName] = useState("");
+  const [rangeSaving, setRangeSaving] = useState(false);
+  const [showRangeNameInput, setShowRangeNameInput] = useState(false);
 
   const { start, end } = useMemo(() => {
     if (customDate) return getRangeForDate(customDate);
@@ -320,10 +336,7 @@ export function HistoryView({ onSelectScreenshot }: HistoryViewProps) {
     [taskStats],
   );
 
-  const uniqueApps = useMemo(
-    () => new Set(taskStats.map((t) => t.app_name)).size,
-    [taskStats],
-  );
+  const uniqueApps = new Set(taskStats.map((t) => t.app_name)).size;
 
   const topAppNames = useMemo(
     () => appGroups.slice(0, 3).map((g) => g.appName).join(", "),
@@ -365,6 +378,9 @@ export function HistoryView({ onSelectScreenshot }: HistoryViewProps) {
   // Delete hour group
   const [confirmDeleteKey, setConfirmDeleteKey] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [saveCollectionKey, setSaveCollectionKey] = useState<string | null>(null);
+  const [saveCollectionName, setSaveCollectionName] = useState("");
+  const [savingCollection, setSavingCollection] = useState(false);
   const queryClient = useQueryClient();
 
   const handleDeleteHour = useCallback(
@@ -397,6 +413,121 @@ export function HistoryView({ onSelectScreenshot }: HistoryViewProps) {
     [queryClient, start, end],
   );
 
+  const handleSaveAsCollection = useCallback(
+    async (group: HourGroup) => {
+      if (!saveCollectionName.trim()) return;
+      const datePart = group.key.slice(0, 10);
+      const hourNum = parseInt(group.key.slice(-2), 10);
+      const hourStart = new Date(`${datePart}T${String(hourNum).padStart(2, "0")}:00:00`);
+      const hourEnd = new Date(hourStart.getTime() + 3600_000);
+      const startTs = Math.floor(hourStart.getTime() / 1000);
+      const endTs = Math.floor(hourEnd.getTime() / 1000);
+
+      setSavingCollection(true);
+      try {
+        await createCollection({
+          name: saveCollectionName.trim(),
+          start_time: startTs,
+          end_time: endTs,
+        });
+        setSaveCollectionKey(null);
+        setSaveCollectionName("");
+        queryClient.invalidateQueries({ queryKey: ["collections"] });
+      } catch (err) {
+        console.error("Failed to save collection:", err);
+      } finally {
+        setSavingCollection(false);
+      }
+    },
+    [saveCollectionName, queryClient],
+  );
+
+  // --- Range selection ---
+
+  // Clear range selection when switching modes or changing date range
+  const rangeResetKey = `${mode}-${start}-${end}`;
+  const prevRangeResetKeyRef = useRef(rangeResetKey);
+  if (prevRangeResetKeyRef.current !== rangeResetKey) {
+    prevRangeResetKeyRef.current = rangeResetKey;
+    setRangeSelectMode(false);
+    setRangeStart(null);
+    setRangeEnd(null);
+    setShowRangeNameInput(false);
+    setRangeSaveName("");
+  }
+
+  const handleRangeClick = useCallback(
+    (timestamp: number) => {
+      if (rangeStart === null || rangeEnd !== null) {
+        // First click or third click (reset)
+        setRangeStart(timestamp);
+        setRangeEnd(null);
+        setShowRangeNameInput(false);
+      } else {
+        // Second click — set end, auto-sort
+        const lo = Math.min(rangeStart, timestamp);
+        const hi = Math.max(rangeStart, timestamp);
+        setRangeStart(lo);
+        setRangeEnd(hi);
+      }
+    },
+    [rangeStart, rangeEnd],
+  );
+
+  const isEntryInRange = (timestamp: number): boolean => {
+    if (!rangeSelectMode || rangeStart === null) return false;
+    if (rangeEnd === null) return timestamp === rangeStart;
+    return timestamp >= rangeStart && timestamp <= rangeEnd;
+  };
+
+  const isHourInRange = (hourKey: string): boolean => {
+    if (!rangeSelectMode || rangeStart === null) return false;
+    const hs = hourKeyToTimestamp(hourKey);
+    const he = hs + 3600;
+    if (rangeEnd === null) {
+      return rangeStart >= hs && rangeStart < he;
+    }
+    return hs <= rangeEnd && he > rangeStart;
+  };
+
+  const rangeDisplayText = useMemo(() => {
+    if (rangeStart === null) return "";
+    if (rangeEnd === null) return "Click to set end point";
+    const startDate = new Date(rangeStart * 1000);
+    const endDate = new Date(rangeEnd * 1000);
+    const timeFmt = (d: Date) =>
+      d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    const dateFmt = (d: Date) =>
+      d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    const sameDay = startDate.toDateString() === endDate.toDateString();
+    if (sameDay) {
+      return `${timeFmt(startDate)} — ${timeFmt(endDate)} (${dateFmt(startDate)})`;
+    }
+    return `${dateFmt(startDate)} ${timeFmt(startDate)} — ${dateFmt(endDate)} ${timeFmt(endDate)}`;
+  }, [rangeStart, rangeEnd]);
+
+  const handleRangeSaveAsCollection = useCallback(async () => {
+    if (!rangeSaveName.trim() || rangeStart === null || rangeEnd === null) return;
+    setRangeSaving(true);
+    try {
+      await createCollection({
+        name: rangeSaveName.trim(),
+        start_time: rangeStart,
+        end_time: rangeEnd,
+      });
+      queryClient.invalidateQueries({ queryKey: ["collections"] });
+      setRangeSelectMode(false);
+      setRangeStart(null);
+      setRangeEnd(null);
+      setShowRangeNameInput(false);
+      setRangeSaveName("");
+    } catch (err) {
+      console.error("Failed to save range collection:", err);
+    } finally {
+      setRangeSaving(false);
+    }
+  }, [rangeSaveName, rangeStart, rangeEnd, queryClient]);
+
   return (
     <div className="flex-1 flex flex-col overflow-hidden px-5 py-4">
       {/* Header + Mode toggle + Range selector */}
@@ -419,6 +550,30 @@ export function HistoryView({ onSelectScreenshot }: HistoryViewProps) {
               </button>
             ))}
           </div>
+          {mode === "timeline" && (
+            <button
+              onClick={() => {
+                setRangeSelectMode((prev) => {
+                  if (prev) {
+                    setRangeStart(null);
+                    setRangeEnd(null);
+                    setShowRangeNameInput(false);
+                    setRangeSaveName("");
+                  }
+                  return !prev;
+                });
+              }}
+              className={cn(
+                "flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-lg border transition-colors",
+                rangeSelectMode
+                  ? "bg-accent/15 border-accent/50 text-accent font-medium"
+                  : "border-border/50 text-text-muted hover:text-text-secondary hover:border-border",
+              )}
+            >
+              <Crosshair className="size-3" />
+              Select Range
+            </button>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <div className="flex gap-0.5 bg-surface-raised rounded-lg p-0.5">
@@ -568,7 +723,7 @@ export function HistoryView({ onSelectScreenshot }: HistoryViewProps) {
                         <span className="text-sm text-text-primary flex-1 truncate">
                           {group.appName}
                         </span>
-                        <span className="text-xs text-text-muted font-mono tabular-nums shrink-0">
+                        <span className="text-xs text-text-muted font-mono tabular-nums shrink-0 w-12 text-right">
                           {formatSecs(group.totalSeconds)}
                         </span>
                         <div className="w-20 h-1.5 bg-surface-raised rounded-full shrink-0 overflow-hidden">
@@ -581,9 +736,7 @@ export function HistoryView({ onSelectScreenshot }: HistoryViewProps) {
                             }}
                           />
                         </div>
-                        {group.titles.length > 0 && (
-                          <ChevronDown className={`size-3.5 text-text-muted transition-transform shrink-0 ${isOpen ? "rotate-180" : ""}`} strokeWidth={2} />
-                        )}
+                        <ChevronDown className={`size-3.5 transition-transform shrink-0 ${group.titles.length > 0 ? "text-text-muted" : "text-transparent"} ${isOpen ? "rotate-180" : ""}`} strokeWidth={2} />
                       </button>
                       {isOpen && group.titles.length > 0 && (
                         <div className="bg-surface-raised/20 px-4 pb-2">
@@ -680,12 +833,26 @@ export function HistoryView({ onSelectScreenshot }: HistoryViewProps) {
                       const allIds = group.entries.map((e) => e.id);
 
                       return (
-                        <div key={group.key} className="border border-border/50 rounded-lg overflow-hidden">
+                        <div key={group.key} className={cn(
+                          "border rounded-lg overflow-hidden transition-colors",
+                          isHourInRange(group.key)
+                            ? "border-accent/50 border-l-2 border-l-accent"
+                            : "border-border/50",
+                        )}>
                           {/* Hour header */}
                           <div className="flex items-center">
                             <button
-                              onClick={() => toggleHour(group.key)}
-                              className="flex-1 min-w-0 flex items-center gap-3 px-4 py-2.5 hover:bg-surface-raised/40 transition-colors text-left"
+                              onClick={() => {
+                                if (rangeSelectMode) {
+                                  handleRangeClick(hourKeyToTimestamp(group.key));
+                                } else {
+                                  toggleHour(group.key);
+                                }
+                              }}
+                              className={cn(
+                                "flex-1 min-w-0 flex items-center gap-3 px-4 py-2.5 hover:bg-surface-raised/40 transition-colors text-left",
+                                rangeSelectMode && "cursor-crosshair",
+                              )}
                             >
                               <ChevronRight className={cn(
                                   "size-3.5 text-text-muted transition-transform shrink-0",
@@ -730,6 +897,51 @@ export function HistoryView({ onSelectScreenshot }: HistoryViewProps) {
                                 </div>
                               )}
                             </button>
+                            {/* Save as collection button */}
+                            {saveCollectionKey === group.key ? (
+                              <form
+                                onSubmit={(e) => {
+                                  e.preventDefault();
+                                  handleSaveAsCollection(group);
+                                }}
+                                onClick={(e) => e.stopPropagation()}
+                                className="flex items-center gap-1.5 px-2 shrink-0"
+                              >
+                                <input
+                                  autoFocus
+                                  value={saveCollectionName}
+                                  onChange={(e) => setSaveCollectionName(e.target.value)}
+                                  placeholder="Collection name..."
+                                  className="text-xs bg-transparent border border-border/50 rounded px-2 py-1 w-36 text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50"
+                                />
+                                <button
+                                  type="submit"
+                                  disabled={!saveCollectionName.trim() || savingCollection}
+                                  className="text-accent hover:text-accent/80 text-xs font-medium disabled:opacity-40 transition-colors"
+                                >
+                                  Save
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => { setSaveCollectionKey(null); setSaveCollectionName(""); }}
+                                  className="text-text-muted hover:text-text-secondary text-xs transition-colors"
+                                >
+                                  Cancel
+                                </button>
+                              </form>
+                            ) : (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSaveCollectionKey(group.key);
+                                  setSaveCollectionName(group.label);
+                                }}
+                                className="px-2 py-2.5 text-text-muted/60 hover:text-accent transition-colors shrink-0"
+                                title={`Save ${group.label} as collection`}
+                              >
+                                <FolderPlus className="size-4" strokeWidth={1.5} />
+                              </button>
+                            )}
                             {/* Delete hour button */}
                             <button
                               onClick={(e) => {
@@ -756,8 +968,21 @@ export function HistoryView({ onSelectScreenshot }: HistoryViewProps) {
                                   {visible.map((entry) => (
                                     <button
                                       key={entry.id}
-                                      onClick={() => onSelectScreenshot?.(entry.id, allIds)}
-                                      className="group relative aspect-video rounded-lg overflow-hidden border border-border/30 hover:border-accent/50 bg-surface-raised transition-all hover:scale-[1.02]"
+                                      onClick={() => {
+                                        if (rangeSelectMode) {
+                                          handleRangeClick(entry.timestamp);
+                                        } else {
+                                          onSelectScreenshot?.(entry.id, allIds);
+                                        }
+                                      }}
+                                      className={cn(
+                                        "group relative aspect-video rounded-lg overflow-hidden bg-surface-raised transition-all",
+                                        rangeSelectMode
+                                          ? isEntryInRange(entry.timestamp)
+                                            ? "ring-2 ring-accent border border-accent/50"
+                                            : "border border-border/30 hover:border-accent/50 cursor-crosshair"
+                                          : "border border-border/30 hover:border-accent/50 hover:scale-[1.02]",
+                                      )}
                                     >
                                       {entry.thumbnail_path ? (
                                         <img
@@ -805,6 +1030,93 @@ export function HistoryView({ onSelectScreenshot }: HistoryViewProps) {
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+
+          {/* Range selection floating toolbar */}
+          {rangeSelectMode && rangeStart !== null && (
+            <div className="shrink-0 border-t border-border/50 bg-surface-base/95 backdrop-blur-sm px-4 py-3">
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2 flex-1 min-w-0">
+                  <Crosshair className="size-3.5 text-accent shrink-0" />
+                  <span className="text-sm text-text-secondary">
+                    {rangeEnd !== null ? (
+                      <>Selected: <span className="text-text-primary font-medium">{rangeDisplayText}</span></>
+                    ) : (
+                      <span className="text-text-muted">{rangeDisplayText}</span>
+                    )}
+                  </span>
+                </div>
+                {showRangeNameInput ? (
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      handleRangeSaveAsCollection();
+                    }}
+                    className="flex items-center gap-2"
+                  >
+                    <input
+                      autoFocus
+                      value={rangeSaveName}
+                      onChange={(e) => setRangeSaveName(e.target.value)}
+                      placeholder="Collection name..."
+                      className="text-xs bg-transparent border border-border/50 rounded px-2 py-1.5 w-44 text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50"
+                    />
+                    <button
+                      type="submit"
+                      disabled={!rangeSaveName.trim() || rangeSaving}
+                      className="text-accent hover:text-accent/80 text-xs font-medium disabled:opacity-40 transition-colors"
+                    >
+                      {rangeSaving ? "Saving..." : "Save"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setShowRangeNameInput(false); setRangeSaveName(""); }}
+                      className="text-text-muted hover:text-text-secondary text-xs transition-colors"
+                    >
+                      Back
+                    </button>
+                  </form>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => {
+                        if (rangeEnd !== null) {
+                          const sd = new Date(rangeStart * 1000);
+                          const ed = new Date(rangeEnd * 1000);
+                          const tf = (d: Date) => d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+                          setRangeSaveName(`${tf(sd)} — ${tf(ed)}`);
+                        }
+                        setShowRangeNameInput(true);
+                      }}
+                      disabled={rangeEnd === null}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-accent text-white hover:bg-accent/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      <FolderPlus className="size-3" />
+                      Save as Collection
+                    </button>
+                    <button
+                      onClick={() => { setRangeStart(null); setRangeEnd(null); setShowRangeNameInput(false); }}
+                      className="px-2.5 py-1.5 text-xs text-text-muted hover:text-text-secondary transition-colors"
+                    >
+                      Clear
+                    </button>
+                    <button
+                      onClick={() => {
+                        setRangeSelectMode(false);
+                        setRangeStart(null);
+                        setRangeEnd(null);
+                        setShowRangeNameInput(false);
+                        setRangeSaveName("");
+                      }}
+                      className="p-1.5 text-text-muted hover:text-text-secondary transition-colors"
+                      title="Exit range select"
+                    >
+                      <X className="size-3.5" />
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>

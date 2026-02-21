@@ -229,16 +229,15 @@ export function RewindView({ onSelectScreenshot }: RewindViewProps) {
   }, [activeBlocks]);
 
   // Reset current index when data changes
-  useEffect(() => {
-    if (screenshots.length > 0) {
-      setCurrentIndex(screenshots.length - 1);
-    } else {
-      setCurrentIndex(0);
-    }
+  const dataResetKey = `${startTime}-${endTime}-${screenshots.length}`;
+  const prevDataResetKeyRef = useRef(dataResetKey);
+  if (prevDataResetKeyRef.current !== dataResetKey) {
+    prevDataResetKeyRef.current = dataResetKey;
+    setCurrentIndex(screenshots.length > 0 ? screenshots.length - 1 : 0);
     setIsPlaying(false);
     setRangeSelection(null);
     setRangeMode(false);
-  }, [startTime, endTime, screenshots.length]);
+  }
 
   // -- Auto-play ------------------------------------------------------------
   useEffect(() => {
@@ -597,6 +596,7 @@ export function RewindView({ onSelectScreenshot }: RewindViewProps) {
   return (
     <div
       ref={containerRef}
+      role="application"
       className="flex-1 flex flex-col min-h-0 outline-none"
       tabIndex={0}
       onKeyDown={handleKeyDown}
@@ -763,19 +763,21 @@ export function RewindView({ onSelectScreenshot }: RewindViewProps) {
             {/* Track */}
             <div
               ref={trackRef}
+              role="group"
+              aria-label="Timeline track"
               className="relative h-8 rounded-md bg-surface-raised/60 cursor-pointer select-none overflow-hidden"
               onMouseDown={handleTrackMouseDown}
               onMouseMove={handleTrackMouseMove}
               onMouseLeave={handleTrackMouseLeave}
             >
               {/* Activity segments */}
-              {segments.map((seg, i) => {
+              {segments.map((seg) => {
                 const left = timeToFraction(seg.startTime) * 100;
                 const right = timeToFraction(seg.endTime + 5) * 100; // +5s for last capture
                 const width = Math.max(right - left, 0.3); // min visible width
                 return (
                   <div
-                    key={i}
+                    key={`${seg.startTime}-${seg.color}`}
                     className="absolute top-1 bottom-1 rounded-sm"
                     style={{
                       left: `${left}%`,

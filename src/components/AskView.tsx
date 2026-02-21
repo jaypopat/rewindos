@@ -89,7 +89,7 @@ export function AskView({ onSelectScreenshot }: AskViewProps) {
           <div ref={scrollRef} className="px-5 py-4 max-w-2xl mx-auto">
             {messages.map((msg, i) => (
               <ChatMessage
-                key={`${msg.role}-${i}`}
+                key={msg.id}
                 message={msg}
                 isStreaming={isStreaming && i === messages.length - 1 && msg.role === "assistant"}
                 onScreenshotClick={onSelectScreenshot}

@@ -86,6 +86,8 @@ function fmtMinsFull(mins: number): string {
 }
 
 export function ScreenTimeChart({ blocks, selectedStart, selectedEnd }: Props) {
+  const [hovered, setHovered] = useState<string | null>(null);
+
   if (blocks.length === 0) {
     return (
       <p className="text-text-muted text-sm text-center py-8">
@@ -109,7 +111,6 @@ export function ScreenTimeChart({ blocks, selectedStart, selectedEnd }: Props) {
 
   const hasHighlight = data.some((d) => d.highlighted);
   const hasToday = data.some((d) => d.isToday);
-  const [hovered, setHovered] = useState<string | null>(null);
 
   // Insights for highlighted days (single-day view)
   const highlightedDays = data.filter((d) => d.highlighted);

@@ -21,6 +21,10 @@ pub struct DaemonService {
     pub start_time: Instant,
     pub ollama_client: Option<Arc<OllamaClient>>,
     pub kwin_window_info: Option<Arc<KwinWindowInfo>>,
+    pub capture_backend_name: String,
+    pub window_info_provider_name: String,
+    pub desktop_name: String,
+    pub session_name: String,
 }
 
 /// Lock a mutex, logging a warning if it was poisoned.
@@ -86,6 +90,10 @@ impl DaemonService {
             disk_usage_bytes,
             capture_interval,
             last_capture_timestamp: None,
+            capture_backend: Some(self.capture_backend_name.clone()),
+            window_info_provider: Some(self.window_info_provider_name.clone()),
+            desktop: Some(self.desktop_name.clone()),
+            session: Some(self.session_name.clone()),
         };
 
         serde_json::to_string(&status)

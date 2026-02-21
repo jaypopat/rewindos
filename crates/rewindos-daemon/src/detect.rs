@@ -5,6 +5,7 @@ use tracing::{debug, info, warn};
 use zbus::Connection;
 
 use crate::capture::{self, CaptureBackend, CaptureError};
+use crate::window_info::gnome_shell::GnomeShellWindowInfo;
 use crate::window_info::kwin::KwinWindowInfo;
 use crate::window_info::noop::NoopWindowInfo;
 use crate::window_info::wlr_foreign_toplevel::WlrForeignToplevelProvider;
@@ -20,11 +21,34 @@ pub enum DesktopEnvironment {
     Unknown,
 }
 
+impl std::fmt::Display for DesktopEnvironment {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::KdePlasma => write!(f, "KDE Plasma"),
+            Self::Gnome => write!(f, "GNOME"),
+            Self::Hyprland => write!(f, "Hyprland"),
+            Self::Sway => write!(f, "Sway"),
+            Self::X11 => write!(f, "X11"),
+            Self::Unknown => write!(f, "Unknown"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionType {
     Wayland,
     X11,
     Unknown,
+}
+
+impl std::fmt::Display for SessionType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Wayland => write!(f, "Wayland"),
+            Self::X11 => write!(f, "X11"),
+            Self::Unknown => write!(f, "Unknown"),
+        }
+    }
 }
 
 /// Detect the current desktop environment.
@@ -121,7 +145,10 @@ pub fn create_capture_backend(
 ///
 /// Returns the trait object and optionally the KWin-specific reference
 /// (needed for D-Bus callback forwarding in the service).
-pub fn create_window_info_provider(
+///
+/// For GNOME, uses a probe-based fallback chain:
+///   wlr-foreign-toplevel (GNOME 45+) → GNOME Shell D-Bus Eval → Noop
+pub async fn create_window_info_provider(
     desktop: &DesktopEnvironment,
     session: &SessionType,
     conn: &Connection,
@@ -131,6 +158,26 @@ pub fn create_window_info_provider(
             let kwin = Arc::new(KwinWindowInfo::new(conn.clone()));
             info!("using KWin window info provider");
             (kwin.clone() as Arc<dyn WindowInfoProvider>, Some(kwin))
+        }
+        DesktopEnvironment::Gnome if *session == SessionType::Wayland => {
+            // Probe-based fallback: wlr-foreign-toplevel → GNOME Shell D-Bus → Noop
+            let wlr = WlrForeignToplevelProvider::new();
+            if wlr.probe().await {
+                info!("GNOME: using wlr-foreign-toplevel window info provider (GNOME 45+)");
+                return (Arc::new(wlr) as Arc<dyn WindowInfoProvider>, None);
+            }
+
+            let gnome_shell = GnomeShellWindowInfo::new(conn.clone());
+            if gnome_shell.probe().await {
+                info!("GNOME: using gnome-shell-dbus window info provider");
+                return (Arc::new(gnome_shell) as Arc<dyn WindowInfoProvider>, None);
+            }
+
+            warn!("GNOME: no window info provider available, using noop");
+            (
+                Arc::new(NoopWindowInfo) as Arc<dyn WindowInfoProvider>,
+                None,
+            )
         }
         _ if *session == SessionType::Wayland => {
             info!(

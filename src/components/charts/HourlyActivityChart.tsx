@@ -85,9 +85,9 @@ export function HourlyActivityChart({ data, height }: Props) {
           cursor={{ fill: "rgba(34, 211, 238, 0.06)" }}
         />
         <Bar dataKey="screenshot_count" radius={[3, 3, 0, 0]} barSize={14}>
-          {full.map((entry, index) => (
+          {full.map((entry) => (
             <Cell
-              key={index}
+              key={entry.hour}
               fill={ACCENT}
               fillOpacity={
                 entry.screenshot_count === 0

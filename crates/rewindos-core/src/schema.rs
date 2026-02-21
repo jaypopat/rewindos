@@ -114,6 +114,14 @@ pub struct DaemonStatus {
     pub disk_usage_bytes: u64,
     pub capture_interval: u32,
     pub last_capture_timestamp: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub capture_backend: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub window_info_provider: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub desktop: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -247,4 +255,45 @@ pub struct CachedDailySummary {
     pub model_name: Option<String>,
     pub generated_at: String,
     pub screenshot_count: i64,
+}
+
+// -- Bookmarks & Collections --
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Bookmark {
+    pub id: i64,
+    pub screenshot_id: i64,
+    pub note: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Collection {
+    pub id: i64,
+    pub name: String,
+    pub description: Option<String>,
+    pub color: String,
+    pub start_time: Option<i64>,
+    pub end_time: Option<i64>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub screenshot_count: i64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct NewCollection {
+    pub name: String,
+    pub description: Option<String>,
+    pub color: Option<String>,
+    pub start_time: Option<i64>,
+    pub end_time: Option<i64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct UpdateCollection {
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub color: Option<String>,
+    pub start_time: Option<i64>,
+    pub end_time: Option<i64>,
 }

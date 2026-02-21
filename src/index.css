@@ -25,6 +25,10 @@
   --color-text-secondary: #d4d4d8;
   --color-text-muted: #71717a;
 
+  /* Popover (shadcn compat) */
+  --color-popover: #0e0e0e;
+  --color-popover-foreground: #fafafa;
+
   /* Border */
   --color-border: #27272a;
 

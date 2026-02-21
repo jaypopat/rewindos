@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { getScreenshot, getImageUrl } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
@@ -7,6 +7,8 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AppDot } from "./AppDot";
 import { BoundingBoxOverlay } from "./BoundingBoxOverlay";
+import { BookmarkButton } from "./BookmarkButton";
+import { AddToCollectionMenu } from "./AddToCollectionMenu";
 import { formatTimestamp } from "@/lib/format";
 
 interface ScreenshotDetailProps {
@@ -17,27 +19,23 @@ interface ScreenshotDetailProps {
   onNavigate?: (id: number) => void;
 }
 
-function highlightText(text: string, query?: string): string {
-  if (!query || !query.trim()) return escapeHtml(text);
-  const escaped = escapeHtml(text);
+function highlightText(text: string, query?: string): ReactNode[] {
+  if (!query || !query.trim()) return [text];
   const words = query.trim().split(/\s+/).filter(Boolean);
-  let result = escaped;
-  for (const word of words) {
-    const regex = new RegExp(`(${escapeRegex(word)})`, "gi");
-    result = result.replace(regex, "<mark>$1</mark>");
-  }
-  return result;
-}
-
-function escapeHtml(text: string): string {
-  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const pattern = new RegExp(`(${words.map(escapeRegex).join("|")})`, "gi");
+  const parts = text.split(pattern);
+  return parts.map((part, i) =>
+    i % 2 === 1 ? <mark key={i}>{part}</mark> : part || null,
+  );
 }
 
 function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-export function ScreenshotDetail({ screenshotId, onBack, searchQuery, screenshotIds = [], onNavigate }: ScreenshotDetailProps) {
+const EMPTY_IDS: number[] = [];
+
+export function ScreenshotDetail({ screenshotId, onBack, searchQuery, screenshotIds = EMPTY_IDS, onNavigate }: ScreenshotDetailProps) {
   const [showBoxes, setShowBoxes] = useState(false);
   const [_hoveredBox, setHoveredBox] = useState<number | null>(null);
   const [copied, setCopied] = useState(false);
@@ -187,6 +185,9 @@ export function ScreenshotDetail({ screenshotId, onBack, searchQuery, screenshot
         </div>
 
         <div className="ml-auto flex items-center gap-2">
+          <BookmarkButton screenshotId={screenshotId} size="md" />
+          <AddToCollectionMenu screenshotId={screenshotId} />
+          <div className="w-px h-4 bg-border/50" />
           {detail.bounding_boxes.length > 0 && (
             <Button
               variant="ghost"
@@ -270,12 +271,9 @@ export function ScreenshotDetail({ screenshotId, onBack, searchQuery, screenshot
           <ScrollArea className="flex-1">
             {detail.ocr_text ? (
               <div className="px-4 py-3">
-                <pre
-                  className="text-xs font-mono text-text-secondary whitespace-pre-wrap break-words leading-relaxed"
-                  dangerouslySetInnerHTML={{
-                    __html: highlightText(detail.ocr_text, searchQuery),
-                  }}
-                />
+                <pre className="text-xs font-mono text-text-secondary whitespace-pre-wrap break-words leading-relaxed">
+                  {highlightText(detail.ocr_text, searchQuery)}
+                </pre>
               </div>
             ) : (
               <div className="flex items-center justify-center h-full px-4">

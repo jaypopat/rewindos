@@ -14,4 +14,10 @@ export const queryKeys = {
   hourlyBrowse: (startTime: number, endTime: number) =>
     ["hourly-browse", startTime, endTime] as const,
   rewind: (start: number, end: number) => ["rewind", start, end] as const,
+  isBookmarked: (id: number) => ["is-bookmarked", id] as const,
+  bookmarks: () => ["bookmarks"] as const,
+  bookmarkedIds: (ids: number[]) => ["bookmarked-ids", ...ids] as const,
+  collections: () => ["collections"] as const,
+  collectionScreenshots: (id: number) =>
+    ["collection-screenshots", id] as const,
 };

@@ -12,13 +12,11 @@ interface StatCardProps {
   onClick?: () => void;
 }
 
+const baseClass = "bg-surface-raised rounded-xl border border-border/50 p-4 flex flex-col gap-2 h-full";
+
 export function StatCard({ label, value, sparklineData, detail, accentColor, trend, trendLabel, onClick }: StatCardProps) {
-  return (
-    <div
-      className={`bg-surface-raised rounded-xl border border-border/50 p-4 flex flex-col gap-2 h-full${onClick ? " cursor-pointer hover:border-accent/30 transition-colors" : ""}`}
-      onClick={onClick}
-      role={onClick ? "button" : undefined}
-    >
+  const content = (
+    <>
       <span className="text-xs font-medium text-text-muted uppercase tracking-wider">{label}</span>
       <div className="flex items-end justify-between gap-3">
         <div>
@@ -33,8 +31,22 @@ export function StatCard({ label, value, sparklineData, detail, accentColor, tre
           <Sparkline data={sparklineData} color={accentColor} />
         )}
       </div>
-    </div>
+    </>
   );
+
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        className={`${baseClass} cursor-pointer hover:border-accent/30 transition-colors text-left`}
+        onClick={onClick}
+      >
+        {content}
+      </button>
+    );
+  }
+
+  return <div className={baseClass}>{content}</div>;
 }
 
 function TrendIndicator({ trend, label }: { trend: number; label?: string }) {

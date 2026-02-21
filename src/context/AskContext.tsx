@@ -15,7 +15,10 @@ import {
   type ScreenshotRef,
 } from "@/lib/api";
 
+let nextMsgId = 0;
+
 export interface ChatMessage {
+  id: number;
   role: "user" | "assistant";
   content: string;
   references?: ScreenshotRef[];
@@ -135,8 +138,8 @@ export function AskProvider({ children }: { children: ReactNode }) {
       // Add user message + empty assistant placeholder
       setMessages((prev) => [
         ...prev,
-        { role: "user", content: text },
-        { role: "assistant", content: "" },
+        { id: nextMsgId++, role: "user", content: text },
+        { id: nextMsgId++, role: "assistant", content: "" },
       ]);
 
       try {

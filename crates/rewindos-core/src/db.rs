@@ -1,9 +1,10 @@
 use crate::error::{CoreError, Result};
 use crate::hasher::PerceptualHasher;
 use crate::schema::{
-    ActiveBlock, ActivityResponse, AppUsageStat, BoundingBox, CachedDailySummary, DailyActivity,
-    HourlyActivity, NewBoundingBox, NewScreenshot, OcrStatus, Screenshot, SearchFilters,
-    SearchResponse, SearchResult, TaskUsageStat,
+    ActiveBlock, ActivityResponse, AppUsageStat, Bookmark, BoundingBox, CachedDailySummary,
+    Collection, DailyActivity, HourlyActivity, NewBoundingBox, NewCollection, NewScreenshot,
+    OcrStatus, Screenshot, SearchFilters, SearchResponse, SearchResult, TaskUsageStat,
+    UpdateCollection,
 };
 use rusqlite::{ffi::sqlite3_auto_extension, params, Connection};
 use std::path::Path;
@@ -1154,6 +1155,356 @@ impl Database {
             |row| row.get(0),
         )?;
         Ok(count)
+    }
+
+    /// Map a row to a Screenshot, given columns in standard order:
+    /// id, timestamp, timestamp_ms, app_name, window_title, window_class,
+    /// file_path, thumbnail_path, width, height, file_size_bytes,
+    /// perceptual_hash, ocr_status, created_at
+    fn map_screenshot_row(row: &rusqlite::Row) -> rusqlite::Result<Screenshot> {
+        Ok(Screenshot {
+            id: row.get(0)?,
+            timestamp: row.get(1)?,
+            timestamp_ms: row.get(2)?,
+            app_name: row.get(3)?,
+            window_title: row.get(4)?,
+            window_class: row.get(5)?,
+            file_path: row.get(6)?,
+            thumbnail_path: row.get(7)?,
+            width: row.get(8)?,
+            height: row.get(9)?,
+            file_size_bytes: row.get(10)?,
+            perceptual_hash: row.get(11)?,
+            ocr_status: OcrStatus::parse(&row.get::<_, String>(12)?),
+            created_at: row.get(13)?,
+        })
+    }
+
+    // ── Bookmarks ────────────────────────────────────────────────────
+
+    /// Toggle bookmark on a screenshot. Returns true if added, false if removed.
+    pub fn toggle_bookmark(&self, screenshot_id: i64, note: Option<&str>) -> Result<bool> {
+        let existing: bool = self.conn.query_row(
+            "SELECT COUNT(*) > 0 FROM bookmarks WHERE screenshot_id = ?1",
+            params![screenshot_id],
+            |row| row.get(0),
+        )?;
+
+        if existing {
+            self.conn.execute(
+                "DELETE FROM bookmarks WHERE screenshot_id = ?1",
+                params![screenshot_id],
+            )?;
+            Ok(false)
+        } else {
+            self.conn.execute(
+                "INSERT INTO bookmarks (screenshot_id, note) VALUES (?1, ?2)",
+                params![screenshot_id, note],
+            )?;
+            Ok(true)
+        }
+    }
+
+    /// Check if a screenshot is bookmarked.
+    pub fn is_bookmarked(&self, screenshot_id: i64) -> Result<bool> {
+        let bookmarked: bool = self.conn.query_row(
+            "SELECT COUNT(*) > 0 FROM bookmarks WHERE screenshot_id = ?1",
+            params![screenshot_id],
+            |row| row.get(0),
+        )?;
+        Ok(bookmarked)
+    }
+
+    /// Batch check which screenshot IDs are bookmarked.
+    pub fn get_bookmarked_ids(&self, screenshot_ids: &[i64]) -> Result<Vec<i64>> {
+        if screenshot_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let placeholders: Vec<String> = (1..=screenshot_ids.len())
+            .map(|i| format!("?{i}"))
+            .collect();
+        let sql = format!(
+            "SELECT screenshot_id FROM bookmarks WHERE screenshot_id IN ({})",
+            placeholders.join(", ")
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let params: Vec<&dyn rusqlite::types::ToSql> = screenshot_ids
+            .iter()
+            .map(|id| id as &dyn rusqlite::types::ToSql)
+            .collect();
+        let rows = stmt.query_map(params.as_slice(), |row| row.get::<_, i64>(0))?;
+        let mut result = Vec::new();
+        for row in rows {
+            result.push(row?);
+        }
+        Ok(result)
+    }
+
+    /// List bookmarks with their screenshots, newest first.
+    pub fn list_bookmarks(&self, limit: i64, offset: i64) -> Result<Vec<(Bookmark, Screenshot)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT b.id, b.screenshot_id, b.note, b.created_at,
+                    s.id, s.timestamp, s.timestamp_ms, s.app_name, s.window_title, s.window_class,
+                    s.file_path, s.thumbnail_path, s.width, s.height, s.file_size_bytes,
+                    s.perceptual_hash, s.ocr_status, s.created_at
+             FROM bookmarks b
+             JOIN screenshots s ON s.id = b.screenshot_id
+             ORDER BY b.created_at DESC
+             LIMIT ?1 OFFSET ?2",
+        )?;
+
+        let rows = stmt.query_map(params![limit, offset], |row| {
+            let bookmark = Bookmark {
+                id: row.get(0)?,
+                screenshot_id: row.get(1)?,
+                note: row.get(2)?,
+                created_at: row.get(3)?,
+            };
+            let screenshot = Screenshot {
+                id: row.get(4)?,
+                timestamp: row.get(5)?,
+                timestamp_ms: row.get(6)?,
+                app_name: row.get(7)?,
+                window_title: row.get(8)?,
+                window_class: row.get(9)?,
+                file_path: row.get(10)?,
+                thumbnail_path: row.get(11)?,
+                width: row.get(12)?,
+                height: row.get(13)?,
+                file_size_bytes: row.get(14)?,
+                perceptual_hash: row.get(15)?,
+                ocr_status: OcrStatus::parse(&row.get::<_, String>(16)?),
+                created_at: row.get(17)?,
+            };
+            Ok((bookmark, screenshot))
+        })?;
+
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Into::into)
+    }
+
+    /// Total number of bookmarks.
+    pub fn bookmark_count(&self) -> Result<i64> {
+        let count: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM bookmarks", [], |row| row.get(0))?;
+        Ok(count)
+    }
+
+    // ── Collections ──────────────────────────────────────────────────
+
+    /// Create a new collection. Returns the new row id.
+    pub fn create_collection(&self, new: &NewCollection) -> Result<i64> {
+        self.conn.execute(
+            "INSERT INTO collections (name, description, color, start_time, end_time)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                new.name,
+                new.description,
+                new.color.as_deref().unwrap_or("#6366f1"),
+                new.start_time,
+                new.end_time,
+            ],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    /// Update an existing collection (partial update).
+    pub fn update_collection(&self, id: i64, update: &UpdateCollection) -> Result<()> {
+        let mut sets = Vec::new();
+        let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+
+        if let Some(ref name) = update.name {
+            sets.push(format!("name = ?{}", values.len() + 1));
+            values.push(Box::new(name.clone()));
+        }
+        if let Some(ref desc) = update.description {
+            sets.push(format!("description = ?{}", values.len() + 1));
+            values.push(Box::new(desc.clone()));
+        }
+        if let Some(ref color) = update.color {
+            sets.push(format!("color = ?{}", values.len() + 1));
+            values.push(Box::new(color.clone()));
+        }
+        if let Some(start) = update.start_time {
+            sets.push(format!("start_time = ?{}", values.len() + 1));
+            values.push(Box::new(start));
+        }
+        if let Some(end) = update.end_time {
+            sets.push(format!("end_time = ?{}", values.len() + 1));
+            values.push(Box::new(end));
+        }
+
+        if sets.is_empty() {
+            return Ok(());
+        }
+
+        sets.push(format!("updated_at = datetime('now')"));
+        let id_param = values.len() + 1;
+        values.push(Box::new(id));
+
+        let sql = format!(
+            "UPDATE collections SET {} WHERE id = ?{}",
+            sets.join(", "),
+            id_param
+        );
+
+        let params: Vec<&dyn rusqlite::types::ToSql> = values.iter().map(|v| v.as_ref()).collect();
+        self.conn.execute(&sql, params.as_slice())?;
+        Ok(())
+    }
+
+    /// Delete a collection (cascade removes collection_items).
+    pub fn delete_collection(&self, id: i64) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM collections WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    /// List all collections with computed screenshot_count.
+    pub fn list_collections(&self) -> Result<Vec<Collection>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT c.id, c.name, c.description, c.color, c.start_time, c.end_time,
+                    c.created_at, c.updated_at,
+                    (SELECT COUNT(*) FROM collection_items ci WHERE ci.collection_id = c.id)
+                    + CASE WHEN c.start_time IS NOT NULL AND c.end_time IS NOT NULL
+                           THEN (SELECT COUNT(*) FROM screenshots s
+                                 WHERE s.timestamp >= c.start_time AND s.timestamp < c.end_time
+                                   AND s.id NOT IN (SELECT ci2.screenshot_id FROM collection_items ci2 WHERE ci2.collection_id = c.id))
+                           ELSE 0 END
+                    AS screenshot_count
+             FROM collections c
+             ORDER BY c.updated_at DESC",
+        )?;
+
+        let rows = stmt.query_map([], |row| {
+            Ok(Collection {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                description: row.get(2)?,
+                color: row.get(3)?,
+                start_time: row.get(4)?,
+                end_time: row.get(5)?,
+                created_at: row.get(6)?,
+                updated_at: row.get(7)?,
+                screenshot_count: row.get(8)?,
+            })
+        })?;
+
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Into::into)
+    }
+
+    /// Get a single collection by id.
+    pub fn get_collection(&self, id: i64) -> Result<Option<Collection>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT c.id, c.name, c.description, c.color, c.start_time, c.end_time,
+                    c.created_at, c.updated_at,
+                    (SELECT COUNT(*) FROM collection_items ci WHERE ci.collection_id = c.id)
+                    + CASE WHEN c.start_time IS NOT NULL AND c.end_time IS NOT NULL
+                           THEN (SELECT COUNT(*) FROM screenshots s
+                                 WHERE s.timestamp >= c.start_time AND s.timestamp < c.end_time
+                                   AND s.id NOT IN (SELECT ci2.screenshot_id FROM collection_items ci2 WHERE ci2.collection_id = c.id))
+                           ELSE 0 END
+                    AS screenshot_count
+             FROM collections c
+             WHERE c.id = ?1",
+        )?;
+
+        let mut rows = stmt.query_map(params![id], |row| {
+            Ok(Collection {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                description: row.get(2)?,
+                color: row.get(3)?,
+                start_time: row.get(4)?,
+                end_time: row.get(5)?,
+                created_at: row.get(6)?,
+                updated_at: row.get(7)?,
+                screenshot_count: row.get(8)?,
+            })
+        })?;
+
+        match rows.next() {
+            Some(row) => Ok(Some(row?)),
+            None => Ok(None),
+        }
+    }
+
+    /// Get screenshots for a collection (resolves time-range + manual items via UNION).
+    pub fn get_collection_screenshots(
+        &self,
+        id: i64,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<Screenshot>> {
+        // First check if the collection has a time range
+        let collection = self.get_collection(id)?;
+        let collection = match collection {
+            Some(c) => c,
+            None => return Ok(Vec::new()),
+        };
+
+        let sql = if collection.start_time.is_some() && collection.end_time.is_some() {
+            // UNION: time-range screenshots + manually added items
+            "SELECT id, timestamp, timestamp_ms, app_name, window_title, window_class,
+                    file_path, thumbnail_path, width, height, file_size_bytes,
+                    perceptual_hash, ocr_status, created_at
+             FROM screenshots
+             WHERE (timestamp >= ?2 AND timestamp < ?3)
+                OR id IN (SELECT screenshot_id FROM collection_items WHERE collection_id = ?1)
+             ORDER BY timestamp DESC
+             LIMIT ?4 OFFSET ?5"
+        } else {
+            // Manual items only
+            "SELECT s.id, s.timestamp, s.timestamp_ms, s.app_name, s.window_title, s.window_class,
+                    s.file_path, s.thumbnail_path, s.width, s.height, s.file_size_bytes,
+                    s.perceptual_hash, s.ocr_status, s.created_at
+             FROM screenshots s
+             JOIN collection_items ci ON ci.screenshot_id = s.id
+             WHERE ci.collection_id = ?1
+             ORDER BY s.timestamp DESC
+             LIMIT ?4 OFFSET ?5"
+        };
+
+        let mut stmt = self.conn.prepare(sql)?;
+        let rows = stmt.query_map(
+            params![
+                id,
+                collection.start_time,
+                collection.end_time,
+                limit,
+                offset
+            ],
+            Self::map_screenshot_row,
+        )?;
+
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Into::into)
+    }
+
+    /// Add a screenshot to a collection (idempotent).
+    pub fn add_to_collection(&self, collection_id: i64, screenshot_id: i64) -> Result<()> {
+        self.conn.execute(
+            "INSERT OR IGNORE INTO collection_items (collection_id, screenshot_id)
+             VALUES (?1, ?2)",
+            params![collection_id, screenshot_id],
+        )?;
+        // Touch updated_at
+        self.conn.execute(
+            "UPDATE collections SET updated_at = datetime('now') WHERE id = ?1",
+            params![collection_id],
+        )?;
+        Ok(())
+    }
+
+    /// Remove a screenshot from a collection.
+    pub fn remove_from_collection(&self, collection_id: i64, screenshot_id: i64) -> Result<()> {
+        self.conn.execute(
+            "DELETE FROM collection_items WHERE collection_id = ?1 AND screenshot_id = ?2",
+            params![collection_id, screenshot_id],
+        )?;
+        Ok(())
     }
 
     fn search_count(&self, filters: &SearchFilters) -> Result<i64> {

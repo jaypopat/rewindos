@@ -42,6 +42,16 @@ fn save_restore_token(token: &str) {
     }
 }
 
+fn delete_restore_token() {
+    let path = restore_token_path();
+    if path.exists() {
+        match std::fs::remove_file(&path) {
+            Ok(()) => debug!(path = %path.display(), "deleted stale portal restore token"),
+            Err(e) => warn!(error = %e, "failed to delete portal restore token"),
+        }
+    }
+}
+
 /// Frame data shared between PipeWire thread and async capture_frame().
 struct FrameData {
     pixels: Vec<u8>,
@@ -75,26 +85,14 @@ impl PortalCaptureBackend {
             should_stop: Arc::new(AtomicBool::new(false)),
         }
     }
-}
 
-#[async_trait]
-impl super::CaptureBackend for PortalCaptureBackend {
-    fn name(&self) -> &'static str {
-        "xdg-desktop-portal + PipeWire"
-    }
-
-    async fn initialize(&mut self) -> Result<(), CaptureError> {
+    /// Set up the portal screencast session and spawn the PipeWire thread.
+    async fn setup_portal_session(
+        &mut self,
+        restore_token: Option<String>,
+    ) -> Result<(), CaptureError> {
         use ashpd::desktop::screencast::{CursorMode, Screencast, SourceType};
 
-        info!("initializing xdg-desktop-portal screencast session");
-
-        // Load any previously saved restore token (avoids re-showing permission dialog)
-        let restore_token = load_restore_token();
-        if restore_token.is_some() {
-            info!("using saved portal restore token to skip permission dialog");
-        }
-
-        // Create ScreenCast proxy and session
         let screencast = Screencast::new()
             .await
             .map_err(|e| CaptureError::Portal(format!("failed to connect to portal: {e}")))?;
@@ -104,8 +102,6 @@ impl super::CaptureBackend for PortalCaptureBackend {
             .await
             .map_err(|e| CaptureError::Portal(format!("failed to create session: {e}")))?;
 
-        // Select sources: capture a full monitor, hide cursor
-        // Use ExplicitlyRevoked persist mode so the portal remembers the selection
         screencast
             .select_sources(
                 &session,
@@ -118,7 +114,6 @@ impl super::CaptureBackend for PortalCaptureBackend {
             .await
             .map_err(|e| CaptureError::Portal(format!("failed to select sources: {e}")))?;
 
-        // Start the screencast (may trigger compositor permission dialog on first run)
         let request = screencast
             .start(&session, None)
             .await
@@ -128,7 +123,6 @@ impl super::CaptureBackend for PortalCaptureBackend {
             .response()
             .map_err(|e| CaptureError::Portal(format!("screencast start response error: {e}")))?;
 
-        // Save the restore token for next startup
         if let Some(token) = response.restore_token() {
             save_restore_token(token);
         }
@@ -144,16 +138,13 @@ impl super::CaptureBackend for PortalCaptureBackend {
             "portal screencast started, spawning PipeWire stream"
         );
 
-        // Get PipeWire remote fd
         let pw_fd = screencast
             .open_pipe_wire_remote(&session)
             .await
             .map_err(|e| CaptureError::Portal(format!("failed to open PipeWire remote: {e}")))?;
 
-        // Convert to raw fd for PipeWire thread
         let pw_raw_fd = pw_fd.into_raw_fd();
 
-        // Spawn dedicated thread for PipeWire main loop
         let shared = self.shared.clone();
         let should_stop = self.should_stop.clone();
 
@@ -164,11 +155,12 @@ impl super::CaptureBackend for PortalCaptureBackend {
                     error!("PipeWire thread exited with error: {e}");
                 }
             })
-            .map_err(|e| CaptureError::PipeWire(format!("failed to spawn PipeWire thread: {e}")))?;
+            .map_err(|e| {
+                CaptureError::PipeWire(format!("failed to spawn PipeWire thread: {e}"))
+            })?;
 
         self.pw_thread = Some(handle);
 
-        // Wait briefly for the first frame to arrive
         for _ in 0..50 {
             if self.shared.ready.load(Ordering::Acquire) {
                 info!("PipeWire stream delivering frames");
@@ -179,6 +171,37 @@ impl super::CaptureBackend for PortalCaptureBackend {
 
         warn!("PipeWire stream started but no frames received within 5s — capture may be delayed");
         Ok(())
+    }
+}
+
+#[async_trait]
+impl super::CaptureBackend for PortalCaptureBackend {
+    fn name(&self) -> &'static str {
+        "xdg-desktop-portal + PipeWire"
+    }
+
+    async fn initialize(&mut self) -> Result<(), CaptureError> {
+        info!("initializing xdg-desktop-portal screencast session");
+
+        let restore_token = load_restore_token();
+        let had_token = restore_token.is_some();
+
+        if had_token {
+            info!("using saved portal restore token to skip permission dialog");
+        }
+
+        match self.setup_portal_session(restore_token).await {
+            Ok(()) => Ok(()),
+            Err(e) if had_token => {
+                warn!(
+                    error = %e,
+                    "portal session failed with saved token, retrying with fresh permission"
+                );
+                delete_restore_token();
+                self.setup_portal_session(None).await
+            }
+            Err(e) => Err(e),
+        }
     }
 
     async fn capture_frame(&mut self) -> Result<RawFrame, CaptureError> {

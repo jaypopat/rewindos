@@ -1,6 +1,8 @@
 import type { SearchResult } from "@/lib/api";
 import { getImageUrl } from "@/lib/api";
+import { HighlightedText } from "@/lib/utils";
 import { AppDot } from "./AppDot";
+import { BookmarkButton } from "./BookmarkButton";
 import { formatRelativeTime } from "@/lib/format";
 import { ImageIcon } from "lucide-react";
 
@@ -38,6 +40,9 @@ export function SearchResultGrid({ results, onSelectResult }: SearchResultGridPr
                 +{result.group_count - 1} similar
               </span>
             )}
+            <div className="absolute top-1.5 left-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+              <BookmarkButton screenshotId={result.id} />
+            </div>
           </div>
 
           {/* Metadata overlay */}
@@ -79,10 +84,9 @@ export function SearchResultGrid({ results, onSelectResult }: SearchResultGridPr
                 {result.window_title}
               </p>
             )}
-            <p
-              className="text-[11px] text-text-secondary line-clamp-3 leading-relaxed"
-              dangerouslySetInnerHTML={{ __html: result.matched_text }}
-            />
+            <p className="text-[11px] text-text-secondary line-clamp-3 leading-relaxed">
+              <HighlightedText html={result.matched_text} />
+            </p>
           </div>
         </button>
       ))}

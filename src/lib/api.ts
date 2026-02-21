@@ -251,6 +251,127 @@ export async function deleteScreenshotsInRange(
   return invoke("delete_screenshots_in_range", { startTime, endTime });
 }
 
+// -- Bookmarks --
+
+export interface BookmarkData {
+  id: number;
+  screenshot_id: number;
+  note: string | null;
+  created_at: string;
+}
+
+export interface BookmarkEntry {
+  bookmark: BookmarkData;
+  screenshot: TimelineEntry;
+}
+
+export async function toggleBookmark(
+  screenshotId: number,
+  note?: string,
+): Promise<boolean> {
+  return invoke("toggle_bookmark", {
+    screenshotId,
+    note: note ?? null,
+  });
+}
+
+export async function isBookmarked(screenshotId: number): Promise<boolean> {
+  return invoke("is_bookmarked", { screenshotId });
+}
+
+export async function getBookmarkedIds(
+  screenshotIds: number[],
+): Promise<number[]> {
+  return invoke("get_bookmarked_ids", { screenshotIds });
+}
+
+export async function listBookmarks(
+  limit?: number,
+  offset?: number,
+): Promise<BookmarkEntry[]> {
+  return invoke("list_bookmarks", {
+    limit: limit ?? null,
+    offset: offset ?? null,
+  });
+}
+
+// -- Collections --
+
+export interface Collection {
+  id: number;
+  name: string;
+  description: string | null;
+  color: string;
+  start_time: number | null;
+  end_time: number | null;
+  created_at: string;
+  updated_at: string;
+  screenshot_count: number;
+}
+
+export interface NewCollection {
+  name: string;
+  description?: string;
+  color?: string;
+  start_time?: number;
+  end_time?: number;
+}
+
+export interface UpdateCollectionData {
+  name?: string;
+  description?: string;
+  color?: string;
+  start_time?: number;
+  end_time?: number;
+}
+
+export async function createCollection(
+  collection: NewCollection,
+): Promise<number> {
+  return invoke("create_collection", { collection });
+}
+
+export async function updateCollection(
+  id: number,
+  update: UpdateCollectionData,
+): Promise<void> {
+  return invoke("update_collection", { id, update });
+}
+
+export async function deleteCollection(id: number): Promise<void> {
+  return invoke("delete_collection", { id });
+}
+
+export async function listCollections(): Promise<Collection[]> {
+  return invoke("list_collections");
+}
+
+export async function getCollectionScreenshots(
+  id: number,
+  limit?: number,
+  offset?: number,
+): Promise<TimelineEntry[]> {
+  return invoke("get_collection_screenshots", {
+    id,
+    limit: limit ?? null,
+    offset: offset ?? null,
+  });
+}
+
+export async function addToCollection(
+  collectionId: number,
+  screenshotId: number,
+): Promise<void> {
+  return invoke("add_to_collection", { collectionId, screenshotId });
+}
+
+export async function removeFromCollection(
+  collectionId: number,
+  screenshotId: number,
+): Promise<void> {
+  return invoke("remove_from_collection", { collectionId, screenshotId });
+}
+
 // -- Settings --
 
 export async function getConfig(): Promise<Record<string, unknown>> {

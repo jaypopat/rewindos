@@ -47,8 +47,8 @@ export function SearchResults({ query, filters, onSelectResult, resultView, onRe
   if (isLoading) {
     return (
       <div className="flex-1 px-5 py-3 space-y-2">
-        {[0, 1, 2].map((i) => (
-          <div key={i} className="flex items-start gap-4 px-4 py-3">
+        {["a", "b", "c"].map((id) => (
+          <div key={id} className="flex items-start gap-4 px-4 py-3">
             <Skeleton className="w-28 h-[72px]" />
             <div className="flex-1 space-y-2">
               <Skeleton className="h-3 w-24" />

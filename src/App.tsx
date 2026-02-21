@@ -13,6 +13,7 @@ import { AskView } from "@/components/AskView";
 import { SettingsView } from "@/components/SettingsView";
 import { FocusView } from "@/components/FocusView";
 import { RewindView } from "@/components/RewindView";
+import { SavedView } from "@/components/SavedView";
 
 type SubView = "list" | "detail";
 
@@ -129,7 +130,7 @@ function App() {
           <RewindView onSelectScreenshot={handleSelectResult} />
         )}
 
-        {(view === "search" || view === "dashboard" || view === "history" || view === "rewind" || view === "ask") && subView === "detail" && selectedScreenshotId !== null && (
+        {(view === "search" || view === "dashboard" || view === "history" || view === "rewind" || view === "ask" || view === "saved") && subView === "detail" && selectedScreenshotId !== null && (
           <ScreenshotDetail
             screenshotId={selectedScreenshotId}
             onBack={handleBack}
@@ -149,6 +150,10 @@ function App() {
 
         {view === "ask" && subView === "list" && (
           <AskView onSelectScreenshot={handleSelectResult} />
+        )}
+
+        {view === "saved" && subView === "list" && (
+          <SavedView onSelectScreenshot={handleSelectResult} />
         )}
 
         {view === "focus" && (

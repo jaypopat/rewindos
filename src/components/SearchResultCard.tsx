@@ -1,6 +1,8 @@
 import type { SearchResult } from "@/lib/api";
 import { getImageUrl } from "@/lib/api";
+import { HighlightedText } from "@/lib/utils";
 import { AppDot } from "./AppDot";
+import { BookmarkButton } from "./BookmarkButton";
 import { formatRelativeTime } from "@/lib/format";
 
 interface SearchResultCardProps {
@@ -30,6 +32,9 @@ export function SearchResultCard({ result, index, onClick }: SearchResultCardPro
               +{result.group_count - 1}
             </span>
           )}
+          <div className="absolute top-1 left-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            <BookmarkButton screenshotId={result.id} />
+          </div>
         </div>
       )}
 
@@ -53,10 +58,9 @@ export function SearchResultCard({ result, index, onClick }: SearchResultCardPro
           </p>
         )}
 
-        <p
-          className="text-xs text-text-secondary line-clamp-2 leading-relaxed"
-          dangerouslySetInnerHTML={{ __html: result.matched_text }}
-        />
+        <p className="text-xs text-text-secondary line-clamp-2 leading-relaxed">
+          <HighlightedText html={result.matched_text} />
+        </p>
       </div>
     </button>
   );

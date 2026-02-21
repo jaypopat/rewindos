@@ -63,23 +63,31 @@ export function HeatmapCalendar({ data, weeks = 16 }: HeatmapCalendarProps) {
     columns.push(cells.slice(i, i + 7));
   }
 
-  const dayLabels = ["", "Mon", "", "Wed", "", "Fri", ""];
+  const dayLabels = [
+    { key: "sun", label: "" },
+    { key: "mon", label: "Mon" },
+    { key: "tue", label: "" },
+    { key: "wed", label: "Wed" },
+    { key: "thu", label: "" },
+    { key: "fri", label: "Fri" },
+    { key: "sat", label: "" },
+  ];
 
   return (
     <TooltipProvider>
       <div className="flex gap-1">
         {/* Day labels */}
         <div className="flex flex-col gap-[3px] mr-1">
-          {dayLabels.map((label, i) => (
-            <span key={i} className="text-[9px] text-text-muted leading-[12px] h-3 flex items-center">
-              {label}
+          {dayLabels.map((day) => (
+            <span key={day.key} className="text-[9px] text-text-muted leading-[12px] h-3 flex items-center">
+              {day.label}
             </span>
           ))}
         </div>
 
         {/* Heatmap grid */}
-        {columns.map((week, wi) => (
-          <div key={wi} className="flex flex-col gap-[3px]">
+        {columns.map((week) => (
+          <div key={week[0].date} className="flex flex-col gap-[3px]">
             {week.map((cell) => {
               const count = cell.day?.count ?? 0;
               const level = cell.day === undefined ? -1 : getLevel(count, max);

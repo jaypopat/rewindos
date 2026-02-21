@@ -1,3 +1,4 @@
+pub mod gnome_shell;
 pub mod kwin;
 pub mod noop;
 pub mod wlr_foreign_toplevel;

@@ -169,7 +169,7 @@ function AppTimeline({
           ))}
         </div>
         <div className="relative h-6 bg-surface-raised rounded overflow-hidden">
-          {spans.map((span, i) => {
+          {spans.map((span) => {
             const blockStart = Math.max(span.startTime, rangeStart);
             const blockEnd = Math.min(span.endTime, rangeEnd);
             if (blockEnd <= rangeStart || blockStart >= rangeEnd) return null;
@@ -177,7 +177,7 @@ function AppTimeline({
             const width = ((blockEnd - blockStart) / (rangeEnd - rangeStart)) * 100;
             return (
               <div
-                key={i}
+                key={`${span.startTime}-${span.appName}`}
                 className="absolute top-0 h-full rounded-sm"
                 style={{
                   left: `${left}%`,

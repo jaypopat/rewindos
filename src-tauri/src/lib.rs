@@ -10,8 +10,8 @@ use rewindos_core::config::AppConfig;
 use rewindos_core::db::Database;
 use rewindos_core::embedding::OllamaClient as EmbeddingClient;
 use rewindos_core::schema::{
-    ActiveBlock, ActivityResponse, BoundingBox, CachedDailySummary, SearchFilters, SearchResponse,
-    TaskUsageStat,
+    ActiveBlock, ActivityResponse, Bookmark, BoundingBox, CachedDailySummary, Collection,
+    NewCollection, SearchFilters, SearchResponse, TaskUsageStat, UpdateCollection,
 };
 use serde::{Deserialize, Serialize};
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
@@ -939,6 +939,153 @@ async fn ask(
     })
 }
 
+// -- Bookmark commands --
+
+#[tauri::command]
+fn toggle_bookmark(
+    state: State<'_, AppState>,
+    screenshot_id: i64,
+    note: Option<String>,
+) -> Result<bool, String> {
+    let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+    db.toggle_bookmark(screenshot_id, note.as_deref())
+        .map_err(|e| format!("db error: {e}"))
+}
+
+#[tauri::command]
+fn is_bookmarked(state: State<'_, AppState>, screenshot_id: i64) -> Result<bool, String> {
+    let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+    db.is_bookmarked(screenshot_id)
+        .map_err(|e| format!("db error: {e}"))
+}
+
+#[tauri::command]
+fn get_bookmarked_ids(
+    state: State<'_, AppState>,
+    screenshot_ids: Vec<i64>,
+) -> Result<Vec<i64>, String> {
+    let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+    db.get_bookmarked_ids(&screenshot_ids)
+        .map_err(|e| format!("db error: {e}"))
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct BookmarkEntry {
+    bookmark: Bookmark,
+    screenshot: TimelineEntry,
+}
+
+#[tauri::command]
+fn list_bookmarks(
+    state: State<'_, AppState>,
+    limit: Option<i64>,
+    offset: Option<i64>,
+) -> Result<Vec<BookmarkEntry>, String> {
+    let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+    let results = db
+        .list_bookmarks(limit.unwrap_or(100), offset.unwrap_or(0))
+        .map_err(|e| format!("db error: {e}"))?;
+
+    Ok(results
+        .into_iter()
+        .map(|(bookmark, s)| BookmarkEntry {
+            bookmark,
+            screenshot: TimelineEntry {
+                id: s.id,
+                timestamp: s.timestamp,
+                app_name: s.app_name,
+                window_title: s.window_title,
+                thumbnail_path: s.thumbnail_path,
+                file_path: s.file_path,
+            },
+        })
+        .collect())
+}
+
+// -- Collection commands --
+
+#[tauri::command]
+fn create_collection(
+    state: State<'_, AppState>,
+    collection: NewCollection,
+) -> Result<i64, String> {
+    let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+    db.create_collection(&collection)
+        .map_err(|e| format!("db error: {e}"))
+}
+
+#[tauri::command]
+fn update_collection(
+    state: State<'_, AppState>,
+    id: i64,
+    update: UpdateCollection,
+) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+    db.update_collection(id, &update)
+        .map_err(|e| format!("db error: {e}"))
+}
+
+#[tauri::command]
+fn delete_collection(state: State<'_, AppState>, id: i64) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+    db.delete_collection(id)
+        .map_err(|e| format!("db error: {e}"))
+}
+
+#[tauri::command]
+fn list_collections(state: State<'_, AppState>) -> Result<Vec<Collection>, String> {
+    let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+    db.list_collections()
+        .map_err(|e| format!("db error: {e}"))
+}
+
+#[tauri::command]
+fn get_collection_screenshots(
+    state: State<'_, AppState>,
+    id: i64,
+    limit: Option<i64>,
+    offset: Option<i64>,
+) -> Result<Vec<TimelineEntry>, String> {
+    let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+    let screenshots = db
+        .get_collection_screenshots(id, limit.unwrap_or(200), offset.unwrap_or(0))
+        .map_err(|e| format!("db error: {e}"))?;
+
+    Ok(screenshots
+        .into_iter()
+        .map(|s| TimelineEntry {
+            id: s.id,
+            timestamp: s.timestamp,
+            app_name: s.app_name,
+            window_title: s.window_title,
+            thumbnail_path: s.thumbnail_path,
+            file_path: s.file_path,
+        })
+        .collect())
+}
+
+#[tauri::command]
+fn add_to_collection(
+    state: State<'_, AppState>,
+    collection_id: i64,
+    screenshot_id: i64,
+) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+    db.add_to_collection(collection_id, screenshot_id)
+        .map_err(|e| format!("db error: {e}"))
+}
+
+#[tauri::command]
+fn remove_from_collection(
+    state: State<'_, AppState>,
+    collection_id: i64,
+    screenshot_id: i64,
+) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+    db.remove_from_collection(collection_id, screenshot_id)
+        .map_err(|e| format!("db error: {e}"))
+}
+
 // -- Delete commands --
 
 #[tauri::command]
@@ -1096,6 +1243,16 @@ pub fn run() {
                 }
             }
 
+            // Warn GNOME users about AppIndicator extension requirement
+            if let Ok(desktop) = std::env::var("XDG_CURRENT_DESKTOP") {
+                if desktop.to_uppercase().contains("GNOME") {
+                    warn!(
+                        "GNOME detected: system tray requires \
+                         'AppIndicator and KStatusNotifierItem Support' extension"
+                    );
+                }
+            }
+
             let _tray = TrayIconBuilder::new()
                 .icon(tray_icon)
                 .tooltip("RewindOS - Capturing")
@@ -1196,6 +1353,17 @@ pub fn run() {
             delete_screenshots_in_range,
             get_config,
             update_config,
+            toggle_bookmark,
+            is_bookmarked,
+            get_bookmarked_ids,
+            list_bookmarks,
+            create_collection,
+            update_collection,
+            delete_collection,
+            list_collections,
+            get_collection_screenshots,
+            add_to_collection,
+            remove_from_collection,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

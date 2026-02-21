@@ -69,9 +69,9 @@ export function TimelineView({ onSelectScreenshot }: TimelineViewProps) {
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (e.key === "ArrowLeft" && selectedIdx > 0) {
-        setSelectedIdx(selectedIdx - 1);
+        setSelectedIdx((prev) => prev - 1);
       } else if (e.key === "ArrowRight" && selectedIdx < results.length - 1) {
-        setSelectedIdx(selectedIdx + 1);
+        setSelectedIdx((prev) => prev + 1);
       } else if (e.key === "Enter" && selected) {
         onSelectScreenshot(selected.id);
       }
@@ -81,6 +81,7 @@ export function TimelineView({ onSelectScreenshot }: TimelineViewProps) {
 
   return (
     <div
+      role="listbox"
       className="flex-1 flex flex-col min-h-0 outline-none"
       tabIndex={0}
       onKeyDown={handleKeyDown}

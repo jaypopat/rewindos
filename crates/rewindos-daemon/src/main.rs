@@ -382,10 +382,11 @@ async fn run_daemon() -> anyhow::Result<()> {
 
     // Create window info provider
     let (window_info, kwin_window_info) =
-        detect::create_window_info_provider(&desktop, &session, &dbus_conn);
+        detect::create_window_info_provider(&desktop, &session, &dbus_conn).await;
 
     // Create capture backend
     let capture_backend = detect::create_capture_backend(&desktop, &session, &dbus_conn)?;
+    let capture_backend_name = capture_backend.name().to_string();
 
     // Start the capture pipeline
     let pipeline_handle =
@@ -453,6 +454,10 @@ async fn run_daemon() -> anyhow::Result<()> {
         start_time: Instant::now(),
         ollama_client,
         kwin_window_info: kwin_window_info.clone(),
+        capture_backend_name,
+        window_info_provider_name: window_info.name().to_string(),
+        desktop_name: desktop.to_string(),
+        session_name: session.to_string(),
     };
 
     dbus_conn
