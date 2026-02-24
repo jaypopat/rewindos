@@ -75,3 +75,16 @@ export function formatDateShort(dateStr: string): string {
   const [, month, day] = dateStr.split("-");
   return `${parseInt(month)}/${parseInt(day)}`;
 }
+
+export function formatSecs(secs: number): string {
+  return formatMins(Math.round(secs / 60));
+}
+
+export function formatMins(mins: number): string {
+  if (mins >= 60) {
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    return m > 0 ? `${h}h ${m}m` : `${h}h`;
+  }
+  return `${mins}m`;
+}

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getDailySummary } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
-import { AppDot } from "./AppDot";
+import { AppDot } from "@/components/AppDot";
 import { getAppColor } from "@/lib/app-colors";
 import { Sparkles, ChevronDown, RefreshCw } from "lucide-react";
 
@@ -29,7 +29,6 @@ export function DailyDigestCard({
   dateKey,
   startTime,
   endTime,
-  isToday = false,
   defaultExpanded = false,
 }: DailyDigestCardProps) {
   const [isExpanded, setIsExpanded] = useState(defaultExpanded);
@@ -157,19 +156,17 @@ export function DailyDigestCard({
                   </span>
                 )}
                 <span className="flex-1" />
-                {isToday && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleRegenerate();
-                    }}
-                    disabled={busy}
-                    className="flex items-center gap-1 text-[10px] text-accent hover:text-accent/80 font-medium transition-colors disabled:opacity-50"
-                  >
-                    <RefreshCw className={`size-3 ${isRegenerating ? "animate-spin" : ""}`} strokeWidth={2} />
-                    Regenerate
-                  </button>
-                )}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleRegenerate();
+                  }}
+                  disabled={busy}
+                  className="flex items-center gap-1 text-[10px] text-accent hover:text-accent/80 font-medium transition-colors disabled:opacity-50"
+                >
+                  <RefreshCw className={`size-3 ${isRegenerating ? "animate-spin" : ""}`} strokeWidth={2} />
+                  Regenerate
+                </button>
               </div>
             </>
           )}

@@ -11,7 +11,9 @@ use rewindos_core::db::Database;
 use rewindos_core::embedding::OllamaClient as EmbeddingClient;
 use rewindos_core::schema::{
     ActiveBlock, ActivityResponse, Bookmark, BoundingBox, CachedDailySummary, Collection,
-    NewCollection, SearchFilters, SearchResponse, TaskUsageStat, UpdateCollection,
+    JournalDateInfo, JournalEntry, JournalScreenshot, JournalSearchResponse, JournalStreakInfo,
+    JournalSummary, JournalTag, JournalTemplate, NewCollection, SearchFilters, SearchResponse,
+    TaskUsageStat, UpdateCollection, UpsertJournalEntry,
 };
 use serde::{Deserialize, Serialize};
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
@@ -1086,6 +1088,302 @@ fn remove_from_collection(
         .map_err(|e| format!("db error: {e}"))
 }
 
+// -- Journal commands --
+
+#[tauri::command]
+fn get_journal_entry(
+    state: State<'_, AppState>,
+    date: String,
+) -> Result<Option<JournalEntry>, String> {
+    let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+    db.get_journal_entry(&date)
+        .map_err(|e| format!("db error: {e}"))
+}
+
+#[tauri::command]
+fn upsert_journal_entry(
+    state: State<'_, AppState>,
+    entry: UpsertJournalEntry,
+) -> Result<i64, String> {
+    let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+    db.upsert_journal_entry(&entry)
+        .map_err(|e| format!("db error: {e}"))
+}
+
+#[tauri::command]
+fn delete_journal_entry(state: State<'_, AppState>, date: String) -> Result<bool, String> {
+    let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+    db.delete_journal_entry(&date)
+        .map_err(|e| format!("db error: {e}"))
+}
+
+#[tauri::command]
+fn get_journal_dates(
+    state: State<'_, AppState>,
+    start_date: String,
+    end_date: String,
+) -> Result<Vec<JournalDateInfo>, String> {
+    let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+    db.get_journal_dates(&start_date, &end_date)
+        .map_err(|e| format!("db error: {e}"))
+}
+
+#[tauri::command]
+fn get_journal_streak(state: State<'_, AppState>) -> Result<JournalStreakInfo, String> {
+    let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+    db.get_journal_streak()
+        .map_err(|e| format!("db error: {e}"))
+}
+
+#[tauri::command]
+fn add_journal_screenshot(
+    state: State<'_, AppState>,
+    journal_entry_id: i64,
+    screenshot_id: i64,
+    caption: Option<String>,
+) -> Result<i64, String> {
+    let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+    db.add_journal_screenshot(journal_entry_id, screenshot_id, caption.as_deref())
+        .map_err(|e| format!("db error: {e}"))
+}
+
+#[tauri::command]
+fn remove_journal_screenshot(
+    state: State<'_, AppState>,
+    journal_entry_id: i64,
+    screenshot_id: i64,
+) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+    db.remove_journal_screenshot(journal_entry_id, screenshot_id)
+        .map_err(|e| format!("db error: {e}"))
+}
+
+#[tauri::command]
+fn get_journal_screenshots(
+    state: State<'_, AppState>,
+    journal_entry_id: i64,
+) -> Result<Vec<JournalScreenshot>, String> {
+    let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+    db.get_journal_screenshots(journal_entry_id)
+        .map_err(|e| format!("db error: {e}"))
+}
+
+// -- Journal upgrade commands --
+
+#[tauri::command]
+fn set_journal_tags(
+    state: State<'_, AppState>,
+    entry_id: i64,
+    tags: Vec<String>,
+) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+    db.set_entry_tags(entry_id, &tags)
+        .map_err(|e| format!("db error: {e}"))
+}
+
+#[tauri::command]
+fn get_journal_tags(
+    state: State<'_, AppState>,
+    entry_id: i64,
+) -> Result<Vec<JournalTag>, String> {
+    let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+    db.get_entry_tags(entry_id)
+        .map_err(|e| format!("db error: {e}"))
+}
+
+#[tauri::command]
+fn list_all_journal_tags(state: State<'_, AppState>) -> Result<Vec<JournalTag>, String> {
+    let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+    db.list_all_tags().map_err(|e| format!("db error: {e}"))
+}
+
+#[tauri::command]
+fn search_journal(
+    state: State<'_, AppState>,
+    query: String,
+    limit: Option<i64>,
+    offset: Option<i64>,
+) -> Result<JournalSearchResponse, String> {
+    let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+    db.search_journal(&query, limit.unwrap_or(20), offset.unwrap_or(0))
+        .map_err(|e| format!("db error: {e}"))
+}
+
+#[tauri::command]
+fn list_journal_templates(state: State<'_, AppState>) -> Result<Vec<JournalTemplate>, String> {
+    let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+    db.list_journal_templates()
+        .map_err(|e| format!("db error: {e}"))
+}
+
+#[tauri::command]
+fn create_journal_template(
+    state: State<'_, AppState>,
+    name: String,
+    description: Option<String>,
+    content: String,
+) -> Result<i64, String> {
+    let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+    db.create_journal_template(&name, description.as_deref(), &content)
+        .map_err(|e| format!("db error: {e}"))
+}
+
+#[tauri::command]
+fn delete_journal_template(
+    state: State<'_, AppState>,
+    id: i64,
+) -> Result<bool, String> {
+    let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+    db.delete_journal_template(id)
+        .map_err(|e| format!("db error: {e}"))
+}
+
+#[tauri::command]
+async fn generate_journal_summary(
+    state: State<'_, AppState>,
+    period_type: String,
+    period_key: String,
+    start_date: String,
+    end_date: String,
+    force_regenerate: Option<bool>,
+) -> Result<JournalSummary, String> {
+    let force = force_regenerate.unwrap_or(false);
+
+    // Check cache first
+    if !force {
+        let cached = {
+            let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+            db.get_journal_summary_cache(&period_type, &period_key)
+                .map_err(|e| format!("db error: {e}"))?
+        };
+        if let Some(summary) = cached {
+            return Ok(summary);
+        }
+    }
+
+    // Fetch entries in range
+    let entries = {
+        let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+        db.get_journal_entries_in_range(&start_date, &end_date)
+            .map_err(|e| format!("db error: {e}"))?
+    };
+
+    if entries.is_empty() {
+        return Err("No journal entries in this period".to_string());
+    }
+
+    // Build prompt
+    let entries_text: Vec<String> = entries
+        .iter()
+        .map(|e| format!("## {}\n{}", e.date, e.content))
+        .collect();
+    let prompt = format!(
+        "You are an AI assistant summarizing a user's journal entries. \
+        Write a brief, insightful summary (3-5 sentences) covering themes, mood trends, \
+        and notable events. Be specific and reference content from the entries.\n\n\
+        Journal entries for {} ({}):\n\n{}\n\n\
+        Write a concise summary highlighting patterns, mood trends, and key events.",
+        period_key, period_type, entries_text.join("\n\n"),
+    );
+
+    let (ollama_url, ollama_model) = {
+        let cfg = state
+            .config
+            .lock()
+            .map_err(|e| format!("config lock: {e}"))?;
+        (
+            format!("{}/api/generate", cfg.chat.ollama_url.trim_end_matches('/')),
+            cfg.chat.model.clone(),
+        )
+    };
+
+    let summary_text = match reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+    {
+        Ok(client) => {
+            match client
+                .post(&ollama_url)
+                .json(&serde_json::json!({
+                    "model": ollama_model,
+                    "prompt": prompt,
+                    "stream": false,
+                    "options": {
+                        "temperature": 0.7,
+                        "num_predict": 512,
+                    }
+                }))
+                .send()
+                .await
+            {
+                Ok(resp) if resp.status().is_success() => {
+                    match resp.json::<serde_json::Value>().await {
+                        Ok(json) => {
+                            let raw = json["response"].as_str().unwrap_or("").trim();
+                            if raw.is_empty() {
+                                return Err("Empty response from Ollama".to_string());
+                            }
+                            // Strip <think>...</think> blocks
+                            let cleaned = {
+                                let re =
+                                    regex_lite::Regex::new(r"(?s)<think>.*?</think>").unwrap();
+                                re.replace_all(raw, "").trim().to_string()
+                            };
+                            cleaned
+                        }
+                        Err(e) => return Err(format!("Failed to parse Ollama response: {e}")),
+                    }
+                }
+                Ok(resp) => {
+                    return Err(format!(
+                        "Ollama returned {}: {}",
+                        resp.status(),
+                        resp.text().await.unwrap_or_default()
+                    ))
+                }
+                Err(e) => return Err(format!("Ollama request failed: {e}")),
+            }
+        }
+        Err(e) => return Err(format!("Failed to build HTTP client: {e}")),
+    };
+
+    let entry_count = entries.len() as i64;
+    let generated_at = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
+
+    // Cache result
+    {
+        let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+        let _ = db.set_journal_summary_cache(
+            &period_type,
+            &period_key,
+            &summary_text,
+            entry_count,
+            Some(&ollama_model),
+        );
+    }
+
+    Ok(JournalSummary {
+        period_type,
+        period_key,
+        summary_text,
+        entry_count,
+        generated_at,
+        cached: false,
+    })
+}
+
+#[tauri::command]
+fn export_journal(
+    state: State<'_, AppState>,
+    start_date: String,
+    end_date: String,
+) -> Result<String, String> {
+    let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+    db.export_journal_markdown(&start_date, &end_date)
+        .map_err(|e| format!("db error: {e}"))
+}
+
 // -- Delete commands --
 
 #[tauri::command]
@@ -1364,6 +1662,23 @@ pub fn run() {
             get_collection_screenshots,
             add_to_collection,
             remove_from_collection,
+            get_journal_entry,
+            upsert_journal_entry,
+            delete_journal_entry,
+            get_journal_dates,
+            get_journal_streak,
+            add_journal_screenshot,
+            remove_journal_screenshot,
+            get_journal_screenshots,
+            set_journal_tags,
+            get_journal_tags,
+            list_all_journal_tags,
+            search_journal,
+            list_journal_templates,
+            create_journal_template,
+            delete_journal_template,
+            generate_journal_summary,
+            export_journal,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

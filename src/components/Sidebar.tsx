@@ -5,9 +5,9 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { LayoutGrid, CalendarDays, Rewind, Search, Sparkles, Clock, Settings, Bookmark } from "lucide-react";
+import { LayoutGrid, CalendarDays, Rewind, Search, Sparkles, Clock, Settings, Bookmark, BookOpen } from "lucide-react";
 
-export type View = "dashboard" | "history" | "rewind" | "search" | "saved" | "ask" | "focus" | "settings";
+export type View = "dashboard" | "history" | "rewind" | "search" | "saved" | "journal" | "ask" | "focus" | "settings";
 
 interface SidebarProps {
   activeView: View;
@@ -39,6 +39,11 @@ const NAV_ITEMS: { view: View; label: string; icon: React.ReactNode }[] = [
     view: "saved",
     label: "Saved",
     icon: <Bookmark className="size-5" strokeWidth={1.8} />,
+  },
+  {
+    view: "journal",
+    label: "Journal",
+    icon: <BookOpen className="size-5" strokeWidth={1.8} />,
   },
   {
     view: "ask",

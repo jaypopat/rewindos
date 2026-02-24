@@ -3,13 +3,14 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   listBookmarks,
   listCollections,
+  createCollection,
   deleteCollection,
   getImageUrl,
 } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
-import { BookmarkButton } from "./BookmarkButton";
+import { BookmarkButton } from "@/components/BookmarkButton";
 import { CollectionDetailView } from "./CollectionDetailView";
-import { AppDot } from "./AppDot";
+import { AppDot } from "@/components/AppDot";
 import { formatRelativeTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { Plus, Clock, Trash2, ImageIcon } from "lucide-react";
@@ -48,7 +49,6 @@ export function SavedView({ onSelectScreenshot }: SavedViewProps) {
 
   const createMutation = useMutation({
     mutationFn: async (name: string) => {
-      const { createCollection } = await import("@/lib/api");
       return createCollection({ name });
     },
     onSuccess: () => {

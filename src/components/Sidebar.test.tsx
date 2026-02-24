@@ -3,13 +3,13 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { Sidebar } from "./Sidebar";
 
 describe("Sidebar", () => {
-  it("renders all main nav items", () => {
+  it("renders all main nav items plus settings", () => {
     const onViewChange = vi.fn();
     render(<Sidebar activeView="dashboard" onViewChange={onViewChange} />);
 
     const buttons = screen.getAllByRole("button");
-    // 5 nav items + 1 settings button = 6
-    expect(buttons.length).toBe(6);
+    // 8 nav items + 1 settings button = 9
+    expect(buttons.length).toBe(9);
   });
 
   it("calls onViewChange when a nav item is clicked", () => {
@@ -17,8 +17,8 @@ describe("Sidebar", () => {
     render(<Sidebar activeView="dashboard" onViewChange={onViewChange} />);
 
     const buttons = screen.getAllByRole("button");
-    // Click the third button (Search — after Today, History)
-    fireEvent.click(buttons[2]);
+    // Click the fourth button (Search — after Today, History, Rewind)
+    fireEvent.click(buttons[3]);
     expect(onViewChange).toHaveBeenCalledWith("search");
   });
 

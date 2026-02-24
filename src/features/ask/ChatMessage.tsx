@@ -1,6 +1,6 @@
 import { createElement, useMemo, type ReactNode } from "react";
 import type { ChatMessage as ChatMessageType } from "@/context/AskContext";
-import { ScreenshotRefCard } from "./ScreenshotRefCard";
+import { ScreenshotRefCard } from "@/components/ScreenshotRefCard";
 
 interface ChatMessageProps {
   message: ChatMessageType;

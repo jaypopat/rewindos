@@ -26,7 +26,12 @@ describe("queryKeys", () => {
 
   it("generates activity key from timestamp", () => {
     const key = queryKeys.activity(1000);
-    expect(key).toEqual(["activity", 1000]);
+    expect(key).toEqual(["activity", 1000, undefined]);
+  });
+
+  it("generates activity key with until timestamp", () => {
+    const key = queryKeys.activity(1000, 2000);
+    expect(key).toEqual(["activity", 1000, 2000]);
   });
 
   it("generates ask health key", () => {

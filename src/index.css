@@ -14,6 +14,7 @@
   /* Semantic / AI */
   --color-semantic: #f59e0b;
   --color-semantic-muted: #f59e0b20;
+  --color-semantic-highlight: #f59e0b40;
 
   /* Signal */
   --color-signal-active: #34d399;
@@ -217,4 +218,254 @@ mark {
 
 .font-mono {
   font-family: var(--font-mono);
+}
+
+/* --- Tiptap / ProseMirror --- */
+
+.tiptap {
+  outline: none;
+  min-height: 200px;
+}
+
+.tiptap p {
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+  line-height: 1.625;
+  color: var(--color-text-primary);
+  margin: 0.125rem 0;
+}
+
+.tiptap h1,
+.tiptap h2,
+.tiptap h3 {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin: 0.75rem 0 0.25rem;
+}
+
+.tiptap h1 {
+  font-size: 1.125rem;
+  border-bottom: 1px solid rgba(228, 228, 231, 0.15);
+  padding-bottom: 0.25rem;
+}
+
+.tiptap h2 {
+  font-size: 1rem;
+}
+
+.tiptap h3 {
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-secondary);
+}
+
+.tiptap ul,
+.tiptap ol {
+  padding-left: 1.25rem;
+  margin: 0.125rem 0;
+}
+
+.tiptap ul:not([data-type]) {
+  list-style-type: disc;
+}
+
+.tiptap ol {
+  list-style-type: decimal;
+}
+
+.tiptap li {
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+  line-height: 1.625;
+  color: var(--color-text-primary);
+}
+
+.tiptap li p {
+  margin: 0;
+}
+
+.tiptap li::marker {
+  color: var(--color-text-muted);
+}
+
+.tiptap ul[data-type="taskList"] {
+  list-style: none;
+  padding-left: 0;
+}
+
+.tiptap ul[data-type="taskList"] li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.375rem;
+}
+
+.tiptap ul[data-type="taskList"] li > label {
+  display: flex;
+  align-items: center;
+  margin-top: 0.25rem;
+}
+
+.tiptap ul[data-type="taskList"] li > label input[type="checkbox"] {
+  accent-color: var(--color-accent);
+  cursor: pointer;
+}
+
+.tiptap ul[data-type="taskList"] li[data-checked="true"] > div > p {
+  text-decoration: line-through;
+  opacity: 0.5;
+}
+
+.tiptap blockquote {
+  border-left: 2px solid var(--color-text-muted);
+  padding-left: 0.75rem;
+  margin: 0.5rem 0;
+  color: var(--color-text-secondary);
+  font-style: italic;
+}
+
+.tiptap code {
+  color: var(--color-accent);
+  background: var(--color-accent-muted);
+  padding: 0.125rem 0.25rem;
+  border-radius: 0.25rem;
+  font-size: 0.75rem;
+  font-family: var(--font-mono);
+}
+
+.tiptap pre {
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-radius: 0.5rem;
+  padding: 0.75rem;
+  margin: 0.5rem 0;
+  overflow-x: auto;
+}
+
+.tiptap pre code {
+  background: none;
+  padding: 0;
+  color: var(--color-text-secondary);
+}
+
+.tiptap strong {
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+.tiptap em {
+  font-style: italic;
+}
+
+.tiptap a {
+  color: var(--color-accent);
+  text-decoration: underline;
+  text-decoration-color: var(--color-accent);
+  cursor: pointer;
+}
+
+.tiptap mark {
+  background: var(--color-semantic-highlight);
+  color: inherit;
+  padding: 0.125rem 0.25rem;
+  border-radius: 0.125rem;
+}
+
+.tiptap hr {
+  border: none;
+  border-top: 1px solid var(--color-text-muted);
+  margin: 0.75rem 0;
+}
+
+/* Placeholder */
+.tiptap p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: var(--color-text-muted);
+  pointer-events: none;
+  height: 0;
+  font-style: italic;
+}
+
+/* --- Journal BubbleMenu --- */
+
+.journal-bubble-menu {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-radius: 0.5rem;
+  padding: 0.25rem;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.journal-bubble-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 0.25rem;
+  color: var(--color-text-muted);
+  transition: color 0.15s, background 0.15s;
+}
+
+.journal-bubble-btn:hover {
+  color: var(--color-text-primary);
+  background: var(--color-surface-overlay);
+}
+
+.journal-bubble-btn.is-active {
+  color: var(--color-accent);
+  background: var(--color-accent-muted);
+}
+
+.journal-bubble-divider {
+  width: 1px;
+  height: 1rem;
+  background: var(--color-border);
+  margin: 0 0.125rem;
+}
+
+/* --- Journal Slash Menu --- */
+
+.journal-slash-menu {
+  display: flex;
+  flex-direction: column;
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-radius: 0.5rem;
+  padding: 0.25rem;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  min-width: 11rem;
+  max-height: 16rem;
+  overflow-y: auto;
+}
+
+.journal-slash-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.375rem 0.5rem;
+  border-radius: 0.25rem;
+  color: var(--color-text-muted);
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  transition: color 0.15s, background 0.15s;
+}
+
+.journal-slash-item:hover,
+.journal-slash-item.is-selected {
+  color: var(--color-text-primary);
+  background: var(--color-surface-overlay);
+}
+
+.journal-slash-empty {
+  padding: 0.5rem;
+  color: var(--color-text-muted);
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  text-align: center;
 }

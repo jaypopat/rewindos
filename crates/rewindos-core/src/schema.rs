@@ -297,3 +297,92 @@ pub struct UpdateCollection {
     pub start_time: Option<i64>,
     pub end_time: Option<i64>,
 }
+
+// -- Journal --
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JournalEntry {
+    pub id: i64,
+    pub date: String,
+    pub content: String,
+    pub mood: Option<i32>,
+    pub energy: Option<i32>,
+    pub word_count: i32,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct UpsertJournalEntry {
+    pub date: String,
+    pub content: String,
+    pub mood: Option<i32>,
+    pub energy: Option<i32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JournalScreenshot {
+    pub id: i64,
+    pub journal_entry_id: i64,
+    pub screenshot_id: i64,
+    pub caption: Option<String>,
+    pub sort_order: i32,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JournalStreakInfo {
+    pub current_streak: i32,
+    pub longest_streak: i32,
+    pub total_entries: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JournalTag {
+    pub id: i64,
+    pub name: String,
+    pub color: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JournalDateInfo {
+    pub date: String,
+    pub word_count: i32,
+    pub mood: Option<i32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JournalSearchResult {
+    pub entry_id: i64,
+    pub date: String,
+    pub snippet: String,
+    pub mood: Option<i32>,
+    pub word_count: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JournalSearchResponse {
+    pub results: Vec<JournalSearchResult>,
+    pub total_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JournalTemplate {
+    pub id: i64,
+    pub name: String,
+    pub description: Option<String>,
+    pub content: String,
+    pub is_builtin: bool,
+    pub sort_order: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JournalSummary {
+    pub period_type: String,
+    pub period_key: String,
+    pub summary_text: String,
+    pub entry_count: i64,
+    pub generated_at: String,
+    pub cached: bool,
+}

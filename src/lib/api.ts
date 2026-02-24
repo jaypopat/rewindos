@@ -372,6 +372,211 @@ export async function removeFromCollection(
   return invoke("remove_from_collection", { collectionId, screenshotId });
 }
 
+// -- Journal --
+
+export interface JournalEntry {
+  id: number;
+  date: string;
+  content: string;
+  mood: number | null;
+  energy: number | null;
+  word_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface JournalScreenshot {
+  id: number;
+  journal_entry_id: number;
+  screenshot_id: number;
+  caption: string | null;
+  sort_order: number;
+  created_at: string;
+}
+
+export interface JournalStreakInfo {
+  current_streak: number;
+  longest_streak: number;
+  total_entries: number;
+}
+
+export async function getJournalEntry(
+  date: string,
+): Promise<JournalEntry | null> {
+  return invoke("get_journal_entry", { date });
+}
+
+export async function upsertJournalEntry(
+  entry: { date: string; content: string; mood?: number | null; energy?: number | null },
+): Promise<number> {
+  return invoke("upsert_journal_entry", { entry });
+}
+
+export async function deleteJournalEntry(date: string): Promise<boolean> {
+  return invoke("delete_journal_entry", { date });
+}
+
+export interface JournalDateInfo {
+  date: string;
+  word_count: number;
+  mood: number | null;
+}
+
+export async function getJournalDates(
+  startDate: string,
+  endDate: string,
+): Promise<JournalDateInfo[]> {
+  return invoke("get_journal_dates", { startDate, endDate });
+}
+
+export async function getJournalStreak(): Promise<JournalStreakInfo> {
+  return invoke("get_journal_streak");
+}
+
+export async function addJournalScreenshot(
+  journalEntryId: number,
+  screenshotId: number,
+  caption?: string,
+): Promise<number> {
+  return invoke("add_journal_screenshot", {
+    journalEntryId,
+    screenshotId,
+    caption: caption ?? null,
+  });
+}
+
+export async function removeJournalScreenshot(
+  journalEntryId: number,
+  screenshotId: number,
+): Promise<void> {
+  return invoke("remove_journal_screenshot", {
+    journalEntryId,
+    screenshotId,
+  });
+}
+
+export async function getJournalScreenshots(
+  journalEntryId: number,
+): Promise<JournalScreenshot[]> {
+  return invoke("get_journal_screenshots", { journalEntryId });
+}
+
+// -- Journal Tags --
+
+export interface JournalTag {
+  id: number;
+  name: string;
+  color: string | null;
+  created_at: string;
+}
+
+export async function setJournalTags(
+  entryId: number,
+  tags: string[],
+): Promise<void> {
+  return invoke("set_journal_tags", { entryId, tags });
+}
+
+export async function getJournalTags(
+  entryId: number,
+): Promise<JournalTag[]> {
+  return invoke("get_journal_tags", { entryId });
+}
+
+export async function listAllJournalTags(): Promise<JournalTag[]> {
+  return invoke("list_all_journal_tags");
+}
+
+// -- Journal Search --
+
+export interface JournalSearchResult {
+  entry_id: number;
+  date: string;
+  snippet: string;
+  mood: number | null;
+  word_count: number;
+}
+
+export interface JournalSearchResponse {
+  results: JournalSearchResult[];
+  total_count: number;
+}
+
+export async function searchJournal(
+  query: string,
+  limit?: number,
+  offset?: number,
+): Promise<JournalSearchResponse> {
+  return invoke("search_journal", {
+    query,
+    limit: limit ?? null,
+    offset: offset ?? null,
+  });
+}
+
+// -- Journal Templates --
+
+export interface JournalTemplate {
+  id: number;
+  name: string;
+  description: string | null;
+  content: string;
+  is_builtin: boolean;
+  sort_order: number;
+}
+
+export async function listJournalTemplates(): Promise<JournalTemplate[]> {
+  return invoke("list_journal_templates");
+}
+
+export async function createJournalTemplate(
+  name: string,
+  description: string | null,
+  content: string,
+): Promise<number> {
+  return invoke("create_journal_template", { name, description, content });
+}
+
+export async function deleteJournalTemplate(id: number): Promise<boolean> {
+  return invoke("delete_journal_template", { id });
+}
+
+// -- Journal Summary --
+
+export interface JournalSummary {
+  period_type: string;
+  period_key: string;
+  summary_text: string;
+  entry_count: number;
+  generated_at: string;
+  cached: boolean;
+}
+
+export async function generateJournalSummary(
+  periodType: string,
+  periodKey: string,
+  startDate: string,
+  endDate: string,
+  forceRegenerate?: boolean,
+): Promise<JournalSummary> {
+  return invoke("generate_journal_summary", {
+    periodType,
+    periodKey,
+    startDate,
+    endDate,
+    forceRegenerate: forceRegenerate ?? false,
+  });
+}
+
+// -- Journal Export --
+
+export async function exportJournal(
+  startDate: string,
+  endDate: string,
+): Promise<string> {
+  return invoke("export_journal", { startDate, endDate });
+}
+
 // -- Settings --
 
 export async function getConfig(): Promise<Record<string, unknown>> {

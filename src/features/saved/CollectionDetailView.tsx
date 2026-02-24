@@ -8,8 +8,8 @@ import {
 } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import { Button } from "@/components/ui/button";
-import { BookmarkButton } from "./BookmarkButton";
-import { AppDot } from "./AppDot";
+import { BookmarkButton } from "@/components/BookmarkButton";
+import { AppDot } from "@/components/AppDot";
 import { formatRelativeTime } from "@/lib/format";
 import { ArrowLeft, Clock, Trash2, X, ImageIcon } from "lucide-react";
 

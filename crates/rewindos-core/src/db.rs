@@ -2,9 +2,11 @@ use crate::error::{CoreError, Result};
 use crate::hasher::PerceptualHasher;
 use crate::schema::{
     ActiveBlock, ActivityResponse, AppUsageStat, Bookmark, BoundingBox, CachedDailySummary,
-    Collection, DailyActivity, HourlyActivity, NewBoundingBox, NewCollection, NewScreenshot,
-    OcrStatus, Screenshot, SearchFilters, SearchResponse, SearchResult, TaskUsageStat,
-    UpdateCollection,
+    Collection, DailyActivity, HourlyActivity, JournalDateInfo, JournalEntry, JournalScreenshot,
+    JournalSearchResponse, JournalSearchResult, JournalStreakInfo, JournalSummary, JournalTag,
+    JournalTemplate, NewBoundingBox, NewCollection, NewScreenshot, OcrStatus, Screenshot,
+    SearchFilters, SearchResponse, SearchResult, TaskUsageStat, UpdateCollection,
+    UpsertJournalEntry,
 };
 use rusqlite::{ffi::sqlite3_auto_extension, params, Connection};
 use std::path::Path;
@@ -1507,6 +1509,536 @@ impl Database {
         Ok(())
     }
 
+    // ── Journal ──────────────────────────────────────────────────────
+
+    /// Get a journal entry by date (YYYY-MM-DD).
+    pub fn get_journal_entry(&self, date: &str) -> Result<Option<JournalEntry>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, date, content, mood, energy, word_count, created_at, updated_at
+             FROM journal_entries WHERE date = ?1",
+        )?;
+
+        let mut rows = stmt.query_map(params![date], |row| {
+            Ok(JournalEntry {
+                id: row.get(0)?,
+                date: row.get(1)?,
+                content: row.get(2)?,
+                mood: row.get(3)?,
+                energy: row.get(4)?,
+                word_count: row.get(5)?,
+                created_at: row.get(6)?,
+                updated_at: row.get(7)?,
+            })
+        })?;
+
+        match rows.next() {
+            Some(row) => Ok(Some(row?)),
+            None => Ok(None),
+        }
+    }
+
+    /// Create or update a journal entry for a date. Returns the entry id.
+    pub fn upsert_journal_entry(&self, entry: &UpsertJournalEntry) -> Result<i64> {
+        let word_count = entry.content.split_whitespace().count() as i32;
+
+        let tx = self.conn.unchecked_transaction()?;
+
+        tx.execute(
+            "INSERT INTO journal_entries (date, content, mood, energy, word_count)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(date) DO UPDATE SET
+               content = ?2, mood = ?3, energy = ?4, word_count = ?5,
+               updated_at = datetime('now')",
+            params![entry.date, entry.content, entry.mood, entry.energy, word_count],
+        )?;
+
+        let id: i64 = tx.query_row(
+            "SELECT id FROM journal_entries WHERE date = ?1",
+            params![entry.date],
+            |row| row.get(0),
+        )?;
+
+        // Sync journal_fts
+        tx.execute(
+            "DELETE FROM journal_fts WHERE entry_id = ?1",
+            params![id],
+        )?;
+        if !entry.content.is_empty() {
+            tx.execute(
+                "INSERT INTO journal_fts (content, entry_id) VALUES (?1, ?2)",
+                params![entry.content, id],
+            )?;
+        }
+
+        tx.commit()?;
+        Ok(id)
+    }
+
+    /// Delete a journal entry by date. Returns true if an entry was deleted.
+    pub fn delete_journal_entry(&self, date: &str) -> Result<bool> {
+        let tx = self.conn.unchecked_transaction()?;
+
+        // Get entry id for FTS cleanup
+        let id: Option<i64> = tx
+            .query_row(
+                "SELECT id FROM journal_entries WHERE date = ?1",
+                params![date],
+                |row| row.get(0),
+            )
+            .ok();
+
+        if let Some(id) = id {
+            tx.execute("DELETE FROM journal_fts WHERE entry_id = ?1", params![id])?;
+        }
+
+        let count = tx.execute(
+            "DELETE FROM journal_entries WHERE date = ?1",
+            params![date],
+        )?;
+
+        tx.commit()?;
+        Ok(count > 0)
+    }
+
+    /// Get dates that have journal entries in a range (for calendar heatmap).
+    pub fn get_journal_dates(
+        &self,
+        start_date: &str,
+        end_date: &str,
+    ) -> Result<Vec<JournalDateInfo>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT date, word_count, mood FROM journal_entries
+             WHERE date >= ?1 AND date <= ?2 AND length(content) > 0
+             ORDER BY date",
+        )?;
+
+        let rows = stmt.query_map(params![start_date, end_date], |row| {
+            Ok(JournalDateInfo {
+                date: row.get(0)?,
+                word_count: row.get(1)?,
+                mood: row.get(2)?,
+            })
+        })?;
+
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Into::into)
+    }
+
+    /// Compute current streak, longest streak, and total entry count.
+    pub fn get_journal_streak(&self) -> Result<JournalStreakInfo> {
+        let mut stmt = self.conn.prepare(
+            "SELECT date FROM journal_entries
+             WHERE length(content) > 0
+             ORDER BY date DESC",
+        )?;
+
+        let dates: Vec<String> = stmt
+            .query_map([], |row| row.get::<_, String>(0))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+
+        let total_entries = dates.len() as i32;
+
+        if dates.is_empty() {
+            return Ok(JournalStreakInfo {
+                current_streak: 0,
+                longest_streak: 0,
+                total_entries: 0,
+            });
+        }
+
+        // Parse dates into NaiveDate for streak calculation
+        let parsed: Vec<chrono::NaiveDate> = dates
+            .iter()
+            .filter_map(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
+            .collect();
+
+        // Current streak: count consecutive days from today backwards
+        let today = chrono::Local::now().date_naive();
+        let mut current_streak = 0;
+        let mut check_date = today;
+
+        for date in &parsed {
+            if *date == check_date {
+                current_streak += 1;
+                check_date -= chrono::Duration::days(1);
+            } else if *date < check_date {
+                break;
+            }
+        }
+
+        // Longest streak: scan all dates (already sorted DESC)
+        let mut longest_streak = 0;
+        let mut streak = 0;
+        let mut prev: Option<chrono::NaiveDate> = None;
+
+        for date in &parsed {
+            match prev {
+                Some(p) if p - *date == chrono::Duration::days(1) => {
+                    streak += 1;
+                }
+                _ => {
+                    streak = 1;
+                }
+            }
+            if streak > longest_streak {
+                longest_streak = streak;
+            }
+            prev = Some(*date);
+        }
+
+        Ok(JournalStreakInfo {
+            current_streak,
+            longest_streak,
+            total_entries,
+        })
+    }
+
+    /// Add a screenshot to a journal entry.
+    pub fn add_journal_screenshot(
+        &self,
+        journal_entry_id: i64,
+        screenshot_id: i64,
+        caption: Option<&str>,
+    ) -> Result<i64> {
+        // Get the next sort_order
+        let max_order: i32 = self
+            .conn
+            .query_row(
+                "SELECT COALESCE(MAX(sort_order), -1) FROM journal_screenshots WHERE journal_entry_id = ?1",
+                params![journal_entry_id],
+                |row| row.get(0),
+            )?;
+
+        self.conn.execute(
+            "INSERT OR IGNORE INTO journal_screenshots (journal_entry_id, screenshot_id, caption, sort_order)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![journal_entry_id, screenshot_id, caption, max_order + 1],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    /// Remove a screenshot from a journal entry.
+    pub fn remove_journal_screenshot(
+        &self,
+        journal_entry_id: i64,
+        screenshot_id: i64,
+    ) -> Result<()> {
+        self.conn.execute(
+            "DELETE FROM journal_screenshots WHERE journal_entry_id = ?1 AND screenshot_id = ?2",
+            params![journal_entry_id, screenshot_id],
+        )?;
+        Ok(())
+    }
+
+    /// Get all screenshots attached to a journal entry.
+    pub fn get_journal_screenshots(&self, journal_entry_id: i64) -> Result<Vec<JournalScreenshot>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, journal_entry_id, screenshot_id, caption, sort_order, created_at
+             FROM journal_screenshots
+             WHERE journal_entry_id = ?1
+             ORDER BY sort_order",
+        )?;
+
+        let rows = stmt.query_map(params![journal_entry_id], |row| {
+            Ok(JournalScreenshot {
+                id: row.get(0)?,
+                journal_entry_id: row.get(1)?,
+                screenshot_id: row.get(2)?,
+                caption: row.get(3)?,
+                sort_order: row.get(4)?,
+                created_at: row.get(5)?,
+            })
+        })?;
+
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Into::into)
+    }
+
+    // ── Journal Tags ─────────────────────────────────────────────────
+
+    /// Get or create a tag by name (case-insensitive). Returns the tag id.
+    pub fn get_or_create_tag(&self, name: &str) -> Result<i64> {
+        self.conn.execute(
+            "INSERT OR IGNORE INTO journal_tags (name) VALUES (?1)",
+            params![name],
+        )?;
+        let id: i64 = self.conn.query_row(
+            "SELECT id FROM journal_tags WHERE name = ?1 COLLATE NOCASE",
+            params![name],
+            |row| row.get(0),
+        )?;
+        Ok(id)
+    }
+
+    /// Set the tags for a journal entry (replaces all existing tags).
+    pub fn set_entry_tags(&self, entry_id: i64, tag_names: &[String]) -> Result<()> {
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute(
+            "DELETE FROM journal_entry_tags WHERE journal_entry_id = ?1",
+            params![entry_id],
+        )?;
+        for name in tag_names {
+            tx.execute(
+                "INSERT OR IGNORE INTO journal_tags (name) VALUES (?1)",
+                params![name],
+            )?;
+            let tag_id: i64 = tx.query_row(
+                "SELECT id FROM journal_tags WHERE name = ?1 COLLATE NOCASE",
+                params![name],
+                |row| row.get(0),
+            )?;
+            tx.execute(
+                "INSERT OR IGNORE INTO journal_entry_tags (journal_entry_id, tag_id)
+                 VALUES (?1, ?2)",
+                params![entry_id, tag_id],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Get tags for a journal entry.
+    pub fn get_entry_tags(&self, entry_id: i64) -> Result<Vec<JournalTag>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT t.id, t.name, t.color, t.created_at
+             FROM journal_tags t
+             JOIN journal_entry_tags et ON et.tag_id = t.id
+             WHERE et.journal_entry_id = ?1
+             ORDER BY t.name",
+        )?;
+
+        let rows = stmt.query_map(params![entry_id], |row| {
+            Ok(JournalTag {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                color: row.get(2)?,
+                created_at: row.get(3)?,
+            })
+        })?;
+
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Into::into)
+    }
+
+    /// List all tags across all journal entries.
+    pub fn list_all_tags(&self) -> Result<Vec<JournalTag>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, name, color, created_at FROM journal_tags ORDER BY name",
+        )?;
+
+        let rows = stmt.query_map([], |row| {
+            Ok(JournalTag {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                color: row.get(2)?,
+                created_at: row.get(3)?,
+            })
+        })?;
+
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Into::into)
+    }
+
+    // ── Journal Search ──────────────────────────────────────────────
+
+    /// Full-text search across journal entries using FTS5.
+    pub fn search_journal(
+        &self,
+        query: &str,
+        limit: i64,
+        offset: i64,
+    ) -> Result<JournalSearchResponse> {
+        let total_count: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM journal_fts WHERE journal_fts MATCH ?1",
+            params![query],
+            |row| row.get(0),
+        )?;
+
+        let mut stmt = self.conn.prepare(
+            "SELECT je.id, je.date,
+                    snippet(journal_fts, 0, '<mark>', '</mark>', '...', 32),
+                    je.mood, je.word_count
+             FROM journal_fts
+             JOIN journal_entries je ON je.id = journal_fts.entry_id
+             WHERE journal_fts MATCH ?1
+             ORDER BY rank
+             LIMIT ?2 OFFSET ?3",
+        )?;
+
+        let rows = stmt.query_map(params![query, limit, offset], |row| {
+            Ok(JournalSearchResult {
+                entry_id: row.get(0)?,
+                date: row.get(1)?,
+                snippet: row.get(2)?,
+                mood: row.get(3)?,
+                word_count: row.get(4)?,
+            })
+        })?;
+
+        let results: Vec<JournalSearchResult> = rows
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+
+        Ok(JournalSearchResponse {
+            results,
+            total_count,
+        })
+    }
+
+    // ── Journal Templates ───────────────────────────────────────────
+
+    /// List all journal templates (built-in first, then custom).
+    pub fn list_journal_templates(&self) -> Result<Vec<JournalTemplate>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, name, description, content, is_builtin, sort_order
+             FROM journal_templates
+             ORDER BY is_builtin DESC, sort_order, name",
+        )?;
+
+        let rows = stmt.query_map([], |row| {
+            Ok(JournalTemplate {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                description: row.get(2)?,
+                content: row.get(3)?,
+                is_builtin: row.get::<_, i32>(4)? != 0,
+                sort_order: row.get(5)?,
+            })
+        })?;
+
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Into::into)
+    }
+
+    /// Create a custom journal template. Returns the new id.
+    pub fn create_journal_template(
+        &self,
+        name: &str,
+        description: Option<&str>,
+        content: &str,
+    ) -> Result<i64> {
+        self.conn.execute(
+            "INSERT INTO journal_templates (name, description, content, is_builtin, sort_order)
+             VALUES (?1, ?2, ?3, 0, 99)",
+            params![name, description, content],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    /// Delete a custom template (refuses to delete built-in templates).
+    pub fn delete_journal_template(&self, id: i64) -> Result<bool> {
+        let count = self.conn.execute(
+            "DELETE FROM journal_templates WHERE id = ?1 AND is_builtin = 0",
+            params![id],
+        )?;
+        Ok(count > 0)
+    }
+
+    // ── Journal Range / Export ───────────────────────────────────────
+
+    /// Get journal entries in a date range.
+    pub fn get_journal_entries_in_range(
+        &self,
+        start_date: &str,
+        end_date: &str,
+    ) -> Result<Vec<JournalEntry>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, date, content, mood, energy, word_count, created_at, updated_at
+             FROM journal_entries
+             WHERE date >= ?1 AND date <= ?2 AND length(content) > 0
+             ORDER BY date",
+        )?;
+
+        let rows = stmt.query_map(params![start_date, end_date], |row| {
+            Ok(JournalEntry {
+                id: row.get(0)?,
+                date: row.get(1)?,
+                content: row.get(2)?,
+                mood: row.get(3)?,
+                energy: row.get(4)?,
+                word_count: row.get(5)?,
+                created_at: row.get(6)?,
+                updated_at: row.get(7)?,
+            })
+        })?;
+
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Into::into)
+    }
+
+    /// Export journal entries as a single markdown string.
+    pub fn export_journal_markdown(
+        &self,
+        start_date: &str,
+        end_date: &str,
+    ) -> Result<String> {
+        let entries = self.get_journal_entries_in_range(start_date, end_date)?;
+        let mut output = String::new();
+        for entry in &entries {
+            output.push_str(&format!("# {}\n\n", entry.date));
+            if let Some(mood) = entry.mood {
+                output.push_str(&format!("Mood: {}/5\n", mood));
+            }
+            if let Some(energy) = entry.energy {
+                output.push_str(&format!("Energy: {}/5\n", energy));
+            }
+            if entry.mood.is_some() || entry.energy.is_some() {
+                output.push('\n');
+            }
+            output.push_str(&entry.content);
+            output.push_str("\n\n---\n\n");
+        }
+        Ok(output)
+    }
+
+    // ── Journal Summary Cache ───────────────────────────────────────
+
+    /// Get a cached journal summary.
+    pub fn get_journal_summary_cache(
+        &self,
+        period_type: &str,
+        period_key: &str,
+    ) -> Result<Option<JournalSummary>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT period_type, period_key, summary_text, entry_count, generated_at
+             FROM journal_summaries
+             WHERE period_type = ?1 AND period_key = ?2",
+        )?;
+
+        let mut rows = stmt.query_map(params![period_type, period_key], |row| {
+            Ok(JournalSummary {
+                period_type: row.get(0)?,
+                period_key: row.get(1)?,
+                summary_text: row.get(2)?,
+                entry_count: row.get(3)?,
+                generated_at: row.get(4)?,
+                cached: true,
+            })
+        })?;
+
+        match rows.next() {
+            Some(row) => Ok(Some(row?)),
+            None => Ok(None),
+        }
+    }
+
+    /// Insert or replace a cached journal summary.
+    pub fn set_journal_summary_cache(
+        &self,
+        period_type: &str,
+        period_key: &str,
+        summary_text: &str,
+        entry_count: i64,
+        model_name: Option<&str>,
+    ) -> Result<()> {
+        self.conn.execute(
+            "INSERT OR REPLACE INTO journal_summaries
+             (period_type, period_key, summary_text, entry_count, model_name, generated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'))",
+            params![period_type, period_key, summary_text, entry_count, model_name],
+        )?;
+        Ok(())
+    }
+
     fn search_count(&self, filters: &SearchFilters) -> Result<i64> {
         let mut stmt = self.conn.prepare(
             "SELECT COUNT(*)
@@ -2094,5 +2626,164 @@ mod tests {
         let db = make_test_db();
         let results = db.deduplicate_results(Vec::new(), 5).unwrap();
         assert!(results.is_empty());
+    }
+
+    // ── Journal tests ───────────────────────────────────────────────
+
+    #[test]
+    fn test_journal_upsert_and_get() {
+        let db = make_test_db();
+
+        let entry = crate::schema::UpsertJournalEntry {
+            date: "2025-01-15".to_string(),
+            content: "Worked on the journal feature today.".to_string(),
+            mood: Some(4),
+            energy: Some(3),
+        };
+        let id = db.upsert_journal_entry(&entry).unwrap();
+        assert!(id > 0);
+
+        let got = db.get_journal_entry("2025-01-15").unwrap().unwrap();
+        assert_eq!(got.id, id);
+        assert_eq!(got.date, "2025-01-15");
+        assert_eq!(got.content, "Worked on the journal feature today.");
+        assert_eq!(got.mood, Some(4));
+        assert_eq!(got.energy, Some(3));
+        assert_eq!(got.word_count, 6);
+
+        // Upsert same date — should update
+        let entry2 = crate::schema::UpsertJournalEntry {
+            date: "2025-01-15".to_string(),
+            content: "Updated entry.".to_string(),
+            mood: None,
+            energy: None,
+        };
+        let id2 = db.upsert_journal_entry(&entry2).unwrap();
+        assert_eq!(id, id2);
+
+        let got2 = db.get_journal_entry("2025-01-15").unwrap().unwrap();
+        assert_eq!(got2.content, "Updated entry.");
+        assert_eq!(got2.mood, None);
+    }
+
+    #[test]
+    fn test_journal_get_nonexistent() {
+        let db = make_test_db();
+        let got = db.get_journal_entry("2099-01-01").unwrap();
+        assert!(got.is_none());
+    }
+
+    #[test]
+    fn test_journal_delete() {
+        let db = make_test_db();
+
+        let entry = crate::schema::UpsertJournalEntry {
+            date: "2025-02-01".to_string(),
+            content: "Some content".to_string(),
+            mood: None,
+            energy: None,
+        };
+        db.upsert_journal_entry(&entry).unwrap();
+
+        assert!(db.delete_journal_entry("2025-02-01").unwrap());
+        assert!(!db.delete_journal_entry("2025-02-01").unwrap()); // already gone
+        assert!(db.get_journal_entry("2025-02-01").unwrap().is_none());
+    }
+
+    #[test]
+    fn test_journal_dates() {
+        let db = make_test_db();
+
+        for day in &["2025-03-01", "2025-03-03", "2025-03-05"] {
+            db.upsert_journal_entry(&crate::schema::UpsertJournalEntry {
+                date: day.to_string(),
+                content: "entry".to_string(),
+                mood: None,
+                energy: None,
+            })
+            .unwrap();
+        }
+
+        let dates = db.get_journal_dates("2025-03-01", "2025-03-31").unwrap();
+        let date_strings: Vec<&str> = dates.iter().map(|d| d.date.as_str()).collect();
+        assert_eq!(date_strings, vec!["2025-03-01", "2025-03-03", "2025-03-05"]);
+
+        // Narrower range
+        let dates = db.get_journal_dates("2025-03-02", "2025-03-04").unwrap();
+        let date_strings: Vec<&str> = dates.iter().map(|d| d.date.as_str()).collect();
+        assert_eq!(date_strings, vec!["2025-03-03"]);
+    }
+
+    #[test]
+    fn test_journal_streak() {
+        let db = make_test_db();
+
+        // Empty — all zeros
+        let info = db.get_journal_streak().unwrap();
+        assert_eq!(info.current_streak, 0);
+        assert_eq!(info.longest_streak, 0);
+        assert_eq!(info.total_entries, 0);
+
+        // Add entries for today and yesterday
+        let today = chrono::Local::now().date_naive();
+        let yesterday = today - chrono::Duration::days(1);
+
+        db.upsert_journal_entry(&crate::schema::UpsertJournalEntry {
+            date: today.format("%Y-%m-%d").to_string(),
+            content: "today".to_string(),
+            mood: None,
+            energy: None,
+        })
+        .unwrap();
+        db.upsert_journal_entry(&crate::schema::UpsertJournalEntry {
+            date: yesterday.format("%Y-%m-%d").to_string(),
+            content: "yesterday".to_string(),
+            mood: None,
+            energy: None,
+        })
+        .unwrap();
+
+        let info = db.get_journal_streak().unwrap();
+        assert_eq!(info.current_streak, 2);
+        assert!(info.longest_streak >= 2);
+        assert_eq!(info.total_entries, 2);
+    }
+
+    #[test]
+    fn test_journal_screenshots() {
+        let db = make_test_db();
+
+        // Create a journal entry
+        let entry_id = db
+            .upsert_journal_entry(&crate::schema::UpsertJournalEntry {
+                date: "2025-04-01".to_string(),
+                content: "entry with screenshots".to_string(),
+                mood: None,
+                energy: None,
+            })
+            .unwrap();
+
+        // Create screenshots
+        let ss_id1 = db.insert_screenshot(&make_screenshot(5000)).unwrap();
+        let ss_id2 = db.insert_screenshot(&make_screenshot(5001)).unwrap();
+
+        // Attach
+        db.add_journal_screenshot(entry_id, ss_id1, Some("first screenshot"))
+            .unwrap();
+        db.add_journal_screenshot(entry_id, ss_id2, None).unwrap();
+
+        let attached = db.get_journal_screenshots(entry_id).unwrap();
+        assert_eq!(attached.len(), 2);
+        assert_eq!(attached[0].screenshot_id, ss_id1);
+        assert_eq!(attached[0].caption.as_deref(), Some("first screenshot"));
+        assert_eq!(attached[0].sort_order, 0);
+        assert_eq!(attached[1].screenshot_id, ss_id2);
+        assert_eq!(attached[1].sort_order, 1);
+
+        // Remove one
+        db.remove_journal_screenshot(entry_id, ss_id1).unwrap();
+        let attached = db.get_journal_screenshots(entry_id).unwrap();
+        assert_eq!(attached.len(), 1);
+        assert_eq!(attached[0].screenshot_id, ss_id2);
     }
 }

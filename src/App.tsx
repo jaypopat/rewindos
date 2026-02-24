@@ -1,19 +1,24 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import type { SearchFilters } from "@/lib/api";
 import { useDebounce } from "@/hooks/useDebounce";
+import { useGlobalKeyboard } from "@/hooks/useGlobalKeyboard";
 import { Sidebar, type View } from "@/components/Sidebar";
 import { SearchBar, DATE_PRESETS } from "@/components/SearchBar";
 import { SearchResults } from "@/components/SearchResults";
-import { ScreenshotDetail } from "@/components/ScreenshotDetail";
-import { DashboardView } from "@/components/DashboardView";
-import { HistoryView } from "@/components/HistoryView";
 import { DaemonPanel } from "@/components/DaemonPanel";
-import { AskView } from "@/components/AskView";
-import { SettingsView } from "@/components/SettingsView";
-import { FocusView } from "@/components/FocusView";
-import { RewindView } from "@/components/RewindView";
-import { SavedView } from "@/components/SavedView";
+import {
+  DashboardView,
+  HistoryView,
+  RewindView,
+  AskView,
+  SavedView,
+  JournalView,
+  FocusView,
+  SettingsView,
+  ScreenshotDetail,
+  ViewSuspense,
+} from "@/app/routes";
 
 type SubView = "list" | "detail";
 
@@ -33,13 +38,16 @@ function App() {
   const datePresetDef = DATE_PRESETS[datePreset];
   const startTime = datePresetDef.value ? datePresetDef.value() : undefined;
 
-  const filters: SearchFilters = {
-    start_time: startTime,
-    end_time: undefined,
-    app_name: appFilter,
-    limit: 50,
-    offset: 0,
-  };
+  const filters: SearchFilters = useMemo(
+    () => ({
+      start_time: startTime,
+      end_time: undefined,
+      app_name: appFilter,
+      limit: 50,
+      offset: 0,
+    }),
+    [startTime, appFilter],
+  );
 
   const handleSelectResult = useCallback((id: number, siblingIds?: number[]) => {
     setSelectedScreenshotId(id);
@@ -68,20 +76,14 @@ function App() {
   }, []);
 
   // Global keyboard shortcuts
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "/" && !isInputFocused()) {
-        e.preventDefault();
-        handleViewChange("search");
-        setTimeout(() => searchInputRef.current?.focus(), 50);
-      }
-      if (e.key === "Escape" && subView === "detail") {
-        handleBack();
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [subView, handleBack, handleViewChange]);
+  useGlobalKeyboard({
+    onSearch: useCallback(() => {
+      handleViewChange("search");
+      setTimeout(() => searchInputRef.current?.focus(), 50);
+    }, [handleViewChange]),
+    onEscape: handleBack,
+    isDetailView: subView === "detail",
+  });
 
   // Listen for global hotkey (Ctrl+Shift+Space)
   useEffect(() => {
@@ -94,17 +96,20 @@ function App() {
     };
   }, [handleViewChange]);
 
+  const showDetail =
+    (view === "search" || view === "dashboard" || view === "history" || view === "rewind" || view === "ask" || view === "saved" || view === "journal") &&
+    subView === "detail" &&
+    selectedScreenshotId !== null;
+
   return (
     <main className="flex h-screen animate-fade-in">
       <Sidebar activeView={view} onViewChange={handleViewChange} />
 
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Top bar — daemon status only, no title duplication */}
         <header className="flex items-center justify-end px-5 py-2 border-b border-border/50 bg-surface/80 backdrop-blur-sm shrink-0">
           <DaemonPanel />
         </header>
 
-        {/* Content */}
         {view === "search" && subView === "list" && (
           <div className="flex-1 flex flex-col min-h-0">
             <SearchBar
@@ -127,17 +132,21 @@ function App() {
         )}
 
         {view === "rewind" && subView === "list" && (
-          <RewindView onSelectScreenshot={handleSelectResult} />
+          <ViewSuspense>
+            <RewindView onSelectScreenshot={handleSelectResult} />
+          </ViewSuspense>
         )}
 
-        {(view === "search" || view === "dashboard" || view === "history" || view === "rewind" || view === "ask" || view === "saved") && subView === "detail" && selectedScreenshotId !== null && (
-          <ScreenshotDetail
-            screenshotId={selectedScreenshotId}
-            onBack={handleBack}
-            searchQuery={debouncedQuery}
-            screenshotIds={screenshotIds}
-            onNavigate={handleNavigateScreenshot}
-          />
+        {showDetail && (
+          <ViewSuspense>
+            <ScreenshotDetail
+              screenshotId={selectedScreenshotId!}
+              onBack={handleBack}
+              searchQuery={debouncedQuery}
+              screenshotIds={screenshotIds}
+              onNavigate={handleNavigateScreenshot}
+            />
+          </ViewSuspense>
         )}
 
         {view === "dashboard" && subView === "list" && (
@@ -145,32 +154,43 @@ function App() {
         )}
 
         {view === "history" && subView === "list" && (
-          <HistoryView onSelectScreenshot={handleSelectResult} />
+          <ViewSuspense>
+            <HistoryView onSelectScreenshot={handleSelectResult} />
+          </ViewSuspense>
         )}
 
         {view === "ask" && subView === "list" && (
-          <AskView onSelectScreenshot={handleSelectResult} />
+          <ViewSuspense>
+            <AskView onSelectScreenshot={handleSelectResult} />
+          </ViewSuspense>
         )}
 
         {view === "saved" && subView === "list" && (
-          <SavedView onSelectScreenshot={handleSelectResult} />
+          <ViewSuspense>
+            <SavedView onSelectScreenshot={handleSelectResult} />
+          </ViewSuspense>
+        )}
+
+        {view === "journal" && subView === "list" && (
+          <ViewSuspense>
+            <JournalView onSelectScreenshot={handleSelectResult} />
+          </ViewSuspense>
         )}
 
         {view === "focus" && (
-          <FocusView />
+          <ViewSuspense>
+            <FocusView />
+          </ViewSuspense>
         )}
 
         {view === "settings" && (
-          <SettingsView />
+          <ViewSuspense>
+            <SettingsView />
+          </ViewSuspense>
         )}
       </div>
     </main>
   );
-}
-
-function isInputFocused(): boolean {
-  const el = document.activeElement;
-  return el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement;
 }
 
 export default App;
