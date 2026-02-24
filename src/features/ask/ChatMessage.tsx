@@ -1,4 +1,5 @@
-import { createElement, useMemo, type ReactNode } from "react";
+import { useMemo, useState } from "react";
+import Markdown from "markdown-to-jsx";
 import type { ChatMessage as ChatMessageType } from "@/context/AskContext";
 import { ScreenshotRefCard } from "@/components/ScreenshotRefCard";
 
@@ -8,8 +9,31 @@ interface ChatMessageProps {
   onScreenshotClick?: (id: number) => void;
 }
 
+const MARKDOWN_OVERRIDES = {
+  h1: { props: { className: "text-base font-semibold text-text-primary mt-3 mb-1" } },
+  h2: { props: { className: "text-sm font-semibold text-text-primary mt-2.5 mb-1" } },
+  h3: { props: { className: "text-sm font-medium text-text-primary mt-2 mb-0.5" } },
+  ul: { props: { className: "list-disc list-inside space-y-0.5 my-1" } },
+  ol: { props: { className: "list-decimal list-inside space-y-0.5 my-1" } },
+  li: { props: { className: "text-sm text-text-secondary" } },
+  p: { props: { className: "my-1" } },
+  strong: { props: { className: "text-text-primary font-semibold" } },
+  em: { props: { className: "italic" } },
+  code: { props: { className: "font-mono text-xs bg-surface-overlay px-1 py-0.5 text-accent rounded" } },
+  pre: { props: { className: "bg-surface-overlay border border-border/30 rounded-md p-3 my-2 overflow-x-auto text-xs font-mono" } },
+  a: { props: { className: "text-accent hover:underline", target: "_blank", rel: "noopener" } },
+  blockquote: { props: { className: "border-l-2 border-semantic/30 pl-3 my-2 text-text-muted italic" } },
+  table: { props: { className: "border-collapse my-2 text-xs" } },
+  th: { props: { className: "border border-border/30 px-2 py-1 text-left font-medium text-text-primary bg-surface-overlay" } },
+  td: { props: { className: "border border-border/30 px-2 py-1 text-text-secondary" } },
+  hr: { props: { className: "border-border/30 my-3" } },
+};
+
+const MAX_COLLAPSED_SOURCES = 3;
+
 export function ChatMessage({ message, isStreaming, onScreenshotClick }: ChatMessageProps) {
   const isUser = message.role === "user";
+  const [showAllSources, setShowAllSources] = useState(false);
 
   // Parse [REF:ID] markers from content
   const { segments, refIds } = useMemo(() => {
@@ -45,11 +69,19 @@ export function ChatMessage({ message, isStreaming, onScreenshotClick }: ChatMes
 
   const unreferencedRefs = useMemo(() => {
     if (!message.references) return [];
-    if (refIds.length === 0) return message.references;
+    if (refIds.length === 0) {
+      return showAllSources
+        ? message.references
+        : message.references.slice(0, MAX_COLLAPSED_SOURCES);
+    }
     return [];
-  }, [message.references, refIds]);
+  }, [message.references, refIds, showAllSources]);
 
   const allSourceRefs = [...referencedRefs, ...unreferencedRefs];
+  const hiddenSourceCount =
+    refIds.length === 0 && message.references && !showAllSources
+      ? Math.max(0, message.references.length - MAX_COLLAPSED_SOURCES)
+      : 0;
 
   if (isUser) {
     return (
@@ -58,7 +90,7 @@ export function ChatMessage({ message, isStreaming, onScreenshotClick }: ChatMes
           <div className="flex items-center justify-end gap-2 mb-1">
             <span className="font-mono text-[10px] text-text-muted uppercase tracking-wider">you</span>
           </div>
-          <div className="px-3 py-2.5 bg-accent/8 border border-accent/20 text-sm text-text-primary leading-relaxed">
+          <div className="px-3 py-2.5 bg-accent/8 border border-accent/20 text-sm text-text-primary leading-relaxed whitespace-pre-wrap">
             {message.content}
           </div>
         </div>
@@ -79,7 +111,7 @@ export function ChatMessage({ message, isStreaming, onScreenshotClick }: ChatMes
 
       <div className="pl-3.5 border-l border-semantic/20">
         {/* Rendered content — inline refs become small clickable chips */}
-        <div className="text-sm text-text-secondary leading-relaxed space-y-2 [&_strong]:text-text-primary [&_strong]:font-semibold [&_code]:font-mono [&_code]:text-xs [&_code]:bg-surface-overlay [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-accent">
+        <div className="text-sm text-text-secondary leading-relaxed">
           {segments.map((seg, i) => {
             if (seg.type === "ref") {
               return (
@@ -93,12 +125,18 @@ export function ChatMessage({ message, isStreaming, onScreenshotClick }: ChatMes
                 </button>
               );
             }
-            // Render text with basic markdown-like formatting
-            return <span key={`text-${i}`}>{formatMarkdown(seg.value)}</span>;
+            return (
+              <Markdown
+                key={`text-${i}`}
+                options={{ forceBlock: false, overrides: MARKDOWN_OVERRIDES }}
+              >
+                {seg.value}
+              </Markdown>
+            );
           })}
         </div>
 
-        {/* Source cards — always shown at bottom, never inline */}
+        {/* Source cards — shown at bottom */}
         {allSourceRefs.length > 0 && (
           <div className="mt-3 pt-2 border-t border-border/30">
             <span className="font-mono text-[10px] text-text-muted uppercase tracking-wider">sources</span>
@@ -111,25 +149,17 @@ export function ChatMessage({ message, isStreaming, onScreenshotClick }: ChatMes
                 />
               ))}
             </div>
+            {hiddenSourceCount > 0 && (
+              <button
+                onClick={() => setShowAllSources(true)}
+                className="font-mono text-[10px] text-text-muted hover:text-text-secondary mt-1.5 transition-colors"
+              >
+                +{hiddenSourceCount} more sources
+              </button>
+            )}
           </div>
         )}
       </div>
     </div>
   );
-}
-
-function formatMarkdown(text: string): ReactNode[] {
-  const tokens = text.split(/(\*\*.*?\*\*|`.*?`|\n)/g);
-  return tokens.map((token, i) => {
-    if (token.startsWith("**") && token.endsWith("**")) {
-      return createElement("strong", { key: i }, token.slice(2, -2));
-    }
-    if (token.startsWith("`") && token.endsWith("`")) {
-      return createElement("code", { key: i }, token.slice(1, -1));
-    }
-    if (token === "\n") {
-      return createElement("br", { key: i });
-    }
-    return token || null;
-  });
 }

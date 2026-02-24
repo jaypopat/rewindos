@@ -41,5 +41,7 @@ export const queryKeys = {
     ["activeBlocks-chart", start, end] as const,
   journalPicker: (start: number, end: number) =>
     ["journal-picker", start, end] as const,
+  openTodos: (start: string, end: string) =>
+    ["open-todos", start, end] as const,
   config: () => ["config"] as const,
 };

@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use tokio::sync::watch;
 
 use futures::StreamExt;
 use rewindos_core::chat::{
@@ -12,8 +13,8 @@ use rewindos_core::embedding::OllamaClient as EmbeddingClient;
 use rewindos_core::schema::{
     ActiveBlock, ActivityResponse, Bookmark, BoundingBox, CachedDailySummary, Collection,
     JournalDateInfo, JournalEntry, JournalScreenshot, JournalSearchResponse, JournalStreakInfo,
-    JournalSummary, JournalTag, JournalTemplate, NewCollection, SearchFilters, SearchResponse,
-    TaskUsageStat, UpdateCollection, UpsertJournalEntry,
+    JournalSummary, JournalTag, JournalTemplate, NewCollection, OpenTodo, SearchFilters,
+    SearchResponse, TaskUsageStat, UpdateCollection, UpsertJournalEntry,
 };
 use serde::{Deserialize, Serialize};
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
@@ -27,6 +28,7 @@ struct AppState {
     db: Mutex<Database>,
     config: Mutex<AppConfig>,
     chat_sessions: Arc<Mutex<HashMap<String, Vec<ChatMessage>>>>,
+    ask_cancel_tokens: Arc<Mutex<HashMap<String, watch::Sender<bool>>>>,
     embedding_client: Option<EmbeddingClient>,
 }
 
@@ -202,6 +204,7 @@ fn browse_screenshots(
     end_time: Option<i64>,
     app_name: Option<String>,
     limit: Option<i64>,
+    offset: Option<i64>,
 ) -> Result<Vec<TimelineEntry>, String> {
     let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
     let screenshots = db
@@ -210,7 +213,7 @@ fn browse_screenshots(
             end_time,
             app_name.as_deref(),
             limit.unwrap_or(200),
-            0,
+            offset.unwrap_or(0),
         )
         .map_err(|e| format!("db error: {e}"))?;
 
@@ -668,6 +671,18 @@ async fn ask_health(state: State<'_, AppState>) -> Result<bool, String> {
 }
 
 #[tauri::command]
+fn ask_cancel(state: State<'_, AppState>, session_id: String) -> Result<(), String> {
+    let tokens = state
+        .ask_cancel_tokens
+        .lock()
+        .map_err(|e| format!("lock: {e}"))?;
+    if let Some(tx) = tokens.get(&session_id) {
+        let _ = tx.send(true);
+    }
+    Ok(())
+}
+
+#[tauri::command]
 async fn ask(
     state: State<'_, AppState>,
     app: AppHandle,
@@ -877,40 +892,86 @@ async fn ask(
     }
     messages.push(user_message);
 
-    // 4. Spawn streaming task
+    // 4. Spawn streaming task with cancel support
     let session_id_clone = session_id.clone();
     let chat_sessions = state.chat_sessions.clone();
+    let cancel_tokens = state.ask_cancel_tokens.clone();
+
+    // Create cancel channel
+    let (cancel_tx, mut cancel_rx) = watch::channel(false);
+    {
+        let mut tokens = cancel_tokens
+            .lock()
+            .map_err(|e| format!("lock: {e}"))?;
+        tokens.insert(session_id.clone(), cancel_tx);
+    }
 
     tokio::spawn(async move {
         let client = OllamaChatClient::new(&config.chat);
         let mut stream = std::pin::pin!(client.chat_stream(messages));
         let mut full_response = String::new();
 
-        while let Some(chunk) = stream.next().await {
-            match chunk {
-                Ok(ChatStreamChunk { token, done }) => {
-                    full_response.push_str(&token);
-                    let _ = app.emit(
-                        "ask-token",
-                        AskTokenPayload {
-                            session_id: session_id_clone.clone(),
-                            token,
-                            done,
-                        },
-                    );
-                    if done {
-                        break;
+        loop {
+            tokio::select! {
+                chunk = stream.next() => {
+                    match chunk {
+                        Some(Ok(ChatStreamChunk { token, done })) => {
+                            full_response.push_str(&token);
+                            let _ = app.emit(
+                                "ask-token",
+                                AskTokenPayload {
+                                    session_id: session_id_clone.clone(),
+                                    token,
+                                    done,
+                                },
+                            );
+                            if done {
+                                break;
+                            }
+                        }
+                        Some(Err(e)) => {
+                            let _ = app.emit(
+                                "ask-error",
+                                AskErrorPayload {
+                                    session_id: session_id_clone.clone(),
+                                    error: e.to_string(),
+                                },
+                            );
+                            // Cleanup cancel token
+                            if let Ok(mut tokens) = cancel_tokens.lock() {
+                                tokens.remove(&session_id_clone);
+                            }
+                            return;
+                        }
+                        None => break,
                     }
                 }
-                Err(e) => {
-                    let _ = app.emit(
-                        "ask-error",
-                        AskErrorPayload {
-                            session_id: session_id_clone.clone(),
-                            error: e.to_string(),
-                        },
-                    );
-                    return;
+                _ = cancel_rx.changed() => {
+                    if *cancel_rx.borrow() {
+                        // Cancelled — emit done with what we have
+                        let _ = app.emit(
+                            "ask-done",
+                            AskDonePayload {
+                                session_id: session_id_clone.clone(),
+                                full_response: full_response.clone(),
+                            },
+                        );
+                        // Store partial response
+                        if !full_response.is_empty() {
+                            if let Ok(mut sessions) = chat_sessions.lock() {
+                                if let Some(history) = sessions.get_mut(&session_id_clone) {
+                                    history.push(ChatMessage {
+                                        role: ChatRole::Assistant,
+                                        content: full_response,
+                                    });
+                                }
+                            }
+                        }
+                        if let Ok(mut tokens) = cancel_tokens.lock() {
+                            tokens.remove(&session_id_clone);
+                        }
+                        return;
+                    }
                 }
             }
         }
@@ -923,6 +984,11 @@ async fn ask(
                     content: full_response.clone(),
                 });
             }
+        }
+
+        // Cleanup cancel token
+        if let Ok(mut tokens) = cancel_tokens.lock() {
+            tokens.remove(&session_id_clone);
         }
 
         let _ = app.emit(
@@ -1132,6 +1198,17 @@ fn get_journal_dates(
 fn get_journal_streak(state: State<'_, AppState>) -> Result<JournalStreakInfo, String> {
     let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
     db.get_journal_streak()
+        .map_err(|e| format!("db error: {e}"))
+}
+
+#[tauri::command]
+fn get_open_todos(
+    state: State<'_, AppState>,
+    start_date: String,
+    end_date: String,
+) -> Result<Vec<OpenTodo>, String> {
+    let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+    db.get_open_todos(&start_date, &end_date)
         .map_err(|e| format!("db error: {e}"))
 }
 
@@ -1500,6 +1577,7 @@ pub fn run() {
                 db: Mutex::new(db),
                 config: Mutex::new(config),
                 chat_sessions: Arc::new(Mutex::new(HashMap::new())),
+                ask_cancel_tokens: Arc::new(Mutex::new(HashMap::new())),
                 embedding_client,
             });
 
@@ -1648,6 +1726,7 @@ pub fn run() {
             ask,
             ask_new_session,
             ask_health,
+            ask_cancel,
             delete_screenshots_in_range,
             get_config,
             update_config,
@@ -1667,6 +1746,7 @@ pub fn run() {
             delete_journal_entry,
             get_journal_dates,
             get_journal_streak,
+            get_open_todos,
             add_journal_screenshot,
             remove_journal_screenshot,
             get_journal_screenshots,

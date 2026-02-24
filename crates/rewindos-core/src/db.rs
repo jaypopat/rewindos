@@ -4,7 +4,7 @@ use crate::schema::{
     ActiveBlock, ActivityResponse, AppUsageStat, Bookmark, BoundingBox, CachedDailySummary,
     Collection, DailyActivity, HourlyActivity, JournalDateInfo, JournalEntry, JournalScreenshot,
     JournalSearchResponse, JournalSearchResult, JournalStreakInfo, JournalSummary, JournalTag,
-    JournalTemplate, NewBoundingBox, NewCollection, NewScreenshot, OcrStatus, Screenshot,
+    JournalTemplate, NewBoundingBox, NewCollection, NewScreenshot, OcrStatus, OpenTodo, Screenshot,
     SearchFilters, SearchResponse, SearchResult, TaskUsageStat, UpdateCollection,
     UpsertJournalEntry,
 };
@@ -1544,12 +1544,12 @@ impl Database {
         let tx = self.conn.unchecked_transaction()?;
 
         tx.execute(
-            "INSERT INTO journal_entries (date, content, mood, energy, word_count)
-             VALUES (?1, ?2, ?3, ?4, ?5)
+            "INSERT INTO journal_entries (date, content, word_count)
+             VALUES (?1, ?2, ?3)
              ON CONFLICT(date) DO UPDATE SET
-               content = ?2, mood = ?3, energy = ?4, word_count = ?5,
+               content = ?2, word_count = ?3,
                updated_at = datetime('now')",
-            params![entry.date, entry.content, entry.mood, entry.energy, word_count],
+            params![entry.date, entry.content, word_count],
         )?;
 
         let id: i64 = tx.query_row(
@@ -1622,6 +1622,43 @@ impl Database {
 
         rows.collect::<std::result::Result<Vec<_>, _>>()
             .map_err(Into::into)
+    }
+
+    /// Get open (unchecked) todos from journal entries in a date range.
+    /// Parses markdown lines matching `- [ ] ` prefix.
+    pub fn get_open_todos(
+        &self,
+        start_date: &str,
+        end_date: &str,
+    ) -> Result<Vec<OpenTodo>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT date, content FROM journal_entries
+             WHERE date >= ?1 AND date <= ?2 AND content LIKE '%- [ ] %'
+             ORDER BY date DESC",
+        )?;
+
+        let mut todos = Vec::new();
+        let rows = stmt.query_map(params![start_date, end_date], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+
+        for row in rows {
+            let (date, content) = row?;
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if trimmed.starts_with("- [ ] ") {
+                    let text = trimmed.strip_prefix("- [ ] ").unwrap_or("").to_string();
+                    if !text.is_empty() {
+                        todos.push(OpenTodo {
+                            date: date.clone(),
+                            text,
+                        });
+                    }
+                }
+            }
+        }
+
+        Ok(todos)
     }
 
     /// Compute current streak, longest streak, and total entry count.
@@ -2637,8 +2674,6 @@ mod tests {
         let entry = crate::schema::UpsertJournalEntry {
             date: "2025-01-15".to_string(),
             content: "Worked on the journal feature today.".to_string(),
-            mood: Some(4),
-            energy: Some(3),
         };
         let id = db.upsert_journal_entry(&entry).unwrap();
         assert!(id > 0);
@@ -2647,23 +2682,18 @@ mod tests {
         assert_eq!(got.id, id);
         assert_eq!(got.date, "2025-01-15");
         assert_eq!(got.content, "Worked on the journal feature today.");
-        assert_eq!(got.mood, Some(4));
-        assert_eq!(got.energy, Some(3));
         assert_eq!(got.word_count, 6);
 
         // Upsert same date — should update
         let entry2 = crate::schema::UpsertJournalEntry {
             date: "2025-01-15".to_string(),
             content: "Updated entry.".to_string(),
-            mood: None,
-            energy: None,
         };
         let id2 = db.upsert_journal_entry(&entry2).unwrap();
         assert_eq!(id, id2);
 
         let got2 = db.get_journal_entry("2025-01-15").unwrap().unwrap();
         assert_eq!(got2.content, "Updated entry.");
-        assert_eq!(got2.mood, None);
     }
 
     #[test]
@@ -2680,8 +2710,6 @@ mod tests {
         let entry = crate::schema::UpsertJournalEntry {
             date: "2025-02-01".to_string(),
             content: "Some content".to_string(),
-            mood: None,
-            energy: None,
         };
         db.upsert_journal_entry(&entry).unwrap();
 
@@ -2698,8 +2726,6 @@ mod tests {
             db.upsert_journal_entry(&crate::schema::UpsertJournalEntry {
                 date: day.to_string(),
                 content: "entry".to_string(),
-                mood: None,
-                energy: None,
             })
             .unwrap();
         }
@@ -2731,15 +2757,11 @@ mod tests {
         db.upsert_journal_entry(&crate::schema::UpsertJournalEntry {
             date: today.format("%Y-%m-%d").to_string(),
             content: "today".to_string(),
-            mood: None,
-            energy: None,
         })
         .unwrap();
         db.upsert_journal_entry(&crate::schema::UpsertJournalEntry {
             date: yesterday.format("%Y-%m-%d").to_string(),
             content: "yesterday".to_string(),
-            mood: None,
-            energy: None,
         })
         .unwrap();
 
@@ -2758,8 +2780,6 @@ mod tests {
             .upsert_journal_entry(&crate::schema::UpsertJournalEntry {
                 date: "2025-04-01".to_string(),
                 content: "entry with screenshots".to_string(),
-                mood: None,
-                energy: None,
             })
             .unwrap();
 

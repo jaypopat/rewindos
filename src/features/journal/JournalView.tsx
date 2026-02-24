@@ -2,7 +2,7 @@ import { useCallback } from "react";
 import { cn } from "@/lib/utils";
 import { queryKeys } from "@/lib/query-keys";
 import { ChevronLeft, ChevronRight, Search, Paperclip } from "lucide-react";
-import { MOOD_EMOJIS, ENERGY_EMOJIS } from "./constants";
+
 import { useJournalEntry } from "./hooks/useJournalEntry";
 import { JournalEditor } from "./JournalEditor";
 import { TagEditor } from "./TagEditor";
@@ -37,7 +37,7 @@ export function JournalView({ onSelectScreenshot }: JournalViewProps) {
     <div className="flex-1 flex min-h-0 overflow-hidden">
       {/* Left panel: Editor */}
       <div className="flex-1 flex flex-col min-w-0 border-r border-border/50">
-        {/* Date nav + mood/energy + search */}
+        {/* Date nav + search */}
         <div className="flex items-center gap-2 px-5 py-3 border-b border-border/50 shrink-0">
           <button onClick={j.goToPrev} className="p-1 text-text-muted hover:text-text-secondary transition-colors">
             <ChevronLeft className="size-4" strokeWidth={2} />
@@ -50,8 +50,7 @@ export function JournalView({ onSelectScreenshot }: JournalViewProps) {
           </button>
           <button
             onClick={j.goToNext}
-            disabled={j.isToday}
-            className="p-1 text-text-muted hover:text-text-secondary transition-colors disabled:opacity-30"
+            className="p-1 text-text-muted hover:text-text-secondary transition-colors"
           >
             <ChevronRight className="size-4" strokeWidth={2} />
           </button>
@@ -60,44 +59,9 @@ export function JournalView({ onSelectScreenshot }: JournalViewProps) {
             <span className="text-[10px] font-mono text-accent bg-accent/10 px-1.5 py-0.5 rounded">today</span>
           )}
 
-          {/* Mood picker */}
-          <div className="flex gap-0.5 ml-3">
-            {MOOD_EMOJIS.map((emoji, i) => (
-              <button
-                key={`mood-${i}`}
-                onClick={() => j.setMood(j.mood === i + 1 ? null : i + 1)}
-                className={cn(
-                  "w-6 h-6 rounded-md text-sm flex items-center justify-center transition-all",
-                  j.mood === i + 1 ? "bg-accent/20 ring-1 ring-accent/40 scale-110" : "opacity-40 hover:opacity-70",
-                )}
-                title={`Mood: ${i + 1}/5`}
-              >
-                {emoji}
-              </button>
-            ))}
-          </div>
-
-          {/* Energy picker */}
-          <div className="flex gap-0.5 ml-1">
-            {ENERGY_EMOJIS.map((emoji, i) => (
-              <button
-                key={`energy-${i}`}
-                onClick={() => j.setEnergy(j.energy === i + 1 ? null : i + 1)}
-                className={cn(
-                  "w-6 h-6 rounded-md text-sm flex items-center justify-center transition-all",
-                  j.energy === i + 1 ? "bg-accent/20 ring-1 ring-accent/40 scale-110" : "opacity-40 hover:opacity-70",
-                )}
-                title={`Energy: ${i + 1}/5`}
-              >
-                {emoji}
-              </button>
-            ))}
-          </div>
-
           <span className="flex-1" />
 
           {j.isSaving && <span className="text-[10px] text-text-muted font-mono">saving...</span>}
-          {!j.isSaving && j.isUnsaved && <span className="text-[10px] text-amber-400 font-mono">unsaved</span>}
 
           <button
             onClick={() => j.setShowSearch(!j.showSearch)}
@@ -172,6 +136,7 @@ export function JournalView({ onSelectScreenshot }: JournalViewProps) {
                 dayStart={j.dayStart}
                 dayEnd={j.dayEnd}
                 attachedIds={j.journalScreenshots.map((s) => s.screenshot_id)}
+                appUsage={j.activityData?.app_usage}
                 onAttach={(id) => j.attachMutation.mutate(id)}
                 onClose={() => j.setShowScreenshotPicker(false)}
               />

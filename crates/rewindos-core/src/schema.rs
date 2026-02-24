@@ -316,8 +316,6 @@ pub struct JournalEntry {
 pub struct UpsertJournalEntry {
     pub date: String,
     pub content: String,
-    pub mood: Option<i32>,
-    pub energy: Option<i32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -385,4 +383,10 @@ pub struct JournalSummary {
     pub entry_count: i64,
     pub generated_at: String,
     pub cached: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OpenTodo {
+    pub date: String,
+    pub text: String,
 }

@@ -3,6 +3,7 @@ import { cn } from "@/lib/utils";
 import { AppDot } from "@/components/AppDot";
 import { Flame, Lightbulb, Download } from "lucide-react";
 import { MiniCalendarHeatmap } from "./MiniCalendarHeatmap";
+import { OpenTodosPanel } from "./OpenTodosPanel";
 import { AISummaryPanel } from "./AISummaryPanel";
 
 interface JournalSidebarProps {
@@ -65,6 +66,9 @@ export function JournalSidebar({
             </div>
           </div>
         )}
+
+        {/* Open Todos */}
+        <OpenTodosPanel onSelectDate={onSelectDate} />
 
         {/* AI Summary */}
         {ollamaAvailable && <AISummaryPanel selectedDate={selectedDate} />}

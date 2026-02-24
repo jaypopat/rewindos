@@ -15,7 +15,6 @@ import {
   addMonths,
   subMonths,
 } from "date-fns";
-import { MOOD_EMOJIS } from "./constants";
 
 interface MiniCalendarHeatmapProps {
   selectedDate: Date;
@@ -82,7 +81,6 @@ export function MiniCalendarHeatmap({
           const isSelected = isSameDay(day, selectedDate);
           const isCurrentMonth = isSameMonth(day, viewMonth);
           const isCurrentDay = isSameDay(day, today);
-          const isFuture = day > today;
 
           // Intensity based on word count
           const wc = info?.word_count ?? 0;
@@ -100,13 +98,11 @@ export function MiniCalendarHeatmap({
           return (
             <button
               key={key}
-              onClick={() => !isFuture && onSelectDate(day)}
-              disabled={isFuture}
-              title={hasEntry ? `${wc} words${info?.mood ? ` ${MOOD_EMOJIS[(info.mood || 3) - 1]}` : ""}` : undefined}
+              onClick={() => onSelectDate(day)}
+              title={hasEntry ? `${wc} words` : undefined}
               className={cn(
                 "relative flex items-center justify-center w-full aspect-square text-[10px] rounded transition-colors",
                 !isCurrentMonth && "opacity-30",
-                isFuture && "opacity-20 cursor-not-allowed",
                 hasEntry && !isSelected && intensityClass,
                 isSelected
                   ? "ring-1 ring-accent/60 bg-accent/20 text-accent font-medium"

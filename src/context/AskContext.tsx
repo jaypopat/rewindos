@@ -10,6 +10,7 @@ import {
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
   ask,
+  askCancel,
   askNewSession,
   type AskResponse,
   type ScreenshotRef,
@@ -46,6 +47,7 @@ interface AskContextValue {
   error: string | null;
   sessionId: string | null;
   sendMessage: (text: string) => Promise<void>;
+  cancelStream: () => void;
   newSession: () => Promise<void>;
 }
 
@@ -171,6 +173,13 @@ export function AskProvider({ children }: { children: ReactNode }) {
     [ensureSession],
   );
 
+  const cancelStream = useCallback(() => {
+    const sid = sessionIdRef.current;
+    if (!sid || !isStreamingRef.current) return;
+    askCancel(sid).catch(() => {});
+    setIsStreaming(false);
+  }, []);
+
   const newSession = useCallback(async () => {
     setMessages([]);
     setError(null);
@@ -186,7 +195,7 @@ export function AskProvider({ children }: { children: ReactNode }) {
 
   return (
     <AskContext.Provider
-      value={{ messages, isStreaming, error, sessionId, sendMessage, newSession }}
+      value={{ messages, isStreaming, error, sessionId, sendMessage, cancelStream, newSession }}
     >
       {children}
     </AskContext.Provider>

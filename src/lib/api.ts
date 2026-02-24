@@ -137,12 +137,14 @@ export async function browseScreenshots(
   endTime?: number,
   appName?: string,
   limit?: number,
+  offset?: number,
 ): Promise<TimelineEntry[]> {
   return invoke("browse_screenshots", {
     startTime: startTime ?? null,
     endTime: endTime ?? null,
     appName: appName ?? null,
     limit: limit ?? 200,
+    offset: offset ?? 0,
   });
 }
 
@@ -240,6 +242,10 @@ export async function ask(
   message: string,
 ): Promise<AskResponse> {
   return invoke("ask", { sessionId, message });
+}
+
+export async function askCancel(sessionId: string): Promise<void> {
+  return invoke("ask_cancel", { sessionId });
 }
 
 // -- Delete --
@@ -407,7 +413,7 @@ export async function getJournalEntry(
 }
 
 export async function upsertJournalEntry(
-  entry: { date: string; content: string; mood?: number | null; energy?: number | null },
+  entry: { date: string; content: string },
 ): Promise<number> {
   return invoke("upsert_journal_entry", { entry });
 }
@@ -459,6 +465,20 @@ export async function getJournalScreenshots(
   journalEntryId: number,
 ): Promise<JournalScreenshot[]> {
   return invoke("get_journal_screenshots", { journalEntryId });
+}
+
+// -- Open Todos --
+
+export interface OpenTodo {
+  date: string;
+  text: string;
+}
+
+export async function getOpenTodos(
+  startDate: string,
+  endDate: string,
+): Promise<OpenTodo[]> {
+  return invoke("get_open_todos", { startDate, endDate });
 }
 
 // -- Journal Tags --

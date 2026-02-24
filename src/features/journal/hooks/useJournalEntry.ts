@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useEffect } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   getJournalEntry,
@@ -26,17 +26,18 @@ import {
   subMonths,
   isSameDay,
   format,
+  isToday as isDateToday,
 } from "date-fns";
+import { extractUncheckedTodos, buildCarryForwardContent } from "../utils";
 
 export function useJournalEntry() {
   const [selectedDate, setSelectedDate] = useState(() => new Date());
-  const [mood, setMood] = useState<number | null>(null);
-  const [energy, setEnergy] = useState<number | null>(null);
   const [content, setContent] = useState("");
   const [showScreenshotPicker, setShowScreenshotPicker] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const [showExport, setShowExport] = useState(false);
   const [contentKey, setContentKey] = useState(0);
+  const carryForwardAppliedRef = useRef<string | null>(null);
   const queryClient = useQueryClient();
 
   const dateKey = dateToKey(selectedDate);
@@ -106,10 +107,34 @@ export function useJournalEntry() {
   useEffect(() => {
     if (!entryLoading) {
       setContent(entry?.content ?? "");
-      setMood(entry?.mood ?? null);
-      setEnergy(entry?.energy ?? null);
     }
   }, [entry, entryLoading]);
+
+  // ── Carry forward unchecked todos from yesterday ──
+
+  useEffect(() => {
+    if (entryLoading) return;
+    if (!isDateToday(selectedDate)) return;
+    if (entry?.content) return; // existing entry already has content
+    if (carryForwardAppliedRef.current === dateKey) return; // already applied for this date
+
+    const prevKey = dateToKey(subDays(selectedDate, 1));
+    queryClient
+      .fetchQuery({
+        queryKey: queryKeys.journalEntry(prevKey),
+        queryFn: () => getJournalEntry(prevKey),
+      })
+      .then((prevEntry) => {
+        if (!prevEntry?.content) return;
+        const todos = extractUncheckedTodos(prevEntry.content);
+        if (todos.length === 0) return;
+        const carried = buildCarryForwardContent(todos);
+        carryForwardAppliedRef.current = dateKey;
+        setContent(carried);
+        setContentKey((k) => k + 1);
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entryLoading, dateKey]);
 
   // ── Prefetch adjacent days ──
 
@@ -129,12 +154,10 @@ export function useJournalEntry() {
   // ── Auto-save with debounce ──
 
   const debouncedContent = useDebounce(content, 800);
-  const debouncedMood = useDebounce(mood, 800);
-  const debouncedEnergy = useDebounce(energy, 800);
 
   const saveMutation = useMutation({
-    mutationFn: (data: { content: string; mood: number | null; energy: number | null }) =>
-      upsertJournalEntry({ date: dateKey, content: data.content, mood: data.mood, energy: data.energy }),
+    mutationFn: (data: { content: string }) =>
+      upsertJournalEntry({ date: dateKey, content: data.content }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.journalStreak() });
       queryClient.invalidateQueries({
@@ -145,22 +168,17 @@ export function useJournalEntry() {
 
   useEffect(() => {
     const stored = entry?.content ?? "";
-    const storedMood = entry?.mood ?? null;
-    const storedEnergy = entry?.energy ?? null;
-    if (
-      (debouncedContent !== stored || debouncedMood !== storedMood || debouncedEnergy !== storedEnergy) &&
-      !entryLoading
-    ) {
-      saveMutation.mutate({ content: debouncedContent, mood: debouncedMood, energy: debouncedEnergy });
+    if (debouncedContent !== stored && !entryLoading) {
+      saveMutation.mutate({ content: debouncedContent });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedContent, debouncedMood, debouncedEnergy]);
+  }, [debouncedContent]);
 
   // ── Screenshot attach / detach ──
 
   const attachMutation = useMutation({
     mutationFn: async (screenshotId: number) => {
-      const entryId = await upsertJournalEntry({ date: dateKey, content, mood, energy });
+      const entryId = await upsertJournalEntry({ date: dateKey, content });
       await addJournalScreenshot(entryId, screenshotId);
     },
     onSuccess: () => {
@@ -185,6 +203,7 @@ export function useJournalEntry() {
 
   const goToDate = useCallback(
     (d: Date) => {
+      carryForwardAppliedRef.current = null;
       setSelectedDate(d);
       setContentKey((k) => k + 1);
       setShowScreenshotPicker(false);
@@ -215,12 +234,12 @@ export function useJournalEntry() {
         goToDate(subDays(selectedDate, 1));
       } else if (e.altKey && e.key === "ArrowRight") {
         e.preventDefault();
-        if (!isToday) goToDate(addDays(selectedDate, 1));
+        goToDate(addDays(selectedDate, 1));
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [selectedDate, isToday, goToDate]);
+  }, [selectedDate, goToDate]);
 
   // ── Writing stats ──
 
@@ -259,7 +278,6 @@ export function useJournalEntry() {
 
   const formattedDate = format(selectedDate, "EEEE, MMM d, yyyy");
   const isSaving = saveMutation.isPending;
-  const isUnsaved = content !== (entry?.content ?? "");
   return {
     // Date navigation
     selectedDate,
@@ -277,13 +295,8 @@ export function useJournalEntry() {
     // Content
     content,
     setContent,
-    mood,
-    setMood,
-    energy,
-    setEnergy,
     entryLoading,
     isSaving,
-    isUnsaved,
     // Entry & tags
     entry,
     entryTags,
