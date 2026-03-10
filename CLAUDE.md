@@ -29,8 +29,8 @@ Core flow: capture → OCR → full-text search, with optional semantic search v
 - `src/` — React frontend
 
 ## Key Modules (rewindos-core)
-- `db.rs` — SQLite + FTS5 + vector search, hybrid search (RRF), scene deduplication
-- `schema.rs` — All shared types (Screenshot, SearchResult, SearchResponse, etc.)
+- `db.rs` — SQLite + FTS5 + vector search, hybrid search (RRF), scene dedup, bookmarks, collections, journal, summaries
+- `schema.rs` — All shared types (Screenshot, SearchResult, Bookmark, Collection, JournalEntry, JournalTag, JournalTemplate, etc.)
 - `embedding.rs` — OllamaClient (embed, health_check, has_model, pull_model)
 - `chat.rs` — OllamaChatClient, intent detection, streaming chat with screenshot context
 - `hasher.rs` — Perceptual hashing, hamming distance, WebP save, thumbnails
@@ -52,11 +52,14 @@ Core flow: capture → OCR → full-text search, with optional semantic search v
 
 ## Frontend Views
 - **Search** — Full-text search with grid/list toggle, scene dedup badges, SemanticBadge
-- **History** — Chronological screenshot browser with timeline
-- **Dashboard** — Activity charts, app usage stats, daily/hourly breakdowns
-- **Ask** — AI chat with intent detection and screenshot references
+- **History** — Chronological browser with timeline/apps modes, hourly grouping, daily digests
+- **Rewind** — Timelapse playback with canvas renderer, scrubber, speed controls, keyboard nav
+- **Dashboard** — Activity charts, app usage stats, heatmap calendar, top apps
+- **Ask** — AI chat with intent detection, streaming, screenshot references
+- **Journal** — Rich text editor (Tiptap), tags, templates, screenshot attachments, AI summaries, search, export
+- **Saved** — Bookmarks and collections browser
 - **Focus** — Pomodoro timer with productivity tracking
-- **Settings** — Full config UI (capture, privacy, semantic, chat, focus)
+- **Settings** — Full config UI (General, Capture, OCR, Privacy, Storage, AI, Focus)
 
 ## Target Platform
 Linux (Wayland) — KDE Plasma, GNOME, Hyprland, Sway

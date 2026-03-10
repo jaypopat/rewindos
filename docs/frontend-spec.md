@@ -19,20 +19,33 @@ Full-text + semantic search with grid/list toggle.
 - **ScreenshotDetail**: Full screenshot + OCR text panel with bounding box overlay
 
 ### History View
-Chronological screenshot browser with timeline scrubbing.
+Chronological screenshot browser with two viewing modes.
 
-- Browse screenshots by date/time without a search query
-- TimelineView for hourly/daily visual aggregation
-- RewindView for continuous timeline playback
+- **TimelineMode**: Browse screenshots by date/time with hourly grouping (HourGroup)
+- **AppsMode**: Filter by application
+- Date range selection (RangeSelectToolbar) with presets
+- DailyDigestCard for AI-generated summaries
+- Custom hooks: `useHistoryData`, `useRangeSelection`
+
+### Rewind View
+Timelapse playback of screen history.
+
+- **RewindPlayer**: Canvas-based renderer for smooth playback
+- **RewindControls**: Play/pause, speed (0.5x–8x)
+- **RewindScrubber**: Timeline slider for seeking
+- Keyboard navigation (arrow keys, space, speed shortcuts)
+- Custom hooks: `usePlayback`, `useRewindData`, `useScrubber`, `useRewindKeyboard`
 
 ### Dashboard View
-Analytics dashboard with activity charts.
+Analytics dashboard with charts and stats.
 
-- App usage breakdown (pie/bar)
-- Daily activity chart (captures per day)
-- Hourly activity heatmap
-- StatCard components for key metrics
-- Sparkline mini-charts
+- App usage breakdown with categories (CategoriesBreakdown)
+- Daily/hourly activity charts (DailyActivityChart, HourlyActivityChart)
+- Screen time chart and heatmap calendar
+- CapturesCarousel for recent screenshots
+- TopTasksList for most-used apps
+- AppTimeline for top-app timeline view
+- StatCard and Sparkline components
 
 ### Ask View
 AI chat interface powered by Ollama.
@@ -40,7 +53,31 @@ AI chat interface powered by Ollama.
 - Intent detection (recall, time-based, productivity, app-specific, general)
 - Streaming chat responses with markdown rendering
 - Screenshot references with clickable cards (ScreenshotRefCard)
-- Session management (new session, history)
+- Session management (new session, cancel)
+- AskEmptyState for onboarding
+- Managed via AskContext (React context + TanStack Query)
+
+### Journal View
+Daily journaling with rich text editing.
+
+- **JournalEditor**: Tiptap rich text editor with formatting toolbar
+- **JournalSidebar**: Date picker, navigation, MiniCalendarHeatmap
+- **TagEditor**: Tag management with colors
+- **SlashMenu**: Command menu (`/template`, `/image`)
+- **ScreenshotPicker**: Modal to attach screenshots from history
+- **AttachedScreenshot**: Inline screenshot display with captions
+- **JournalSearchPanel**: FTS5 search across journal entries
+- **AISummaryPanel**: Generate daily/weekly AI summaries
+- **OpenTodosPanel**: Parse and display TODO items from entries
+- **ExportDialog**: Export journal to Markdown or HTML
+- Template system with 4 built-in templates (Daily Reflection, Standup, Gratitude, Weekly Review)
+
+### Saved View
+Bookmarks and collections browser.
+
+- **SavedView**: Browse all collections, view bookmarked screenshots
+- **CollectionDetailView**: View and manage screenshots in a collection
+- BookmarkButton and AddToCollectionMenu on screenshot cards
 
 ### Focus View
 Pomodoro timer with productivity tracking.
@@ -51,15 +88,16 @@ Pomodoro timer with productivity tracking.
 - Session history
 
 ### Settings View
-Full configuration UI for all config sections.
+Full configuration UI organized into tabs.
 
-- Capture settings (interval, threshold, enabled)
-- Storage settings (retention, quality)
-- Privacy settings (excluded apps, title patterns)
-- OCR settings (language, workers)
-- Semantic search settings (Ollama URL, model)
-- Chat settings (model, temperature)
-- Focus settings (timer durations, distraction apps)
+- **GeneralTab**: Capture interval, sensitivity, retention
+- **CaptureTab**: Capture backend, window detection
+- **OCRTab**: Language, worker count
+- **PrivacyTab**: Excluded apps, window title patterns
+- **StorageTab**: Disk limits, cleanup
+- **AITab**: Ollama endpoint, semantic search, chat model config
+- **FocusTab**: Pomodoro timer settings, distraction apps
+- Reusable form primitives: TextField, NumberInput, Toggle, ListInput, CategoryRulesEditor
 
 ## Key Components
 
@@ -130,8 +168,19 @@ interface SearchResponse {
 - `getActiveBlocks(startTime, endTime)` — Active time blocks
 - `getDailySummary(startTime, endTime)` — AI-generated daily summary
 - `ask(sessionId, message)` — AI chat
+- `askHealth()` / `askNewSession()` / `askCancel(sessionId)` — Chat session management
 - `deleteScreenshotsInRange(startTime, endTime)` — Privacy delete
 - `getConfig()` / `updateConfig(config)` — Settings management
+- `toggleBookmark(id)` / `isBookmarked(id)` / `getBookmarkedIds()` / `listBookmarks()` — Bookmarking
+- `createCollection()` / `updateCollection()` / `deleteCollection()` / `listCollections()` — Collections
+- `getCollectionScreenshots()` / `addToCollection()` / `removeFromCollection()` — Collection items
+- `upsertJournalEntry()` / `deleteJournalEntry()` / `getJournalEntry()` / `getJournalDates()` — Journal CRUD
+- `getJournalStreak()` / `getOpenTodos()` / `searchJournal(query)` — Journal queries
+- `addJournalScreenshot()` / `removeJournalScreenshot()` / `getJournalScreenshots()` — Journal screenshots
+- `setJournalTags()` / `getJournalTags()` / `listAllJournalTags()` — Tag system
+- `listJournalTemplates()` / `createJournalTemplate()` / `deleteJournalTemplate()` — Templates
+- `generateJournalSummary(periodType, periodKey)` — AI summaries
+- `exportJournal(format)` — Export to Markdown/HTML
 
 ## Image Serving
 

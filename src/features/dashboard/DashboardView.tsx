@@ -1,16 +1,15 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   browseScreenshots,
   getActivity,
-  getConfig,
   getTaskBreakdown,
   getActiveBlocks,
 } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
-import { type AppConfig } from "@/lib/config";
 import { formatDuration } from "@/lib/format";
 import { buildCategoryRules, categorizeApp, type ActivityCategory } from "@/lib/app-categories";
+import { useConfigQuery } from "@/hooks/useConfigQuery";
 import { StatCard } from "@/components/StatCard";
 import { HourlyActivityChart } from "@/components/charts/HourlyActivityChart";
 import { AppDonutChart } from "@/components/charts/AppDonutChart";
@@ -25,22 +24,15 @@ export interface DashboardViewProps {
 }
 
 export function DashboardView({ onSelectScreenshot }: DashboardViewProps) {
-  const [categoryRules, setCategoryRules] = useState<Record<string, string[]> | undefined>();
+  const { data: appConfig } = useConfigQuery();
 
-  // Load category config
-  useEffect(() => {
-    getConfig()
-      .then((c) => {
-        const { focus } = c as unknown as AppConfig;
-        if (focus) {
-          const userRules = focus.category_rules ?? {};
-          if (Object.keys(userRules).length > 0) {
-            setCategoryRules(buildCategoryRules(userRules));
-          }
-        }
-      })
-      .catch(() => {});
-  }, []);
+  const categoryRules = useMemo(() => {
+    const userRules = appConfig?.focus?.category_rules;
+    if (userRules && Object.keys(userRules).length > 0) {
+      return buildCategoryRules(userRules);
+    }
+    return undefined;
+  }, [appConfig]);
 
   // Today's time range
   const { todayStart, todayEnd } = useMemo(() => {

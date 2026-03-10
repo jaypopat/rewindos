@@ -31,11 +31,23 @@ install: build install-daemon
 	@# Copy the built binary
 	mkdir -p ~/.local/bin
 	cp target/release/rewindos ~/.local/bin/rewindos
-	@# Desktop entry (app launcher)
+	@# Remove old desktop file from previous installs
+	rm -f ~/.local/share/applications/com.rewindos.RewindOS.desktop
+	@# Desktop entry (app launcher) — filename must match Wayland app_id
 	mkdir -p ~/.local/share/applications
-	cp systemd/rewindos.desktop ~/.local/share/applications/com.rewindos.RewindOS.desktop
-	sed -i "s|^Exec=.*|Exec=$(HOME)/.local/bin/rewindos|" ~/.local/share/applications/com.rewindos.RewindOS.desktop
+	cp systemd/rewindos.desktop ~/.local/share/applications/com.jay.rewindos.desktop
+	sed -i "s|^Exec=.*|Exec=$(HOME)/.local/bin/rewindos|" ~/.local/share/applications/com.jay.rewindos.desktop
 	update-desktop-database ~/.local/share/applications/ 2>/dev/null || true
+	@# Install icons to hicolor theme
+	mkdir -p ~/.local/share/icons/hicolor/32x32/apps
+	mkdir -p ~/.local/share/icons/hicolor/128x128/apps
+	mkdir -p ~/.local/share/icons/hicolor/256x256/apps
+	mkdir -p ~/.local/share/icons/hicolor/512x512/apps
+	cp src-tauri/icons/32x32.png ~/.local/share/icons/hicolor/32x32/apps/com.jay.rewindos.png
+	cp src-tauri/icons/128x128.png ~/.local/share/icons/hicolor/128x128/apps/com.jay.rewindos.png
+	cp src-tauri/icons/128x128@2x.png ~/.local/share/icons/hicolor/256x256/apps/com.jay.rewindos.png
+	cp src-tauri/icons/icon.png ~/.local/share/icons/hicolor/512x512/apps/com.jay.rewindos.png
+	gtk-update-icon-cache ~/.local/share/icons/hicolor/ 2>/dev/null || true
 	@# Autostart on login (starts minimized in tray)
 	mkdir -p ~/.config/autostart
 	cp systemd/rewindos.desktop ~/.config/autostart/rewindos.desktop
@@ -63,9 +75,15 @@ uninstall:
 	systemctl --user disable rewindos-daemon 2>/dev/null || true
 	rm -f ~/.config/systemd/user/rewindos-daemon.service
 	rm -f ~/.config/autostart/rewindos.desktop
+	rm -f ~/.local/share/applications/com.jay.rewindos.desktop
 	rm -f ~/.local/share/applications/com.rewindos.RewindOS.desktop
 	rm -f ~/.local/share/applications/com.rewindos.Daemon.desktop
 	rm -f ~/.local/bin/rewindos
+	rm -f ~/.local/share/icons/hicolor/32x32/apps/com.jay.rewindos.png
+	rm -f ~/.local/share/icons/hicolor/128x128/apps/com.jay.rewindos.png
+	rm -f ~/.local/share/icons/hicolor/256x256/apps/com.jay.rewindos.png
+	rm -f ~/.local/share/icons/hicolor/512x512/apps/com.jay.rewindos.png
+	gtk-update-icon-cache ~/.local/share/icons/hicolor/ 2>/dev/null || true
 	systemctl --user daemon-reload
 	update-desktop-database ~/.local/share/applications/ 2>/dev/null || true
 	@echo "==> RewindOS uninstalled."

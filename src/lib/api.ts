@@ -481,6 +481,16 @@ export async function getOpenTodos(
   return invoke("get_open_todos", { startDate, endDate });
 }
 
+export async function getCarryForwardTodos(
+  today: string,
+  lookbackDays?: number,
+): Promise<string[]> {
+  return invoke("get_carry_forward_todos", {
+    today,
+    lookbackDays: lookbackDays ?? null,
+  });
+}
+
 // -- Journal Tags --
 
 export interface JournalTag {

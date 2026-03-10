@@ -1,8 +1,7 @@
-import { useEffect, useState } from "react";
+import { useMemo } from "react";
 import { usePomodoroTimer, type PomodoroConfig, type PomodoroPhase } from "@/hooks/usePomodoroTimer";
 import { useFocusScore } from "@/hooks/useFocusScore";
-import { getConfig } from "@/lib/api";
-import { type AppConfig } from "@/lib/config";
+import { useConfigQuery } from "@/hooks/useConfigQuery";
 import { cn } from "@/lib/utils";
 import { getCategoryColor, buildCategoryRules } from "@/lib/app-categories";
 
@@ -31,44 +30,25 @@ function formatTimer(seconds: number): string {
 }
 
 export function FocusView() {
-  const [focusSettings, setFocusSettings] = useState({
-    config: {
-      workMinutes: 25,
-      shortBreakMinutes: 5,
-      longBreakMinutes: 15,
-      sessionsBeforeLongBreak: 4,
-      autoStartBreaks: true,
-      autoStartWork: false,
-    } as PomodoroConfig,
-    distractionApps: [] as string[],
-    categoryRules: undefined as Record<string, string[]> | undefined,
-    dailyGoalMinutes: 480,
-  });
+  const { data: appConfig } = useConfigQuery();
 
-  const { config, distractionApps, categoryRules, dailyGoalMinutes } = focusSettings;
-
-  // Load config from backend (single fetch)
-  useEffect(() => {
-    getConfig().then((c) => {
-      const { focus } = c as unknown as AppConfig;
-      if (focus) {
-        const userRules = focus.category_rules ?? {};
-        setFocusSettings({
-          config: {
-            workMinutes: focus.work_minutes ?? 25,
-            shortBreakMinutes: focus.short_break_minutes ?? 5,
-            longBreakMinutes: focus.long_break_minutes ?? 15,
-            sessionsBeforeLongBreak: focus.sessions_before_long_break ?? 4,
-            autoStartBreaks: focus.auto_start_breaks ?? true,
-            autoStartWork: focus.auto_start_work ?? false,
-          },
-          distractionApps: focus.distraction_apps ?? [],
-          categoryRules: Object.keys(userRules).length > 0 ? buildCategoryRules(userRules) : undefined,
-          dailyGoalMinutes: focus.daily_goal_minutes ?? 480,
-        });
-      }
-    }).catch(() => {});
-  }, []);
+  const { config, distractionApps, categoryRules, dailyGoalMinutes } = useMemo(() => {
+    const focus = appConfig?.focus;
+    const userRules = focus?.category_rules ?? {};
+    return {
+      config: {
+        workMinutes: focus?.work_minutes ?? 25,
+        shortBreakMinutes: focus?.short_break_minutes ?? 5,
+        longBreakMinutes: focus?.long_break_minutes ?? 15,
+        sessionsBeforeLongBreak: focus?.sessions_before_long_break ?? 4,
+        autoStartBreaks: focus?.auto_start_breaks ?? true,
+        autoStartWork: focus?.auto_start_work ?? false,
+      } as PomodoroConfig,
+      distractionApps: focus?.distraction_apps ?? [],
+      categoryRules: Object.keys(userRules).length > 0 ? buildCategoryRules(userRules) : undefined,
+      dailyGoalMinutes: focus?.daily_goal_minutes ?? 480,
+    };
+  }, [appConfig]);
 
   const { state, start, pause, skip, reset } = usePomodoroTimer(config);
   const focus = useFocusScore(distractionApps, categoryRules);

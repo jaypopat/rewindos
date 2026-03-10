@@ -30,7 +30,7 @@ export function AskView({ onSelectScreenshot }: AskViewProps) {
   // Auto-scroll on new content
   useEffect(() => {
     if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      scrollRef.current.scrollIntoView({ block: "end" });
     }
   }, [messages]);
 
@@ -117,7 +117,7 @@ export function AskView({ onSelectScreenshot }: AskViewProps) {
       {messages.length === 0 ? (
         <AskEmptyState onSuggest={(q) => handleSubmit(q)} />
       ) : (
-        <ScrollArea className="flex-1">
+        <ScrollArea className="flex-1 min-h-0">
           <div ref={scrollRef} className="px-5 py-4 max-w-2xl mx-auto">
             {messages.map((msg, i) => (
               <ChatMessage

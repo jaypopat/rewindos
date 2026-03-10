@@ -59,17 +59,21 @@ rewindos/
 │   ├── rewindos-core/          # Shared library
 │   │   ├── Cargo.toml
 │   │   ├── migrations/
-│   │   │   ├── V001__initial_schema.sql
-│   │   │   └── V002__vector_embeddings.sql
+│   │   │   ├── V001__initial_schema.sql      # screenshots, ocr_fts, bounding_boxes, daemon_state
+│   │   │   ├── V002__vector_embeddings.sql   # embedding_status + ocr_embeddings vec0
+│   │   │   ├── V003__daily_summaries.sql     # AI-generated daily summaries
+│   │   │   ├── V004__bookmarks_collections.sql  # bookmarks, collections, collection_items
+│   │   │   ├── V005__journal.sql             # journal_entries, journal_screenshots
+│   │   │   └── V006__journal_upgrade.sql     # tags, FTS, templates, summaries, mood/energy
 │   │   └── src/
 │   │       ├── lib.rs
-│   │       ├── db.rs           # SQLite + FTS5 + vector + hybrid search + scene dedup
-│   │       ├── schema.rs       # Database types & models
+│   │       ├── db.rs           # SQLite + FTS5 + vector + hybrid search + scene dedup + bookmarks + journal
+│   │       ├── schema.rs       # All shared types (Screenshot, SearchResult, Bookmark, Collection, Journal*)
 │   │       ├── ocr.rs          # Tesseract CLI wrapper
 │   │       ├── hasher.rs       # Perceptual hashing (image-hasher)
 │   │       ├── config.rs       # Config loading (config.toml)
 │   │       ├── embedding.rs    # OllamaClient (embeddings, model management)
-│   │       ├── chat.rs         # OllamaChatClient (AI chat, intent detection)
+│   │       ├── chat.rs         # OllamaChatClient (AI chat, intent detection, context assembly)
 │   │       └── error.rs        # Error types (thiserror)
 │   │
 │   └── rewindos-daemon/        # Capture daemon (systemd service)
@@ -77,42 +81,67 @@ rewindos/
 │       └── src/
 │           ├── main.rs         # Entry point, D-Bus server, Ollama auto-detect, backfill
 │           ├── capture/        # PipeWire portal screen capture (multi-backend)
+│           │   ├── mod.rs      # Abstract capture interface + platform detection
+│           │   ├── portal.rs   # xdg-desktop-portal + PipeWire stream
+│           │   └── kwin.rs     # KDE KWin D-Bus fallback
 │           ├── pipeline.rs     # Tokio channel pipeline orchestration
-│           ├── window_info/    # Active window metadata (wlr-toplevel, KWin, X11)
+│           ├── window_info/    # Active window metadata
+│           │   ├── mod.rs      # Abstract provider + detection chain
+│           │   ├── wlr_foreign_toplevel.rs  # Wayland wlr-foreign-toplevel protocol
+│           │   ├── kwin.rs     # KDE KWin D-Bus
+│           │   ├── gnome_shell.rs  # GNOME Shell D-Bus
+│           │   └── noop.rs     # No-op fallback
 │           ├── service.rs      # D-Bus service implementation
-│           └── detect.rs       # Desktop/session environment detection
+│           └── detect.rs       # Ollama detection and auto-model-pull
 │
 ├── src-tauri/                  # Tauri UI application
 │   ├── Cargo.toml
+│   ├── tauri.conf.json         # App config, CSP, bundling, post-install scripts
 │   └── src/
-│       └── lib.rs              # Tauri commands + D-Bus client
+│       └── lib.rs              # 29 Tauri commands + D-Bus client + AI chat
 │
 ├── src/                        # React frontend
-│   ├── main.tsx
-│   ├── App.tsx
-│   ├── components/
-│   │   ├── SearchBar.tsx       # Search input with filters
+│   ├── main.tsx                # Vite entry point
+│   ├── App.tsx                 # Main app container, view switching
+│   ├── index.css               # Tailwind CSS + custom styles
+│   ├── components/             # Reusable UI components
+│   │   ├── SearchBar.tsx       # Debounced search with filters
 │   │   ├── SearchResults.tsx   # Result container with grid/list toggle
-│   │   ├── SearchResultGrid.tsx  # Grid view with "+N similar" badges
-│   │   ├── SearchResultCard.tsx  # List view with dedup badges
+│   │   ├── SearchResultGrid.tsx / SearchResultCard.tsx  # Grid and list views
 │   │   ├── SemanticBadge.tsx   # "ai search" / "keyword" mode indicator
 │   │   ├── ScreenshotDetail.tsx  # Full screenshot + OCR text viewer
-│   │   ├── HistoryView.tsx     # Chronological screenshot browser
-│   │   ├── TimelineView.tsx    # Visual timeline with hourly/daily view
-│   │   ├── DashboardView.tsx   # Analytics dashboard with charts
-│   │   ├── AskView.tsx         # AI chat interface
-│   │   ├── ChatMessage.tsx     # Chat message with streaming + screenshot refs
-│   │   ├── FocusView.tsx       # Pomodoro timer with productivity tracking
-│   │   ├── SettingsView.tsx    # Full config UI
-│   │   ├── Sidebar.tsx         # View navigation
-│   │   └── ...                 # Supporting components
-│   └── lib/
+│   │   ├── BoundingBoxOverlay.tsx  # OCR text highlighting on screenshots
+│   │   ├── BookmarkButton.tsx / AddToCollectionMenu.tsx  # Save actions
+│   │   ├── DaemonPanel.tsx     # Status indicator
+│   │   ├── Sidebar.tsx         # Navigation
+│   │   ├── charts/             # Reusable chart components (activity, heatmap, screen time)
+│   │   ├── shared/             # Dialog, loading, empty state, confirmation
+│   │   └── ui/                 # shadcn/ui primitives
+│   ├── features/               # Feature-specific views
+│   │   ├── ask/                # AI chat (AskView, ChatMessage, AskEmptyState)
+│   │   ├── dashboard/          # Analytics (DashboardView, charts, carousels)
+│   │   ├── history/            # Timeline (HistoryView, TimelineMode, AppsMode, HourGroup)
+│   │   ├── journal/            # Journaling (JournalView, Editor, Sidebar, Tags, Templates, Export)
+│   │   ├── rewind/             # Timelapse (RewindView, Player, Controls, Scrubber)
+│   │   ├── saved/              # Bookmarks & collections (SavedView, CollectionDetailView)
+│   │   ├── focus/              # Pomodoro timer (FocusView)
+│   │   └── settings/           # Config UI (SettingsView, tabs/, primitives/)
+│   ├── hooks/                  # Custom React hooks (debounce, focus score, keyboard, pomodoro)
+│   ├── context/                # React context providers (AskContext)
+│   └── lib/                    # Utilities
 │       ├── api.ts              # Tauri invoke wrappers + TypeScript types
-│       └── format.ts           # Date/time formatting utilities
+│       ├── query-keys.ts       # TanStack Query key factory
+│       ├── app-categories.ts   # App name to category mapping
+│       ├── app-colors.ts       # App color assignments
+│       ├── format.ts           # Number/time formatting
+│       └── ...                 # time-ranges, window-title, config, utils
 │
-├── docs/                       # Documentation
-└── systemd/
-    └── rewindos-daemon.service
+├── docs/                       # Architecture documentation
+├── systemd/                    # Service files
+│   ├── rewindos-daemon.service
+│   ├── rewindos.desktop
+│   └── com.rewindos.Daemon.desktop
+└── Makefile                    # Build, install, dev, logs, restart targets
 ```
 
 ## Component Details
@@ -194,11 +223,14 @@ Desktop app for searching, browsing, chatting, and analytics.
 
 **Views:**
 - **Search** — Full-text + semantic search with grid/list toggle, scene dedup badges
-- **History** — Chronological screenshot browser with timeline scrubbing
-- **Dashboard** — App usage analytics, daily/hourly activity charts
-- **Ask** — AI chat with intent detection and screenshot references
+- **History** — Chronological screenshot browser with timeline/apps modes, hourly grouping, daily digests
+- **Rewind** — Timelapse playback with canvas renderer, scrubber, speed controls, keyboard navigation
+- **Dashboard** — App usage analytics, daily/hourly activity charts, heatmap calendar, top apps
+- **Ask** — AI chat with intent detection, streaming responses, and screenshot references
+- **Journal** — Rich text editor (Tiptap) with tags, templates, screenshot attachments, AI summaries, search, export
+- **Saved** — Bookmarks and collections browser with collection detail views
 - **Focus** — Pomodoro timer with productivity tracking and distraction detection
-- **Settings** — Full configuration UI for all sections
+- **Settings** — Full configuration UI (General, Capture, OCR, Privacy, Storage, AI, Focus)
 
 ## Search Architecture
 

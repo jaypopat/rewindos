@@ -1213,6 +1213,17 @@ fn get_open_todos(
 }
 
 #[tauri::command]
+fn get_carry_forward_todos(
+    state: State<'_, AppState>,
+    today: String,
+    lookback_days: Option<i32>,
+) -> Result<Vec<String>, String> {
+    let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+    db.get_unchecked_todos_for_carry_forward(&today, lookback_days.unwrap_or(14))
+        .map_err(|e| format!("db error: {e}"))
+}
+
+#[tauri::command]
 fn add_journal_screenshot(
     state: State<'_, AppState>,
     journal_entry_id: i64,
@@ -1349,10 +1360,16 @@ async fn generate_journal_summary(
         return Err("No journal entries in this period".to_string());
     }
 
-    // Build prompt
+    // Build prompt — extract plain text from Tiptap JSON for the LLM
     let entries_text: Vec<String> = entries
         .iter()
-        .map(|e| format!("## {}\n{}", e.date, e.content))
+        .map(|e| {
+            format!(
+                "## {}\n{}",
+                e.date,
+                rewindos_core::db::extract_plain_text(&e.content)
+            )
+        })
         .collect();
     let prompt = format!(
         "You are an AI assistant summarizing a user's journal entries. \
@@ -1747,6 +1764,7 @@ pub fn run() {
             get_journal_dates,
             get_journal_streak,
             get_open_todos,
+            get_carry_forward_todos,
             add_journal_screenshot,
             remove_journal_screenshot,
             get_journal_screenshots,

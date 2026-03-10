@@ -1,10 +1,10 @@
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 import { cn } from "@/lib/utils";
 import { queryKeys } from "@/lib/query-keys";
 import { ChevronLeft, ChevronRight, Search, Paperclip } from "lucide-react";
 
 import { useJournalEntry } from "./hooks/useJournalEntry";
-import { JournalEditor } from "./JournalEditor";
+import { JournalEditor, type JournalEditorHandle } from "./JournalEditor";
 import { TagEditor } from "./TagEditor";
 import { JournalSearchPanel } from "./JournalSearchPanel";
 import { JournalSidebar } from "./JournalSidebar";
@@ -18,19 +18,26 @@ interface JournalViewProps {
 
 export function JournalView({ onSelectScreenshot }: JournalViewProps) {
   const j = useJournalEntry();
+  const editorRef = useRef<JournalEditorHandle>(null);
 
   const handleEditorUpdate = useCallback(
-    (md: string) => {
-      j.setContent(md);
+    (json: string) => {
+      j.setContent(json);
     },
     [j.setContent],
   );
 
   const handleInsertPrompt = useCallback(
     (text: string) => {
-      j.setContent((prev: string) => (prev ? prev + "\n" : "") + `\n> ${text}\n`);
+      const editor = editorRef.current?.editor;
+      if (editor) {
+        editor.chain().focus().insertContent({
+          type: "blockquote",
+          content: [{ type: "paragraph", content: [{ type: "text", text }] }],
+        }).run();
+      }
     },
-    [j.setContent],
+    [],
   );
 
   return (
@@ -106,6 +113,7 @@ export function JournalView({ onSelectScreenshot }: JournalViewProps) {
             </div>
           ) : (
             <JournalEditor
+              ref={editorRef}
               content={j.content}
               onUpdate={handleEditorUpdate}
               className=""

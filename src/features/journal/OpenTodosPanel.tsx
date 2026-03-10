@@ -12,8 +12,8 @@ interface OpenTodosPanelProps {
 
 export function OpenTodosPanel({ onSelectDate }: OpenTodosPanelProps) {
   const today = useMemo(() => new Date(), []);
-  const startDate = dateToKey(subDays(today, 7));
-  const endDate = dateToKey(subDays(today, 1));
+  const startDate = dateToKey(subDays(today, 14));
+  const endDate = dateToKey(today);
 
   const { data: todos = [] } = useQuery({
     queryKey: queryKeys.openTodos(startDate, endDate),
@@ -22,8 +22,18 @@ export function OpenTodosPanel({ onSelectDate }: OpenTodosPanelProps) {
   });
 
   const grouped = useMemo(() => {
-    const map = new Map<string, OpenTodo[]>();
+    // Deduplicate by todo text — keep most recent occurrence only
+    const seenTexts = new Set<string>();
+    const deduped: OpenTodo[] = [];
+    // todos are already ordered by date DESC from backend
     for (const todo of todos) {
+      if (!seenTexts.has(todo.text)) {
+        seenTexts.add(todo.text);
+        deduped.push(todo);
+      }
+    }
+    const map = new Map<string, OpenTodo[]>();
+    for (const todo of deduped) {
       const existing = map.get(todo.date) ?? [];
       existing.push(todo);
       map.set(todo.date, existing);

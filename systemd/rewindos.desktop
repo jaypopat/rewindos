@@ -2,8 +2,8 @@
 Name=RewindOS
 Comment=Privacy-first screen capture and search
 Exec=rewindos --minimized
-Icon=rewindos
+Icon=com.jay.rewindos
 Type=Application
 Categories=Utility;
-StartupWMClass=RewindOS
+StartupWMClass=com.jay.rewindos
 X-GNOME-Autostart-enabled=true

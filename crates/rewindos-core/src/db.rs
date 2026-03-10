@@ -21,6 +21,278 @@ mod embedded {
 /// Two screenshots with distance ≤ this value are considered the same "scene".
 const DEDUP_THRESHOLD: u32 = 5;
 
+// ── Tiptap JSON helpers ────────────────────────────────────────────
+
+/// Extract plain text from Tiptap JSON content by recursively collecting text nodes.
+/// Falls back to returning the raw string if JSON parsing fails (e.g. legacy markdown).
+pub fn extract_plain_text(content: &str) -> String {
+    /// Collect inline text nodes without spaces (sibling text nodes concatenate directly).
+    fn collect_inline_text(node: &serde_json::Value, out: &mut String) {
+        if let Some(text) = node.get("text").and_then(|t| t.as_str()) {
+            out.push_str(text);
+        }
+        if let Some(children) = node.get("content").and_then(|c| c.as_array()) {
+            for child in children {
+                collect_inline_text(child, out);
+            }
+        }
+    }
+
+    fn walk(node: &serde_json::Value, out: &mut String) {
+        let typ = node.get("type").and_then(|t| t.as_str()).unwrap_or("");
+        match typ {
+            // Block-level nodes: separate with spaces, collect inline text within
+            "paragraph" | "heading" | "blockquote" | "codeBlock" | "listItem" | "taskItem" => {
+                if !out.is_empty() {
+                    out.push(' ');
+                }
+                collect_inline_text(node, out);
+            }
+            "hardBreak" => {
+                out.push(' ');
+            }
+            // Container nodes: just recurse
+            _ => {
+                if let Some(children) = node.get("content").and_then(|c| c.as_array()) {
+                    for child in children {
+                        walk(child, out);
+                    }
+                }
+            }
+        }
+    }
+
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(content) else {
+        return content.to_string();
+    };
+    let mut result = String::new();
+    walk(&json, &mut result);
+    result
+}
+
+/// Extract task items from Tiptap JSON content.
+/// Returns a list of `(text, checked)` pairs.
+pub fn extract_task_items(content: &str) -> Vec<(String, bool)> {
+    fn walk_for_tasks(node: &serde_json::Value, out: &mut Vec<(String, bool)>) {
+        if let Some(typ) = node.get("type").and_then(|t| t.as_str()) {
+            if typ == "taskItem" {
+                let checked = node
+                    .get("attrs")
+                    .and_then(|a| a.get("checked"))
+                    .and_then(|c| c.as_bool())
+                    .unwrap_or(false);
+                // Collect all text inside this task item
+                let mut text = String::new();
+                if let Some(children) = node.get("content").and_then(|c| c.as_array()) {
+                    for child in children {
+                        collect_text(child, &mut text);
+                    }
+                }
+                let text = text.trim().to_string();
+                if !text.is_empty() {
+                    out.push((text, checked));
+                }
+                return;
+            }
+        }
+        if let Some(children) = node.get("content").and_then(|c| c.as_array()) {
+            for child in children {
+                walk_for_tasks(child, out);
+            }
+        }
+    }
+
+    fn collect_text(node: &serde_json::Value, out: &mut String) {
+        if let Some(text) = node.get("text").and_then(|t| t.as_str()) {
+            out.push_str(text);
+        }
+        if let Some(children) = node.get("content").and_then(|c| c.as_array()) {
+            for child in children {
+                collect_text(child, out);
+            }
+        }
+    }
+
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(content) else {
+        return Vec::new();
+    };
+    let mut result = Vec::new();
+    walk_for_tasks(&json, &mut result);
+    result
+}
+
+/// Convert Tiptap JSON to markdown for export.
+/// Handles headings, paragraphs, task lists, bullet lists, ordered lists,
+/// blockquotes, code blocks, and inline marks (bold, italic, strike, code, underline).
+pub fn tiptap_json_to_markdown(content: &str) -> String {
+    fn node_to_md(node: &serde_json::Value, out: &mut String) {
+        let typ = match node.get("type").and_then(|t| t.as_str()) {
+            Some(t) => t,
+            None => return,
+        };
+
+        match typ {
+            "doc" => {
+                if let Some(children) = node.get("content").and_then(|c| c.as_array()) {
+                    for (i, child) in children.iter().enumerate() {
+                        if i > 0 {
+                            out.push('\n');
+                        }
+                        node_to_md(child, out);
+                    }
+                }
+            }
+            "heading" => {
+                let level = node
+                    .get("attrs")
+                    .and_then(|a| a.get("level"))
+                    .and_then(|l| l.as_u64())
+                    .unwrap_or(1) as usize;
+                for _ in 0..level {
+                    out.push('#');
+                }
+                out.push(' ');
+                inline_children(node, out);
+                out.push('\n');
+            }
+            "paragraph" => {
+                inline_children(node, out);
+                out.push('\n');
+            }
+            "taskList" => {
+                if let Some(children) = node.get("content").and_then(|c| c.as_array()) {
+                    for child in children {
+                        node_to_md(child, out);
+                    }
+                }
+            }
+            "taskItem" => {
+                let checked = node
+                    .get("attrs")
+                    .and_then(|a| a.get("checked"))
+                    .and_then(|c| c.as_bool())
+                    .unwrap_or(false);
+                out.push_str(if checked { "- [x] " } else { "- [ ] " });
+                inline_children(node, out);
+                out.push('\n');
+            }
+            "bulletList" => {
+                if let Some(children) = node.get("content").and_then(|c| c.as_array()) {
+                    for child in children {
+                        node_to_md(child, out);
+                    }
+                }
+            }
+            "listItem" => {
+                out.push_str("- ");
+                inline_children(node, out);
+                out.push('\n');
+            }
+            "orderedList" => {
+                if let Some(children) = node.get("content").and_then(|c| c.as_array()) {
+                    for (i, child) in children.iter().enumerate() {
+                        // Each child is a listItem — process its content array
+                        if let Some(item_children) = child.get("content").and_then(|c| c.as_array()) {
+                            for (j, item_child) in item_children.iter().enumerate() {
+                                if j == 0 {
+                                    // First child (paragraph): inline with number prefix
+                                    out.push_str(&format!("{}. ", i + 1));
+                                    inline_children(item_child, out);
+                                    out.push('\n');
+                                } else {
+                                    // Subsequent children (nested lists, etc.): recurse
+                                    node_to_md(item_child, out);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            "blockquote" => {
+                if let Some(children) = node.get("content").and_then(|c| c.as_array()) {
+                    for child in children {
+                        out.push_str("> ");
+                        inline_children(child, out);
+                        out.push('\n');
+                    }
+                }
+            }
+            "codeBlock" => {
+                out.push_str("```\n");
+                inline_children(node, out);
+                out.push_str("\n```\n");
+            }
+            "horizontalRule" => {
+                out.push_str("---\n");
+            }
+            _ => {
+                // Fallback: just output inline children
+                inline_children(node, out);
+                out.push('\n');
+            }
+        }
+    }
+
+    /// Process inline children — descend into content looking for text nodes with marks.
+    fn inline_children(node: &serde_json::Value, out: &mut String) {
+        if let Some(children) = node.get("content").and_then(|c| c.as_array()) {
+            for child in children {
+                inline_node(child, out);
+            }
+        }
+    }
+
+    fn inline_node(node: &serde_json::Value, out: &mut String) {
+        let typ = node.get("type").and_then(|t| t.as_str()).unwrap_or("");
+        if typ == "text" {
+            let text = node.get("text").and_then(|t| t.as_str()).unwrap_or("");
+            let marks = node.get("marks").and_then(|m| m.as_array());
+            let mut prefix = String::new();
+            let mut suffix = String::new();
+            if let Some(marks) = marks {
+                for mark in marks {
+                    if let Some(mark_type) = mark.get("type").and_then(|t| t.as_str()) {
+                        match mark_type {
+                            "bold" => {
+                                prefix.push_str("**");
+                                suffix.insert_str(0, "**");
+                            }
+                            "italic" => {
+                                prefix.push('*');
+                                suffix.insert(0, '*');
+                            }
+                            "strike" => {
+                                prefix.push_str("~~");
+                                suffix.insert_str(0, "~~");
+                            }
+                            "code" => {
+                                prefix.push('`');
+                                suffix.insert(0, '`');
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            out.push_str(&prefix);
+            out.push_str(text);
+            out.push_str(&suffix);
+        } else if typ == "hardBreak" {
+            out.push('\n');
+        } else {
+            // For non-text inline nodes (e.g. nested paragraphs in list items), recurse
+            inline_children(node, out);
+        }
+    }
+
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(content) else {
+        return content.to_string();
+    };
+    let mut result = String::new();
+    node_to_md(&json, &mut result);
+    result
+}
+
 pub struct Database {
     conn: Connection,
 }
@@ -1539,7 +1811,8 @@ impl Database {
 
     /// Create or update a journal entry for a date. Returns the entry id.
     pub fn upsert_journal_entry(&self, entry: &UpsertJournalEntry) -> Result<i64> {
-        let word_count = entry.content.split_whitespace().count() as i32;
+        let plain_text = extract_plain_text(&entry.content);
+        let word_count = plain_text.split_whitespace().count() as i32;
 
         let tx = self.conn.unchecked_transaction()?;
 
@@ -1558,15 +1831,15 @@ impl Database {
             |row| row.get(0),
         )?;
 
-        // Sync journal_fts
+        // Sync journal_fts — index plain text, not raw JSON
         tx.execute(
             "DELETE FROM journal_fts WHERE entry_id = ?1",
             params![id],
         )?;
-        if !entry.content.is_empty() {
+        if !plain_text.is_empty() {
             tx.execute(
                 "INSERT INTO journal_fts (content, entry_id) VALUES (?1, ?2)",
-                params![entry.content, id],
+                params![plain_text, id],
             )?;
         }
 
@@ -1625,7 +1898,7 @@ impl Database {
     }
 
     /// Get open (unchecked) todos from journal entries in a date range.
-    /// Parses markdown lines matching `- [ ] ` prefix.
+    /// Parses Tiptap JSON for taskItem nodes with `checked: false`.
     pub fn get_open_todos(
         &self,
         start_date: &str,
@@ -1633,7 +1906,7 @@ impl Database {
     ) -> Result<Vec<OpenTodo>> {
         let mut stmt = self.conn.prepare(
             "SELECT date, content FROM journal_entries
-             WHERE date >= ?1 AND date <= ?2 AND content LIKE '%- [ ] %'
+             WHERE date >= ?1 AND date <= ?2 AND content LIKE '%\"checked\":false%'
              ORDER BY date DESC",
         )?;
 
@@ -1644,21 +1917,59 @@ impl Database {
 
         for row in rows {
             let (date, content) = row?;
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if trimmed.starts_with("- [ ] ") {
-                    let text = trimmed.strip_prefix("- [ ] ").unwrap_or("").to_string();
-                    if !text.is_empty() {
-                        todos.push(OpenTodo {
-                            date: date.clone(),
-                            text,
-                        });
-                    }
+            for (text, checked) in extract_task_items(&content) {
+                if !checked {
+                    todos.push(OpenTodo {
+                        date: date.clone(),
+                        text,
+                    });
                 }
             }
         }
 
         Ok(todos)
+    }
+
+    /// Get unchecked todos suitable for carry-forward.
+    /// Looks back `lookback_days` from `today`, iterating newest-to-oldest.
+    /// A todo is excluded if it was checked off in a more recent entry.
+    /// Deduplicates by text — each unique todo is returned only once.
+    pub fn get_unchecked_todos_for_carry_forward(
+        &self,
+        today: &str,
+        lookback_days: i32,
+    ) -> Result<Vec<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT date, content FROM journal_entries
+             WHERE date >= date(?1, '-' || ?2 || ' days') AND date < ?1
+               AND content LIKE '%taskItem%'
+             ORDER BY date DESC",
+        )?;
+
+        let rows = stmt.query_map(params![today, lookback_days], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+
+        use std::collections::HashSet;
+
+        let mut seen_texts = HashSet::new();
+        let mut completed_texts = HashSet::new();
+        let mut result = Vec::new();
+
+        for row in rows {
+            let (_date, content) = row?;
+            for (text, checked) in extract_task_items(&content) {
+                if checked {
+                    completed_texts.insert(text.clone());
+                    seen_texts.insert(text);
+                } else if !seen_texts.contains(&text) {
+                    seen_texts.insert(text.clone());
+                    result.push(text);
+                }
+            }
+        }
+
+        Ok(result)
     }
 
     /// Compute current streak, longest streak, and total entry count.
@@ -2003,6 +2314,7 @@ impl Database {
     }
 
     /// Export journal entries as a single markdown string.
+    /// Converts stored Tiptap JSON content to markdown for export.
     pub fn export_journal_markdown(
         &self,
         start_date: &str,
@@ -2021,8 +2333,8 @@ impl Database {
             if entry.mood.is_some() || entry.energy.is_some() {
                 output.push('\n');
             }
-            output.push_str(&entry.content);
-            output.push_str("\n\n---\n\n");
+            output.push_str(&tiptap_json_to_markdown(&entry.content));
+            output.push_str("\n---\n\n");
         }
         Ok(output)
     }

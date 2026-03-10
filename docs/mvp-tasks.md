@@ -1,10 +1,15 @@
-# RewindOS - MVP Task Breakdown
+# RewindOS - MVP Task Breakdown (Historical)
+
+> **Note:** This document is historical — it tracked the initial MVP build. All MVP tasks are complete,
+> and many post-MVP features have since been implemented (timeline, dashboard, AI search, settings UI,
+> journaling, bookmarks/collections, rewind playback, focus mode). See `docs/architecture.md` for the
+> current state.
 
 ## MVP Definition
 
 **Scope:** Automated screen capture → OCR indexing → full-text search with results list.
 
-**What's IN:**
+**What's IN (all complete):**
 - PipeWire screen capture via xdg-desktop-portal
 - Perceptual hash deduplication
 - WebP screenshot storage
@@ -17,15 +22,22 @@
 - systemd user service
 - Basic privacy controls (app exclusion list in config)
 
-**What's OUT (post-MVP):**
-- Timeline view / scrubbing
-- Analytics dashboard / charts
+**Post-MVP (now implemented):**
+- Timeline view with hourly grouping and apps mode
+- Analytics dashboard with charts, heatmap, app breakdown
+- AI/semantic search via Ollama (hybrid search with RRF)
+- AI chat with intent detection and screenshot context
+- Rewind timelapse playback
+- Journaling with rich text, tags, templates, AI summaries, export
+- Bookmarks and collections
+- Focus mode (Pomodoro timer)
+- Settings UI (full config editor with tabs)
+- Scene deduplication in search results
+
+**Still out:**
 - Video compression (H.264)
-- AI/semantic search (Ollama)
 - Multi-monitor support
-- System tray icon with menu
-- Settings UI (config.toml only for MVP)
-- Data retention auto-cleanup (manual only for MVP)
+- Data retention auto-cleanup
 
 ---
 

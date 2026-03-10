@@ -4,7 +4,7 @@ Privacy-first, local-only screen capture and search for Linux. Continuously capt
 
 ## How it works
 
-A background daemon captures screenshots every 5 seconds, deduplicates them with perceptual hashing, runs OCR via Tesseract, and indexes the extracted text into SQLite FTS5. A Tauri desktop app provides the search UI.
+A background daemon captures screenshots every 5 seconds, deduplicates them with perceptual hashing, runs OCR via Tesseract, and indexes the extracted text into SQLite FTS5. A Tauri desktop app provides search, browsing, journaling, and analytics.
 
 ```
 Timer (5s) → Screen Capture → Hash & Dedupe → OCR → SQLite FTS5
@@ -13,17 +13,22 @@ Timer (5s) → Screen Capture → Hash & Dedupe → OCR → SQLite FTS5
 ## Features
 
 - **Full-text search** across everything on your screen with sub-100ms queries
-- **Intelligent deduplication** — perceptual hashing skips near-identical frames
+- **Hybrid search** — keyword + semantic search via Ollama with Reciprocal Rank Fusion (optional)
+- **Intelligent deduplication** — perceptual hashing skips near-identical frames, scene grouping in search results
+- **Timeline browsing** — scroll through screen history chronologically with hourly grouping
+- **Rewind playback** — timelapse player with scrubber, speed controls, and keyboard navigation
+- **Dashboard** — activity overview, app usage stats, daily/hourly charts, heatmap calendar
+- **AI chat** — ask questions about your screen history with intent detection and screenshot references (Ollama)
+- **Journaling** — rich text editor (Tiptap) with tags, templates, screenshot attachments, AI summaries, and export
+- **Bookmarks & collections** — save and organize screenshots into named collections
+- **Focus mode** — Pomodoro timer with productivity tracking and distraction detection
 - **Privacy controls** — exclude specific apps or window title patterns
-- **AI-powered search** — semantic search and chat with your screen history via Ollama (optional)
-- **Dashboard** — activity overview, app usage stats, daily summaries
-- **Timeline browsing** — scroll through your screen history chronologically
 - **Global hotkey** — `Ctrl+Shift+Space` to instantly open search
 - **System tray** — runs quietly in the background
 
 ## Target platform
 
-KDE Plasma 6+ on Ubuntu 24.04+ (Wayland).
+Linux (Wayland) — KDE Plasma 6+, GNOME, Hyprland, Sway.
 
 ## Prerequisites
 
@@ -35,7 +40,7 @@ sudo apt install \
   libdbus-1-dev pkg-config build-essential
 ```
 
-Optional: [Ollama](https://ollama.com) for AI features (semantic search, chat).
+Optional: [Ollama](https://ollama.com) for AI features (semantic search, chat, journal summaries).
 
 ## Build & install
 
@@ -61,16 +66,22 @@ After installation, the daemon starts automatically. The UI autostarts minimized
 - **View logs**: `make logs`
 - **Restart daemon**: `make restart-daemon`
 - **Launch UI manually**: `rewindos`
-- **Daemon CLI**: `rewindos-daemon pause | resume | status`
+- **Daemon CLI**: `rewindos-daemon pause | resume | status | backfill`
 
 ## Project layout
 
 ```
-crates/rewindos-core/     Shared lib (DB, OCR, hashing, config)
-crates/rewindos-daemon/   Capture daemon (PipeWire, pipeline, D-Bus)
-src-tauri/                Tauri app (search commands, D-Bus client)
+crates/rewindos-core/     Shared lib (DB, OCR, hashing, config, embedding, chat)
+crates/rewindos-daemon/   Capture daemon (PipeWire, pipeline, D-Bus, window info)
+src-tauri/                Tauri app (commands, D-Bus client, AI chat)
 src/                      React frontend
+  components/             Reusable UI components (search, charts, shared)
+  features/               Feature views (ask, dashboard, history, journal, rewind, saved, focus, settings)
+  hooks/                  Custom React hooks
+  context/                React context providers
+  lib/                    API wrappers, utilities, query keys
 docs/                     Architecture & design docs
+systemd/                  Service files and desktop entries
 ```
 
 ## Storage
@@ -93,7 +104,8 @@ Config lives at `~/.rewindos/config.toml`. Key options:
 - **Excluded apps** and window title patterns (e.g. password managers, private browsing)
 - **Retention period** and storage limits
 - **OCR language** and worker count
-- **Ollama endpoint** for AI features
+- **Ollama endpoint** for AI features (semantic search, chat, summaries)
+- **Focus mode** — Pomodoro timer durations, distraction apps
 
 ## License
 

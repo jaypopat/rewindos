@@ -1,33 +1,34 @@
-import { useCallback, useEffect, useState } from "react";
-import { getConfig, updateConfig } from "@/lib/api";
+import { useCallback, useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { updateConfig } from "@/lib/api";
+import { queryKeys } from "@/lib/query-keys";
 import { type AppConfig } from "@/lib/config";
+import { useConfigQuery } from "@/hooks/useConfigQuery";
 
 export function useConfig() {
-  const [config, setConfig] = useState<AppConfig | null>(null);
-  const [saving, setSaving] = useState(false);
+  const { data: fetchedConfig, error: fetchError } = useConfigQuery();
+  const queryClient = useQueryClient();
+  const [localEdits, setLocalEdits] = useState<AppConfig | null>(null);
   const [saved, setSaved] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    getConfig()
-      .then((c) => setConfig(c as unknown as AppConfig))
-      .catch((e) => setError(String(e)));
-  }, []);
+  // Derive config: local edits take priority, otherwise use fetched data
+  const config = localEdits ?? fetchedConfig ?? null;
 
-  const handleSave = useCallback(async () => {
-    if (!config) return;
-    setSaving(true);
-    setError(null);
-    try {
-      await updateConfig(config as unknown as Record<string, unknown>);
+  const saveMutation = useMutation({
+    mutationFn: (c: AppConfig) =>
+      updateConfig(c as unknown as Record<string, unknown>),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.config() });
+      setLocalEdits(null);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setSaving(false);
-    }
-  }, [config]);
+    },
+  });
+
+  const handleSave = useCallback(() => {
+    if (!config) return;
+    saveMutation.mutate(config);
+  }, [config, saveMutation]);
 
   const update = useCallback(
     <S extends keyof AppConfig, K extends keyof AppConfig[S]>(
@@ -35,13 +36,21 @@ export function useConfig() {
       key: K,
       value: AppConfig[S][K],
     ) => {
-      setConfig((prev) => {
-        if (!prev) return prev;
-        return { ...prev, [section]: { ...prev[section], [key]: value } };
+      setLocalEdits((prev) => {
+        const base = prev ?? fetchedConfig ?? null;
+        if (!base) return prev;
+        return { ...base, [section]: { ...base[section], [key]: value } };
       });
     },
-    [],
+    [fetchedConfig],
   );
 
-  return { config, saving, saved, error, handleSave, update };
+  return {
+    config,
+    saving: saveMutation.isPending,
+    saved,
+    error: saveMutation.error ? String(saveMutation.error) : fetchError ? String(fetchError) : null,
+    handleSave,
+    update,
+  };
 }

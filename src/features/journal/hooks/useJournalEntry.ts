@@ -12,6 +12,8 @@ import {
   getTaskBreakdown,
   getJournalTags,
   askHealth,
+  getCarryForwardTodos,
+  type JournalEntry,
   type JournalDateInfo,
 } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
@@ -28,7 +30,24 @@ import {
   format,
   isToday as isDateToday,
 } from "date-fns";
-import { extractUncheckedTodos, buildCarryForwardContent } from "../utils";
+import { buildCarryForwardContent } from "../utils";
+
+function extractTextFromJson(content: string): string {
+  try {
+    const doc = JSON.parse(content);
+    return walkText(doc);
+  } catch {
+    return content;
+  }
+}
+
+function walkText(node: any): string {
+  if (node.type === "text") return node.text ?? "";
+  if (Array.isArray(node.content)) {
+    return node.content.map(walkText).join(" ");
+  }
+  return "";
+}
 
 export function useJournalEntry() {
   const [selectedDate, setSelectedDate] = useState(() => new Date());
@@ -118,21 +137,13 @@ export function useJournalEntry() {
     if (entry?.content) return; // existing entry already has content
     if (carryForwardAppliedRef.current === dateKey) return; // already applied for this date
 
-    const prevKey = dateToKey(subDays(selectedDate, 1));
-    queryClient
-      .fetchQuery({
-        queryKey: queryKeys.journalEntry(prevKey),
-        queryFn: () => getJournalEntry(prevKey),
-      })
-      .then((prevEntry) => {
-        if (!prevEntry?.content) return;
-        const todos = extractUncheckedTodos(prevEntry.content);
-        if (todos.length === 0) return;
-        const carried = buildCarryForwardContent(todos);
-        carryForwardAppliedRef.current = dateKey;
-        setContent(carried);
-        setContentKey((k) => k + 1);
-      });
+    getCarryForwardTodos(dateKey, 14).then((todos) => {
+      if (todos.length === 0) return;
+      const carried = buildCarryForwardContent(todos);
+      carryForwardAppliedRef.current = dateKey;
+      setContent(carried);
+      setContentKey((k) => k + 1);
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entryLoading, dateKey]);
 
@@ -163,6 +174,7 @@ export function useJournalEntry() {
       queryClient.invalidateQueries({
         queryKey: queryKeys.journalDates(calendarStart, calendarEnd),
       });
+      queryClient.invalidateQueries({ queryKey: ["open-todos"] });
     },
   });
 
@@ -203,13 +215,19 @@ export function useJournalEntry() {
 
   const goToDate = useCallback(
     (d: Date) => {
+      // Read cached entry content so the new editor mounts with the correct
+      // content immediately, avoiding a stale-content → setContent cycle that
+      // can corrupt task lists through markdown re-serialization.
+      const key = dateToKey(d);
+      const cached = queryClient.getQueryData<JournalEntry | null>(queryKeys.journalEntry(key));
       carryForwardAppliedRef.current = null;
+      setContent(cached?.content ?? "");
       setSelectedDate(d);
       setContentKey((k) => k + 1);
       setShowScreenshotPicker(false);
       setShowSearch(false);
     },
-    [],
+    [queryClient],
   );
 
   const goToPrev = useCallback(() => {
@@ -243,10 +261,11 @@ export function useJournalEntry() {
 
   // ── Writing stats ──
 
-  const wordCount = useMemo(
-    () => (content.trim() ? content.trim().split(/\s+/).length : 0),
-    [content],
-  );
+  const wordCount = useMemo(() => {
+    if (!content.trim()) return 0;
+    const text = extractTextFromJson(content);
+    return text.trim() ? text.trim().split(/\s+/).length : 0;
+  }, [content]);
   const readingTime = Math.max(1, Math.ceil(wordCount / 200));
 
   // ── Memory jogger prompts ──

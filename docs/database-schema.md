@@ -128,12 +128,158 @@ CREATE TABLE daemon_state (
 );
 ```
 
+### daily_summaries (V003)
+
+AI-generated daily activity summaries.
+
+```sql
+CREATE TABLE daily_summaries (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    date_key        TEXT NOT NULL UNIQUE,         -- 'YYYY-MM-DD'
+    summary_text    TEXT NOT NULL,
+    app_breakdown   TEXT,                          -- JSON object
+    total_sessions  INTEGER,
+    time_range      TEXT,
+    model_name      TEXT,
+    screenshot_count INTEGER,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+```
+
+### bookmarks (V004)
+
+Saved screenshots for quick access.
+
+```sql
+CREATE TABLE bookmarks (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    screenshot_id   INTEGER NOT NULL UNIQUE REFERENCES screenshots(id) ON DELETE CASCADE,
+    note            TEXT,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+```
+
+### collections (V004)
+
+Named groups of screenshots.
+
+```sql
+CREATE TABLE collections (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    name            TEXT NOT NULL,
+    description     TEXT,
+    color           TEXT,
+    start_time      INTEGER,
+    end_time        INTEGER,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE collection_items (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    collection_id   INTEGER NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+    screenshot_id   INTEGER NOT NULL REFERENCES screenshots(id) ON DELETE CASCADE,
+    added_at        TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(collection_id, screenshot_id)
+);
+```
+
+### journal_entries (V005 + V006)
+
+Daily journal entries with rich text content.
+
+```sql
+CREATE TABLE journal_entries (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    date            TEXT NOT NULL UNIQUE,          -- 'YYYY-MM-DD'
+    content         TEXT NOT NULL,                  -- Tiptap JSON or HTML
+    mood            INTEGER,                        -- 1-5 scale (V006)
+    energy          INTEGER,                        -- 1-5 scale (V006)
+    word_count      INTEGER DEFAULT 0,             -- (V006)
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE journal_screenshots (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    entry_id        INTEGER NOT NULL REFERENCES journal_entries(id) ON DELETE CASCADE,
+    screenshot_id   INTEGER NOT NULL REFERENCES screenshots(id) ON DELETE CASCADE,
+    caption         TEXT,
+    sort_order      INTEGER DEFAULT 0,
+    UNIQUE(entry_id, screenshot_id)
+);
+```
+
+### journal_tags (V006)
+
+Tag system for journal entries.
+
+```sql
+CREATE TABLE journal_tags (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    name            TEXT NOT NULL UNIQUE,
+    color           TEXT
+);
+
+CREATE TABLE journal_entry_tags (
+    entry_id        INTEGER NOT NULL REFERENCES journal_entries(id) ON DELETE CASCADE,
+    tag_id          INTEGER NOT NULL REFERENCES journal_tags(id) ON DELETE CASCADE,
+    PRIMARY KEY (entry_id, tag_id)
+);
+```
+
+### journal_fts (V006)
+
+Full-text search for journal content.
+
+```sql
+CREATE VIRTUAL TABLE journal_fts USING fts5(
+    content,
+    date UNINDEXED,
+    entry_id UNINDEXED,
+    tokenize='unicode61 remove_diacritics 2'
+);
+```
+
+### journal_templates (V006)
+
+Reusable journal prompt templates (4 built-in: Daily Reflection, Standup, Gratitude, Weekly Review).
+
+```sql
+CREATE TABLE journal_templates (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    name            TEXT NOT NULL,
+    content         TEXT NOT NULL,
+    is_builtin      INTEGER NOT NULL DEFAULT 0,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+```
+
+### journal_summaries (V006)
+
+AI-generated journal summaries (daily/weekly).
+
+```sql
+CREATE TABLE journal_summaries (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    period_type     TEXT NOT NULL,                  -- 'daily' or 'weekly'
+    period_key      TEXT NOT NULL,                  -- 'YYYY-MM-DD' or 'YYYY-Www'
+    summary_text    TEXT NOT NULL,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(period_type, period_key)
+);
+```
+
 ## Migrations
 
 ```
 crates/rewindos-core/migrations/
-├── V001__initial_schema.sql     # screenshots, ocr_fts, ocr_text_content, ocr_bounding_boxes, daemon_state
-└── V002__vector_embeddings.sql  # embedding_status column + ocr_embeddings vec0 table
+├── V001__initial_schema.sql         # screenshots, ocr_fts, ocr_text_content, ocr_bounding_boxes, daemon_state
+├── V002__vector_embeddings.sql      # embedding_status column + ocr_embeddings vec0 table
+├── V003__daily_summaries.sql        # daily_summaries table
+├── V004__bookmarks_collections.sql  # bookmarks, collections, collection_items
+├── V005__journal.sql                # journal_entries, journal_screenshots
+└── V006__journal_upgrade.sql        # mood/energy/word_count, tags, FTS, templates, summaries
 ```
 
 Migrations run automatically on database open (both daemon and Tauri app).
