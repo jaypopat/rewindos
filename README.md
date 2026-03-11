@@ -2,6 +2,11 @@
 
 Privacy-first, local-only screen capture and search for Linux. Continuously captures your screen, extracts text via OCR, and lets you instantly search through everything you've seen. All data stays on your machine.
 
+<img width="2876" height="1650" alt="image" src="https://github.com/user-attachments/assets/210ae7b4-6995-4190-b64d-d9961583433e" />
+
+<img width="2866" height="1647" alt="image" src="https://github.com/user-attachments/assets/ed92dd18-2a47-491d-abbf-281bb1bc064d" />
+
+
 ## How it works
 
 A background daemon captures screenshots every 5 seconds, deduplicates them with perceptual hashing, runs OCR via Tesseract, and indexes the extracted text into SQLite FTS5. A Tauri desktop app provides search, browsing, journaling, and analytics.
