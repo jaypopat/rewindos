@@ -364,20 +364,6 @@ export async function getCollectionScreenshots(
   });
 }
 
-export async function addToCollection(
-  collectionId: number,
-  screenshotId: number,
-): Promise<void> {
-  return invoke("add_to_collection", { collectionId, screenshotId });
-}
-
-export async function removeFromCollection(
-  collectionId: number,
-  screenshotId: number,
-): Promise<void> {
-  return invoke("remove_from_collection", { collectionId, screenshotId });
-}
-
 // -- Journal --
 
 export interface JournalEntry {

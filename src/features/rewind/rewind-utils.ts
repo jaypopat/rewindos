@@ -8,6 +8,8 @@ import type { TimelineEntry } from "@/lib/api";
 
 export interface RewindViewProps {
   onSelectScreenshot: (id: number, siblingIds?: number[]) => void;
+  initialTimeRange?: { start: number; end: number } | null;
+  onClearInitialRange?: () => void;
 }
 
 export interface ActivitySegment {

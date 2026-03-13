@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useCallback } from "react";
+import { useState, useMemo, useRef, useCallback, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { deleteScreenshotsInRange } from "@/lib/api";
 import { formatDuration } from "@/lib/format";
@@ -13,6 +13,7 @@ import {
   formatTimeShort,
   type RewindViewProps,
 } from "@/features/rewind/rewind-utils";
+import { formatMomentRange } from "@/lib/format";
 import { useRewindData } from "@/features/rewind/hooks/useRewindData";
 import { usePlayback } from "@/features/rewind/hooks/usePlayback";
 import { useScrubber } from "@/features/rewind/hooks/useScrubber";
@@ -21,14 +22,34 @@ import { RewindPlayer } from "@/features/rewind/RewindPlayer";
 import { RewindScrubber } from "@/features/rewind/RewindScrubber";
 import { RewindControls } from "@/features/rewind/RewindControls";
 
-export function RewindView({ onSelectScreenshot }: RewindViewProps) {
+export function RewindView({ onSelectScreenshot, initialTimeRange, onClearInitialRange }: RewindViewProps) {
   const queryClient = useQueryClient();
   const containerRef = useRef<HTMLDivElement>(null);
 
   // -- Time range -----------------------------------------------------------
   const [rangeIdx, setRangeIdx] = useState(0);
   const [customDate, setCustomDate] = useState<string | null>(null);
+  const [fixedRange, setFixedRange] = useState<{ start: number; end: number } | null>(
+    initialTimeRange ?? null,
+  );
+
+  // Sync fixedRange when initialTimeRange changes externally
+  useEffect(() => {
+    if (initialTimeRange) {
+      setFixedRange(initialTimeRange);
+      setCustomDate(null);
+    }
+  }, [initialTimeRange]);
+
+  const clearFixedRange = useCallback(() => {
+    setFixedRange(null);
+    onClearInitialRange?.();
+  }, [onClearInitialRange]);
+
   const { start: startTime, end: endTime } = useMemo(() => {
+    if (fixedRange) {
+      return fixedRange;
+    }
     if (customDate) {
       const d = new Date(customDate + "T00:00:00");
       const start = Math.floor(d.getTime() / 1000);
@@ -36,7 +57,7 @@ export function RewindView({ onSelectScreenshot }: RewindViewProps) {
       return { start, end };
     }
     return TIME_RANGES[rangeIdx].getRange();
-  }, [rangeIdx, customDate]);
+  }, [fixedRange, rangeIdx, customDate]);
 
   // -- Data -----------------------------------------------------------------
   const { screenshots, segments, totalActive, allIds, isLoading } =
@@ -172,10 +193,11 @@ export function RewindView({ onSelectScreenshot }: RewindViewProps) {
                 onClick={() => {
                   setRangeIdx(i);
                   setCustomDate(null);
+                  clearFixedRange();
                 }}
                 className={cn(
                   "px-3 py-1 text-xs rounded-md transition-colors",
-                  i === rangeIdx && !customDate
+                  i === rangeIdx && !customDate && !fixedRange
                     ? "bg-accent/15 text-accent font-medium"
                     : "text-text-muted hover:text-text-secondary",
                 )}
@@ -211,6 +233,7 @@ export function RewindView({ onSelectScreenshot }: RewindViewProps) {
                   if (date) {
                     const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
                     setCustomDate(key);
+                    clearFixedRange();
                   }
                 }}
                 disabled={{ after: new Date() }}
@@ -218,6 +241,16 @@ export function RewindView({ onSelectScreenshot }: RewindViewProps) {
               />
             </PopoverContent>
           </Popover>
+          {fixedRange && (
+            <button
+              onClick={clearFixedRange}
+              className="flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-lg border border-accent/50 bg-accent/10 text-accent hover:bg-accent/20 transition-colors"
+              title="Clear moment range"
+            >
+              {formatMomentRange(fixedRange.start, fixedRange.end)}
+              <span className="text-accent/60">&times;</span>
+            </button>
+          )}
         </div>
       </div>
 

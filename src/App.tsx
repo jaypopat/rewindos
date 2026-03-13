@@ -19,6 +19,8 @@ import {
   ScreenshotDetail,
   ViewSuspense,
 } from "@/app/routes";
+import { SaveMomentDialog } from "@/features/saved/SaveMomentDialog";
+import { Clock } from "lucide-react";
 
 type SubView = "list" | "detail";
 
@@ -32,6 +34,8 @@ function App() {
   const [datePreset, setDatePreset] = useState(0);
   const [resultView, setResultView] = useState<"grid" | "list">("grid");
 
+  const [showSaveMoment, setShowSaveMoment] = useState(false);
+  const [rewindTimeRange, setRewindTimeRange] = useState<{ start: number; end: number } | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const debouncedQuery = useDebounce(query, 300);
 
@@ -70,9 +74,17 @@ function App() {
     setView(v);
     setSubView("list");
     setSelectedScreenshotId(null);
+    setRewindTimeRange(null);
     if (v === "search") {
       setTimeout(() => searchInputRef.current?.focus(), 100);
     }
+  }, []);
+
+  const handleRewindToRange = useCallback((start: number, end: number) => {
+    setRewindTimeRange({ start, end });
+    setView("rewind");
+    setSubView("list");
+    setSelectedScreenshotId(null);
   }, []);
 
   // Global keyboard shortcuts
@@ -106,7 +118,14 @@ function App() {
       <Sidebar activeView={view} onViewChange={handleViewChange} />
 
       <div className="flex-1 flex flex-col min-w-0 min-h-0">
-        <header className="flex items-center justify-end px-5 py-2 border-b border-border/50 bg-surface/80 backdrop-blur-sm shrink-0">
+        <header className="flex items-center justify-end gap-2 px-5 py-2 border-b border-border/50 bg-surface/80 backdrop-blur-sm shrink-0">
+          <button
+            onClick={() => setShowSaveMoment(true)}
+            className="p-1.5 text-text-muted hover:text-accent transition-colors rounded-md hover:bg-accent/10"
+            title="Save moment"
+          >
+            <Clock className="size-4" strokeWidth={1.5} />
+          </button>
           <DaemonPanel />
         </header>
 
@@ -133,7 +152,11 @@ function App() {
 
         {view === "rewind" && subView === "list" && (
           <ViewSuspense>
-            <RewindView onSelectScreenshot={handleSelectResult} />
+            <RewindView
+              onSelectScreenshot={handleSelectResult}
+              initialTimeRange={rewindTimeRange}
+              onClearInitialRange={() => setRewindTimeRange(null)}
+            />
           </ViewSuspense>
         )}
 
@@ -167,7 +190,7 @@ function App() {
 
         {view === "saved" && subView === "list" && (
           <ViewSuspense>
-            <SavedView onSelectScreenshot={handleSelectResult} />
+            <SavedView onSelectScreenshot={handleSelectResult} onRewindToRange={handleRewindToRange} />
           </ViewSuspense>
         )}
 
@@ -189,6 +212,8 @@ function App() {
           </ViewSuspense>
         )}
       </div>
+
+      {showSaveMoment && <SaveMomentDialog onClose={() => setShowSaveMoment(false)} />}
     </main>
   );
 }
