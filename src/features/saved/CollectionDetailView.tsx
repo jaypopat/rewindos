@@ -1,29 +1,34 @@
+import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   getCollectionScreenshots,
-  getImageUrl,
   listCollections,
-  removeFromCollection,
   deleteCollection,
 } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import { Button } from "@/components/ui/button";
 import { BookmarkButton } from "@/components/BookmarkButton";
-import { AppDot } from "@/components/AppDot";
-import { formatRelativeTime } from "@/lib/format";
-import { ArrowLeft, Clock, Trash2, X, ImageIcon } from "lucide-react";
+import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
+import { EmptyState } from "@/components/shared/EmptyState";
+import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
+import { ScreenshotCard } from "@/components/shared/ScreenshotCard";
+import { formatMomentRange, formatDuration } from "@/lib/format";
+import { ArrowLeft, Clock, Rewind, Trash2 } from "lucide-react";
 
 interface CollectionDetailViewProps {
   collectionId: number;
   onBack: () => void;
   onSelectScreenshot?: (id: number, siblingIds?: number[]) => void;
+  onRewindToRange?: (start: number, end: number) => void;
 }
 
 export function CollectionDetailView({
   collectionId,
   onBack,
   onSelectScreenshot,
+  onRewindToRange,
 }: CollectionDetailViewProps) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const queryClient = useQueryClient();
 
   const { data: collections = [] } = useQuery({
@@ -36,14 +41,6 @@ export function CollectionDetailView({
   const { data: screenshots = [], isLoading } = useQuery({
     queryKey: queryKeys.collectionScreenshots(collectionId),
     queryFn: () => getCollectionScreenshots(collectionId),
-  });
-
-  const removeMutation = useMutation({
-    mutationFn: (screenshotId: number) => removeFromCollection(collectionId, screenshotId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.collectionScreenshots(collectionId) });
-      queryClient.invalidateQueries({ queryKey: queryKeys.collections() });
-    },
   });
 
   const deleteMutation = useMutation({
@@ -85,9 +82,24 @@ export function CollectionDetailView({
               )}
             </div>
             {collection.start_time && collection.end_time && (
-              <div className="flex items-center gap-1 text-xs text-text-muted">
-                <Clock className="size-3" strokeWidth={1.5} />
-                Time range
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1 text-xs text-text-secondary">
+                  <Clock className="size-3 text-accent" strokeWidth={1.5} />
+                  {formatMomentRange(collection.start_time, collection.end_time)}
+                </div>
+                <span className="px-1.5 py-0.5 text-[10px] font-mono bg-accent/10 text-accent rounded">
+                  {formatDuration(collection.end_time - collection.start_time)}
+                </span>
+                {onRewindToRange && (
+                  <button
+                    onClick={() => onRewindToRange(collection.start_time!, collection.end_time!)}
+                    className="flex items-center gap-1 px-2 py-1 text-xs text-accent hover:bg-accent/10 rounded-md transition-colors"
+                    title="Rewind this moment"
+                  >
+                    <Rewind className="size-3" strokeWidth={1.5} />
+                    Rewind
+                  </button>
+                )}
               </div>
             )}
             <span className="text-xs text-text-muted font-mono">
@@ -98,13 +110,9 @@ export function CollectionDetailView({
 
         <div className="ml-auto">
           <button
-            onClick={() => {
-              if (collection && confirm(`Delete collection "${collection.name}"?`)) {
-                deleteMutation.mutate();
-              }
-            }}
+            onClick={() => setConfirmDelete(true)}
             className="p-1.5 text-text-muted hover:text-red-400 transition-colors"
-            title="Delete collection"
+            title="Delete moment"
           >
             <Trash2 className="size-4" strokeWidth={1.5} />
           </button>
@@ -114,81 +122,37 @@ export function CollectionDetailView({
       {/* Grid */}
       {isLoading ? (
         <div className="flex items-center justify-center py-20">
-          <div className="w-6 h-6 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
+          <LoadingSpinner size="lg" />
         </div>
       ) : screenshots.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-20 gap-2">
-          <p className="text-sm text-text-muted">No screenshots in this collection</p>
-        </div>
+        <EmptyState title="No screenshots in this moment" />
       ) : (
         <div className="flex-1 overflow-y-auto">
           <div className="grid grid-cols-2 xl:grid-cols-3 gap-3">
             {screenshots.map((entry) => (
-              <div
+              <ScreenshotCard
                 key={entry.id}
-                className="group relative overflow-hidden bg-surface-raised border border-border/30 hover:border-accent/30 transition-all cursor-pointer text-left"
-              >
-                <button
-                  onClick={() => onSelectScreenshot?.(entry.id, allIds)}
-                  className="w-full"
-                >
-                  <div className="aspect-video bg-surface-overlay relative">
-                    {entry.thumbnail_path ? (
-                      <img
-                        src={getImageUrl(entry.thumbnail_path)}
-                        alt=""
-                        className="w-full h-full object-cover"
-                        loading="lazy"
-                      />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center text-text-muted">
-                        <ImageIcon className="size-8 opacity-30" strokeWidth={1} />
-                      </div>
-                    )}
-                  </div>
-                  <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-surface/95 via-surface/70 to-transparent p-3 pt-8">
-                    <div className="flex items-center gap-1.5 mb-1">
-                      {entry.app_name && (
-                        <>
-                          <AppDot appName={entry.app_name} size={6} />
-                          <span className="text-[10px] font-mono text-text-secondary truncate">
-                            {entry.app_name}
-                          </span>
-                        </>
-                      )}
-                      <span className="text-[10px] text-text-muted ml-auto shrink-0">
-                        {formatRelativeTime(entry.timestamp)}
-                      </span>
-                    </div>
-                    {entry.window_title && (
-                      <p className="text-xs text-text-primary truncate leading-tight">
-                        {entry.window_title}
-                      </p>
-                    )}
-                  </div>
-                </button>
-
-                {/* Hover actions */}
-                <div className="absolute top-1.5 right-1.5 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <BookmarkButton screenshotId={entry.id} />
-                  {/* Only show remove for manual collections (no time-range) */}
-                  {collection && !collection.start_time && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        removeMutation.mutate(entry.id);
-                      }}
-                      className="text-text-muted hover:text-red-400 transition-colors"
-                      title="Remove from collection"
-                    >
-                      <X className="size-3.5" strokeWidth={1.5} />
-                    </button>
-                  )}
-                </div>
-              </div>
+                screenshot={entry}
+                onClick={() => onSelectScreenshot?.(entry.id, allIds)}
+                actions={<BookmarkButton screenshotId={entry.id} />}
+              />
             ))}
           </div>
         </div>
+      )}
+
+      {/* Confirm Delete Dialog */}
+      {confirmDelete && (
+        <ConfirmDialog
+          title="Delete moment"
+          description={<>Are you sure you want to delete <strong>"{collection?.name}"</strong>? This cannot be undone.</>}
+          confirmLabel="Delete moment"
+          cancelLabel="Cancel"
+          destructive
+          loading={deleteMutation.isPending}
+          onConfirm={() => deleteMutation.mutate()}
+          onCancel={() => setConfirmDelete(false)}
+        />
       )}
     </div>
   );

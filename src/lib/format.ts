@@ -67,6 +67,46 @@ export function formatDuration(seconds: number): string {
   return rh > 0 ? `${d}d ${rh}h` : `${d}d`;
 }
 
+export function formatMomentRange(startTimestamp: number, endTimestamp: number): string {
+  const start = new Date(startTimestamp * 1000);
+  const end = new Date(endTimestamp * 1000);
+
+  const dateOpts: Intl.DateTimeFormatOptions = {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: start.getFullYear() !== new Date().getFullYear() ? "numeric" : undefined,
+  };
+  const timeOpts: Intl.DateTimeFormatOptions = { hour: "numeric", minute: "2-digit" };
+
+  const startDate = start.toLocaleDateString(undefined, dateOpts);
+  const startTime = start.toLocaleTimeString(undefined, timeOpts);
+  const endTime = end.toLocaleTimeString(undefined, timeOpts);
+
+  // Cross-day: show both dates
+  if (start.toDateString() !== end.toDateString()) {
+    const endDate = end.toLocaleDateString(undefined, dateOpts);
+    return `${startDate}, ${startTime} – ${endDate}, ${endTime}`;
+  }
+
+  return `${startDate}, ${startTime} – ${endTime}`;
+}
+
+export function formatMomentDate(timestamp: number): string {
+  const date = new Date(timestamp * 1000);
+  return date.toLocaleDateString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: date.getFullYear() !== new Date().getFullYear() ? "numeric" : undefined,
+  });
+}
+
+export function formatMomentTime(timestamp: number): string {
+  const date = new Date(timestamp * 1000);
+  return date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+}
+
 export function formatNumber(n: number): string {
   return n.toLocaleString();
 }

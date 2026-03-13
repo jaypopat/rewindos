@@ -8,7 +8,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { AppDot } from "./AppDot";
 import { BoundingBoxOverlay } from "./BoundingBoxOverlay";
 import { BookmarkButton } from "./BookmarkButton";
-import { AddToCollectionMenu } from "./AddToCollectionMenu";
 import { formatTimestamp } from "@/lib/format";
 
 interface ScreenshotDetailProps {
@@ -186,7 +185,6 @@ export function ScreenshotDetail({ screenshotId, onBack, searchQuery, screenshot
 
         <div className="ml-auto flex items-center gap-2">
           <BookmarkButton screenshotId={screenshotId} size="md" />
-          <AddToCollectionMenu screenshotId={screenshotId} />
           <div className="w-px h-4 bg-border/50" />
           {detail.bounding_boxes.length > 0 && (
             <Button

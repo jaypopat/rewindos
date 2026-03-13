@@ -50,7 +50,7 @@ export function BookmarkButton({ screenshotId, size = "sm", className }: Bookmar
           : "text-text-muted hover:text-yellow-400",
         className,
       )}
-      title={bookmarked ? "Remove bookmark" : "Add bookmark"}
+      title={bookmarked ? "Remove from favorites" : "Add to favorites"}
     >
       <Star
         className={iconSize}
