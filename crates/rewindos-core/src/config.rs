@@ -47,8 +47,12 @@ pub struct PrivacyConfig {
 #[serde(default)]
 pub struct OcrConfig {
     pub enabled: bool,
+    /// OCR engine to use: "tesseract" or "paddleocr"
+    pub engine: String,
     pub tesseract_lang: String,
     pub max_workers: u32,
+    /// Directory for PaddleOCR ONNX models (default: ~/.rewindos/models/paddleocr)
+    pub model_dir: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -176,8 +180,10 @@ impl Default for OcrConfig {
     fn default() -> Self {
         Self {
             enabled: true,
+            engine: "tesseract".to_string(),
             tesseract_lang: "eng".to_string(),
             max_workers: 2,
+            model_dir: "~/.rewindos/models/paddleocr".to_string(),
         }
     }
 }
@@ -268,6 +274,11 @@ impl AppConfig {
         fs::create_dir_all(base.join("logs"))?;
         Ok(())
     }
+}
+
+/// Expand `~` to the user's home directory (public version for other modules).
+pub fn resolve_tilde_pub(path: &str) -> Result<PathBuf> {
+    resolve_tilde(path)
 }
 
 /// Expand `~` to the user's home directory.

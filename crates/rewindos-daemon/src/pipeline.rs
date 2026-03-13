@@ -6,7 +6,8 @@ use rewindos_core::config::AppConfig;
 use rewindos_core::db::Database;
 use rewindos_core::embedding::OllamaClient;
 use rewindos_core::hasher::{self, PerceptualHasher};
-use rewindos_core::ocr;
+use rewindos_core::ocr::{self, OcrEngine};
+use rewindos_core::paddle_ocr::PaddleOcrEngine;
 use rewindos_core::schema::{EmbedRequest, NewScreenshot, OcrStatus, ProcessedFrame, RawFrame};
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
@@ -360,8 +361,39 @@ async fn run_ocr_stage(
     let ocr_enabled = config.ocr.enabled;
     let max_workers = config.ocr.max_workers as usize;
     let semaphore = Arc::new(tokio::sync::Semaphore::new(max_workers));
+    let engine = OcrEngine::from_config(&config.ocr.engine);
 
-    info!(enabled = ocr_enabled, max_workers, "OCR stage started");
+    // Load PaddleOCR engine if configured
+    let paddle_engine: Option<Arc<PaddleOcrEngine>> = if engine == OcrEngine::PaddleOcr {
+        let model_dir = rewindos_core::config::resolve_tilde_pub(&config.ocr.model_dir);
+        match model_dir {
+            Ok(dir) => match PaddleOcrEngine::load(&dir) {
+                Ok(e) => {
+                    info!("PaddleOCR engine loaded from {}", dir.display());
+                    Some(Arc::new(e))
+                }
+                Err(e) => {
+                    warn!(error = %e, "failed to load PaddleOCR, falling back to Tesseract");
+                    None
+                }
+            },
+            Err(e) => {
+                warn!(error = %e, "invalid model_dir path, falling back to Tesseract");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    // Fall back to Tesseract if PaddleOCR was requested but failed to load
+    let effective_engine = if engine == OcrEngine::PaddleOcr && paddle_engine.is_none() {
+        OcrEngine::Tesseract
+    } else {
+        engine
+    };
+
+    info!(enabled = ocr_enabled, max_workers, engine = ?effective_engine, "OCR stage started");
 
     if !ocr_enabled {
         // Drain channel without processing
@@ -381,6 +413,8 @@ async fn run_ocr_stage(
         let db = db.clone();
         let ocr_tx = ocr_tx.clone();
         let metrics = metrics.clone();
+        let effective_engine = effective_engine.clone();
+        let paddle_engine = paddle_engine.clone();
 
         tokio::spawn(async move {
             let _permit = permit;
@@ -399,7 +433,13 @@ async fn run_ocr_stage(
                 .await;
             }
 
-            let result = ocr::run_tesseract(&frame.file_path, &lang).await;
+            let result = ocr::run_ocr(
+                &effective_engine,
+                &frame.file_path,
+                &lang,
+                paddle_engine.as_ref(),
+            )
+            .await;
 
             match result {
                 Ok(output) => {

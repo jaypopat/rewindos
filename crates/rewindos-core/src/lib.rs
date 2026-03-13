@@ -5,6 +5,7 @@ pub mod embedding;
 pub mod error;
 pub mod hasher;
 pub mod ocr;
+pub mod paddle_ocr;
 pub mod schema;
 
 pub use config::AppConfig;

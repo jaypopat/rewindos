@@ -1,18 +1,58 @@
 use std::path::Path;
 use std::process::Output;
+use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::process::Command;
 use tracing::{debug, warn};
 
 use crate::error::{CoreError, Result};
+use crate::paddle_ocr::PaddleOcrEngine;
 use crate::schema::NewBoundingBox;
 
 /// Result of running OCR on a single screenshot.
-pub struct TesseractOutput {
+pub struct OcrOutput {
     pub full_text: String,
     pub bounding_boxes: Vec<NewBoundingBox>,
     pub word_count: i32,
+}
+
+/// Which OCR engine to use.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OcrEngine {
+    Tesseract,
+    PaddleOcr,
+}
+
+impl OcrEngine {
+    pub fn from_config(s: &str) -> Self {
+        match s.to_lowercase().as_str() {
+            "paddleocr" | "paddle" => Self::PaddleOcr,
+            _ => Self::Tesseract,
+        }
+    }
+}
+
+/// Unified OCR dispatcher — runs the configured engine.
+pub async fn run_ocr(
+    engine: &OcrEngine,
+    image_path: &Path,
+    lang: &str,
+    paddle_engine: Option<&Arc<PaddleOcrEngine>>,
+) -> Result<OcrOutput> {
+    match engine {
+        OcrEngine::Tesseract => run_tesseract(image_path, lang).await,
+        OcrEngine::PaddleOcr => {
+            let paddle = paddle_engine.ok_or_else(|| {
+                CoreError::Ocr("PaddleOCR engine not initialised".to_string())
+            })?;
+            let paddle = Arc::clone(paddle);
+            let path = image_path.to_path_buf();
+            tokio::task::spawn_blocking(move || paddle.run_on_file(&path))
+                .await
+                .map_err(|e| CoreError::Ocr(format!("PaddleOCR task panicked: {e}")))?
+        }
+    }
 }
 
 /// Minimum confidence threshold for including a word (0-100).
@@ -26,7 +66,7 @@ const TESSERACT_TIMEOUT: Duration = Duration::from_secs(10);
 /// Spawns `tesseract` CLI as a subprocess with TSV output format.
 /// Filters out low-confidence words (below 30%).
 /// Times out after 10 seconds.
-pub async fn run_tesseract(image_path: &Path, lang: &str) -> Result<TesseractOutput> {
+pub async fn run_tesseract(image_path: &Path, lang: &str) -> Result<OcrOutput> {
     let output = spawn_tesseract(image_path, lang).await?;
 
     if !output.status.success() {
@@ -69,7 +109,7 @@ async fn spawn_tesseract(image_path: &Path, lang: &str) -> Result<Output> {
 /// ```text
 /// level  page_num  block_num  par_num  line_num  word_num  left  top  width  height  conf  text
 /// ```
-fn parse_tsv_output(tsv: &str) -> Result<TesseractOutput> {
+fn parse_tsv_output(tsv: &str) -> Result<OcrOutput> {
     let mut full_text_parts: Vec<String> = Vec::new();
     let mut bounding_boxes = Vec::new();
     let mut current_line_num: i32 = -1;
@@ -132,7 +172,7 @@ fn parse_tsv_output(tsv: &str) -> Result<TesseractOutput> {
         "parsed tesseract output"
     );
 
-    Ok(TesseractOutput {
+    Ok(OcrOutput {
         full_text,
         bounding_boxes,
         word_count,

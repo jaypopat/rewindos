@@ -16,7 +16,7 @@ import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { ScreenshotCard } from "@/components/shared/ScreenshotCard";
 import { formatMomentDate, formatMomentTime, formatDuration } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { Plus, Clock, Trash2, Pencil } from "lucide-react";
+import { Plus, Clock, Trash2, Pencil, Search } from "lucide-react";
 
 type SavedTab = "favorites" | "moments";
 
@@ -32,6 +32,7 @@ export function SavedView({ onSelectScreenshot, onRewindToRange }: SavedViewProp
   const [renamingId, setRenamingId] = useState<number | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
+  const [momentSearch, setMomentSearch] = useState("");
   const queryClient = useQueryClient();
 
   const { data: bookmarks = [], isLoading: loadingBookmarks } = useQuery({
@@ -47,6 +48,16 @@ export function SavedView({ onSelectScreenshot, onRewindToRange }: SavedViewProp
   });
 
   const moments = collections.filter((c) => c.start_time && c.end_time);
+
+  const filteredMoments = momentSearch.trim()
+    ? moments.filter((m) => {
+        const q = momentSearch.toLowerCase();
+        return (
+          m.name.toLowerCase().includes(q) ||
+          (m.description && m.description.toLowerCase().includes(q))
+        );
+      })
+    : moments;
 
   const deleteMutation = useMutation({
     mutationFn: deleteCollection,
@@ -153,7 +164,29 @@ export function SavedView({ onSelectScreenshot, onRewindToRange }: SavedViewProp
             <EmptyState icon={Clock} title="No moments saved" description="Save a time range to revisit it later" />
           ) : (
             <div className="space-y-2">
-              {moments.map((col) => (
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-text-muted" strokeWidth={1.5} />
+                <input
+                  type="text"
+                  value={momentSearch}
+                  onChange={(e) => setMomentSearch(e.target.value)}
+                  placeholder="Search moments..."
+                  className="w-full pl-8 pr-3 py-1.5 text-xs bg-surface-raised border border-border/30 rounded-lg text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/40 transition-colors"
+                />
+              </div>
+              {filteredMoments.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-12 text-text-muted">
+                  <Search className="size-5 mb-2 opacity-40" strokeWidth={1.5} />
+                  <p className="text-xs">No moments matching "{momentSearch}"</p>
+                </div>
+              ) : (
+              <>
+              {momentSearch.trim() && (
+                <p className="text-[10px] text-text-muted px-1">
+                  {filteredMoments.length} of {moments.length} moment{moments.length !== 1 ? "s" : ""}
+                </p>
+              )}
+              {filteredMoments.map((col) => (
                 <div
                   key={col.id}
                   className="flex items-center gap-3 px-4 py-3 bg-surface-raised border border-border/30 hover:border-accent/30 rounded-lg transition-all group"
@@ -231,6 +264,8 @@ export function SavedView({ onSelectScreenshot, onRewindToRange }: SavedViewProp
                   </button>
                 </div>
               ))}
+              </>
+              )}
             </div>
           )}
         </div>
