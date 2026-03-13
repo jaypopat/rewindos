@@ -21,9 +21,10 @@ import { buildAppSpans, computeTrend, getTopTasks } from "./dashboard-utils";
 
 export interface DashboardViewProps {
   onSelectScreenshot: (id: number, siblingIds?: number[]) => void;
+  onFilterApp?: (appName: string) => void;
 }
 
-export function DashboardView({ onSelectScreenshot }: DashboardViewProps) {
+export function DashboardView({ onSelectScreenshot, onFilterApp }: DashboardViewProps) {
   const { data: appConfig } = useConfigQuery();
 
   const categoryRules = useMemo(() => {
@@ -177,7 +178,7 @@ export function DashboardView({ onSelectScreenshot }: DashboardViewProps) {
 
       {/* App-colored timeline */}
       {appSpans.length > 0 && (
-        <AppTimeline spans={appSpans} todayStart={todayStart} />
+        <AppTimeline spans={appSpans} todayStart={todayStart} screenshots={screenshots} onSelectScreenshot={onSelectScreenshot} onFilterApp={onFilterApp} />
       )}
 
       {/* Two-column: Top Tasks + Hourly Activity */}

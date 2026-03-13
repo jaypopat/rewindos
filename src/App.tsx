@@ -80,6 +80,14 @@ function App() {
     }
   }, []);
 
+  const handleFilterApp = useCallback((appName: string) => {
+    setAppFilter(appName);
+    setView("search");
+    setSubView("list");
+    setQuery("");
+    setTimeout(() => searchInputRef.current?.focus(), 100);
+  }, []);
+
   const handleRewindToRange = useCallback((start: number, end: number) => {
     setRewindTimeRange({ start, end });
     setView("rewind");
@@ -173,7 +181,7 @@ function App() {
         )}
 
         {view === "dashboard" && subView === "list" && (
-          <DashboardView onSelectScreenshot={handleSelectResult} />
+          <DashboardView onSelectScreenshot={handleSelectResult} onFilterApp={handleFilterApp} />
         )}
 
         {view === "history" && subView === "list" && (
