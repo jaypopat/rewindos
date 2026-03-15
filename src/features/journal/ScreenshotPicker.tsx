@@ -144,7 +144,7 @@ export function ScreenshotPicker({
               onKeyDown={(e) => { if (e.key === "Enter") handleSearchSubmit(); }}
               placeholder="Search all screenshots..."
               className="flex-1 bg-transparent text-xs text-text-primary placeholder:text-text-muted/50 outline-none"
-              autoFocus
+              ref={(el) => el?.focus()}
             />
           </div>
           <button

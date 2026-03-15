@@ -15,5 +15,8 @@ Environment=RUST_LOG=info
 # Ensure Wayland/D-Bus sockets are accessible
 Environment=XDG_RUNTIME_DIR=%t
 
+# Pass through DE detection vars that may not be inherited via graphical-session.target
+PassEnvironment=WAYLAND_DISPLAY XDG_CURRENT_DESKTOP XDG_SESSION_TYPE DISPLAY HYPRLAND_INSTANCE_SIGNATURE SWAYSOCK COSMIC_SESSION_ID DBUS_SESSION_BUS_ADDRESS
+
 [Install]
 WantedBy=graphical-session.target

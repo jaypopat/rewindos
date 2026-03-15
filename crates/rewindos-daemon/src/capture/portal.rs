@@ -95,12 +95,22 @@ impl PortalCaptureBackend {
 
         let screencast = Screencast::new()
             .await
-            .map_err(|e| CaptureError::Portal(format!("failed to connect to portal: {e}")))?;
+            .map_err(|e| {
+                CaptureError::Portal(format!(
+                    "failed to connect to portal: {e}. {}",
+                    portal_install_hint()
+                ))
+            })?;
 
         let session = screencast
             .create_session()
             .await
-            .map_err(|e| CaptureError::Portal(format!("failed to create session: {e}")))?;
+            .map_err(|e| {
+                CaptureError::Portal(format!(
+                    "failed to create session: {e}. {}",
+                    portal_install_hint()
+                ))
+            })?;
 
         screencast
             .select_sources(
@@ -596,5 +606,120 @@ fn build_video_params(buf: &mut [u8]) -> &pipewire::spa::pod::Pod {
     unsafe {
         let ptr = result.into_inner().as_ptr();
         &*(ptr as *const pipewire::spa::pod::Pod)
+    }
+}
+
+/// Return a DE-specific hint about which xdg-desktop-portal backend to install.
+pub(crate) fn portal_install_hint() -> String {
+    let desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default().to_uppercase();
+
+    if desktop.contains("GNOME") {
+        "Hint: ensure 'xdg-desktop-portal-gnome' is installed".into()
+    } else if desktop.contains("KDE") {
+        "Hint: ensure 'xdg-desktop-portal-kde' is installed".into()
+    } else if desktop.contains("HYPRLAND") {
+        "Hint: ensure 'xdg-desktop-portal-hyprland' is installed".into()
+    } else if desktop.contains("SWAY") || std::env::var("SWAYSOCK").is_ok() {
+        "Hint: ensure 'xdg-desktop-portal-wlr' is installed".into()
+    } else if desktop.contains("COSMIC") || std::env::var("COSMIC_SESSION_ID").is_ok() {
+        "Hint: ensure 'xdg-desktop-portal-cosmic' is installed".into()
+    } else {
+        "Hint: ensure the appropriate xdg-desktop-portal backend is installed for your DE".into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::env;
+    use std::sync::Mutex;
+
+    // Env var manipulation isn't thread-safe — run with --test-threads=1
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    fn clear_portal_env_vars() {
+        for var in &["XDG_CURRENT_DESKTOP", "SWAYSOCK", "COSMIC_SESSION_ID"] {
+            env::remove_var(var);
+        }
+    }
+
+    #[test]
+    fn hint_gnome() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        clear_portal_env_vars();
+        env::set_var("XDG_CURRENT_DESKTOP", "GNOME");
+        assert!(portal_install_hint().contains("xdg-desktop-portal-gnome"));
+        clear_portal_env_vars();
+    }
+
+    #[test]
+    fn hint_gnome_ubuntu() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        clear_portal_env_vars();
+        env::set_var("XDG_CURRENT_DESKTOP", "ubuntu:GNOME");
+        assert!(portal_install_hint().contains("xdg-desktop-portal-gnome"));
+        clear_portal_env_vars();
+    }
+
+    #[test]
+    fn hint_kde() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        clear_portal_env_vars();
+        env::set_var("XDG_CURRENT_DESKTOP", "KDE");
+        assert!(portal_install_hint().contains("xdg-desktop-portal-kde"));
+        clear_portal_env_vars();
+    }
+
+    #[test]
+    fn hint_hyprland() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        clear_portal_env_vars();
+        env::set_var("XDG_CURRENT_DESKTOP", "Hyprland");
+        assert!(portal_install_hint().contains("xdg-desktop-portal-hyprland"));
+        clear_portal_env_vars();
+    }
+
+    #[test]
+    fn hint_sway_via_xdg() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        clear_portal_env_vars();
+        env::set_var("XDG_CURRENT_DESKTOP", "sway");
+        assert!(portal_install_hint().contains("xdg-desktop-portal-wlr"));
+        clear_portal_env_vars();
+    }
+
+    #[test]
+    fn hint_sway_via_swaysock() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        clear_portal_env_vars();
+        env::set_var("SWAYSOCK", "/run/sway.sock");
+        assert!(portal_install_hint().contains("xdg-desktop-portal-wlr"));
+        clear_portal_env_vars();
+    }
+
+    #[test]
+    fn hint_cosmic_via_xdg() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        clear_portal_env_vars();
+        env::set_var("XDG_CURRENT_DESKTOP", "COSMIC");
+        assert!(portal_install_hint().contains("xdg-desktop-portal-cosmic"));
+        clear_portal_env_vars();
+    }
+
+    #[test]
+    fn hint_cosmic_via_session_id() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        clear_portal_env_vars();
+        env::set_var("COSMIC_SESSION_ID", "test-id");
+        assert!(portal_install_hint().contains("xdg-desktop-portal-cosmic"));
+        clear_portal_env_vars();
+    }
+
+    #[test]
+    fn hint_unknown_de() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        clear_portal_env_vars();
+        assert!(portal_install_hint().contains("appropriate xdg-desktop-portal backend"));
+        clear_portal_env_vars();
     }
 }

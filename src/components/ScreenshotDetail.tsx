@@ -24,7 +24,7 @@ function highlightText(text: string, query?: string): ReactNode[] {
   const pattern = new RegExp(`(${words.map(escapeRegex).join("|")})`, "gi");
   const parts = text.split(pattern);
   return parts.map((part, i) =>
-    i % 2 === 1 ? <mark key={i}>{part}</mark> : part || null,
+    i % 2 === 1 ? <mark key={`hl-${part}`}>{part}</mark> : part || null,
   );
 }
 

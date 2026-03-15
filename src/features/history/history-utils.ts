@@ -9,6 +9,7 @@ export type HistoryMode = "apps" | "timeline";
 
 export interface HistoryViewProps {
   onSelectScreenshot?: (id: number, siblingIds?: number[]) => void;
+  onRewindToRange?: (start: number, end: number) => void;
 }
 
 export interface AppTaskGroup {

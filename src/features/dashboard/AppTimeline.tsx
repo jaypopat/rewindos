@@ -14,10 +14,9 @@ interface AppTimelineProps {
   todayStart: number;
   screenshots: TimelineEntry[];
   onSelectScreenshot?: (id: number, siblingIds?: number[]) => void;
-  onFilterApp?: (appName: string) => void;
 }
 
-export function AppTimeline({ spans, todayStart, screenshots, onSelectScreenshot, onFilterApp }: AppTimelineProps) {
+export function AppTimeline({ spans, todayStart, screenshots, onSelectScreenshot }: AppTimelineProps) {
   const barRef = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<HoverState | null>(null);
 
@@ -157,10 +156,6 @@ export function AppTimeline({ spans, todayStart, screenshots, onSelectScreenshot
                   left: `${left}%`,
                   width: `${Math.max(width, 0.3)}%`,
                   backgroundColor: getAppColor(span.appName),
-                }}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onFilterApp?.(span.appName);
                 }}
               />
             );

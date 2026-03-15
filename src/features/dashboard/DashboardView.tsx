@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { lazy, Suspense, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   browseScreenshots,
@@ -11,9 +11,14 @@ import { formatDuration } from "@/lib/format";
 import { buildCategoryRules, categorizeApp, type ActivityCategory } from "@/lib/app-categories";
 import { useConfigQuery } from "@/hooks/useConfigQuery";
 import { StatCard } from "@/components/StatCard";
-import { HourlyActivityChart } from "@/components/charts/HourlyActivityChart";
-import { AppDonutChart } from "@/components/charts/AppDonutChart";
 import { AppTimeline } from "./AppTimeline";
+
+const HourlyActivityChart = lazy(() =>
+  import("@/components/charts/HourlyActivityChart").then((m) => ({ default: m.HourlyActivityChart })),
+);
+const AppDonutChart = lazy(() =>
+  import("@/components/charts/AppDonutChart").then((m) => ({ default: m.AppDonutChart })),
+);
 import { CapturesCarousel } from "./CapturesCarousel";
 import { TopTasksList } from "./TopTasksList";
 import { CategoriesBreakdown } from "./CategoriesBreakdown";
@@ -21,10 +26,9 @@ import { buildAppSpans, computeTrend, getTopTasks } from "./dashboard-utils";
 
 export interface DashboardViewProps {
   onSelectScreenshot: (id: number, siblingIds?: number[]) => void;
-  onFilterApp?: (appName: string) => void;
 }
 
-export function DashboardView({ onSelectScreenshot, onFilterApp }: DashboardViewProps) {
+export function DashboardView({ onSelectScreenshot }: DashboardViewProps) {
   const { data: appConfig } = useConfigQuery();
 
   const categoryRules = useMemo(() => {
@@ -178,7 +182,7 @@ export function DashboardView({ onSelectScreenshot, onFilterApp }: DashboardView
 
       {/* App-colored timeline */}
       {appSpans.length > 0 && (
-        <AppTimeline spans={appSpans} todayStart={todayStart} screenshots={screenshots} onSelectScreenshot={onSelectScreenshot} onFilterApp={onFilterApp} />
+        <AppTimeline spans={appSpans} todayStart={todayStart} screenshots={screenshots} onSelectScreenshot={onSelectScreenshot} />
       )}
 
       {/* Two-column: Top Tasks + Hourly Activity */}
@@ -196,7 +200,9 @@ export function DashboardView({ onSelectScreenshot, onFilterApp }: DashboardView
                 Hourly Activity
               </h2>
               <div className="border border-border/50 p-3 flex-1 flex items-end min-h-[200px]">
-                <HourlyActivityChart data={todayActivity.hourly_activity} />
+                <Suspense fallback={<div className="w-full h-full" />}>
+                  <HourlyActivityChart data={todayActivity.hourly_activity} />
+                </Suspense>
               </div>
             </section>
           )}
@@ -218,7 +224,9 @@ export function DashboardView({ onSelectScreenshot, onFilterApp }: DashboardView
                 App Usage
               </h2>
               <div className="flex-1 flex items-center">
-                <AppDonutChart data={todayActivity.app_usage} />
+                <Suspense fallback={<div className="w-full h-full" />}>
+                  <AppDonutChart data={todayActivity.app_usage} />
+                </Suspense>
               </div>
             </section>
           )}

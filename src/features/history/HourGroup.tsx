@@ -148,7 +148,7 @@ export function HourGroupRow({
             className="flex items-center gap-1.5 px-2 shrink-0"
           >
             <input
-              autoFocus
+              ref={(el) => el?.focus()}
               value={saveCollectionName}
               onChange={(e) => setSaveCollectionName(e.target.value)}
               placeholder="Collection name..."
