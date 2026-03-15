@@ -36,6 +36,7 @@ export function JournalSidebar({
       <div className="px-4 py-4 space-y-5">
         {/* Mini Calendar */}
         <MiniCalendarHeatmap
+          key={`${selectedDate.getFullYear()}-${selectedDate.getMonth()}`}
           selectedDate={selectedDate}
           calendarMonth={calendarMonth}
           journalDateMap={journalDateMap}
@@ -110,9 +111,9 @@ export function JournalSidebar({
               Prompts
             </h3>
             <div className="space-y-1.5">
-              {prompts.map((p, i) => (
+              {prompts.map((p) => (
                 <button
-                  key={i}
+                  key={p}
                   onClick={() => onInsertPrompt(p)}
                   className="w-full text-left text-xs text-text-secondary hover:text-text-primary bg-surface-raised hover:bg-surface-overlay/50 border border-border/30 hover:border-accent/20 rounded-lg px-3 py-2 transition-all leading-relaxed"
                 >

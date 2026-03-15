@@ -211,7 +211,7 @@ export function SavedView({ onSelectScreenshot, onRewindToRange }: SavedViewProp
                           className="flex items-center gap-2"
                         >
                           <input
-                            autoFocus
+                            ref={(el) => el?.focus()}
                             value={renameValue}
                             onChange={(e) => setRenameValue(e.target.value)}
                             onBlur={() => setRenamingId(null)}

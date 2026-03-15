@@ -170,14 +170,14 @@ export function FocusView() {
 
         {/* Session progress dots */}
         <div className="flex items-center gap-2">
-          {Array.from({ length: config.sessionsBeforeLongBreak }).map((_, i) => (
+          {Array.from({ length: config.sessionsBeforeLongBreak }, (_, i) => i).map((sessionIdx) => (
             <div
-              key={i}
+              key={`session-${sessionIdx}`}
               className={cn(
                 "w-2 h-2 transition-all",
-                i < (state.completedSessions % config.sessionsBeforeLongBreak)
+                sessionIdx < (state.completedSessions % config.sessionsBeforeLongBreak)
                   ? "bg-accent"
-                  : i === (state.completedSessions % config.sessionsBeforeLongBreak) && state.phase === "work"
+                  : sessionIdx === (state.completedSessions % config.sessionsBeforeLongBreak) && state.phase === "work"
                     ? "bg-accent/30 animate-pulse"
                     : "bg-border/40",
               )}

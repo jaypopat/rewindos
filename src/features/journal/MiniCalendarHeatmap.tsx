@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { dateToKey } from "@/lib/time-ranges";
 import { type JournalDateInfo } from "@/lib/api";
@@ -25,15 +25,11 @@ interface MiniCalendarHeatmapProps {
 
 export function MiniCalendarHeatmap({
   selectedDate,
-  calendarMonth,
+  calendarMonth: _calendarMonth,
   journalDateMap,
   onSelectDate,
 }: MiniCalendarHeatmapProps) {
-  const [viewMonth, setViewMonth] = useState(calendarMonth);
-
-  useEffect(() => {
-    setViewMonth(startOfMonth(selectedDate));
-  }, [selectedDate]);
+  const [viewMonth, setViewMonth] = useState(() => startOfMonth(selectedDate));
 
   const monthStart = startOfMonth(viewMonth);
   const monthEnd = endOfMonth(viewMonth);
@@ -65,9 +61,9 @@ export function MiniCalendarHeatmap({
 
       {/* Day headers */}
       <div className="grid grid-cols-7 gap-0.5 mb-0.5">
-        {["M", "T", "W", "T", "F", "S", "S"].map((d, i) => (
-          <div key={i} className="text-center text-[9px] text-text-muted font-mono py-0.5">
-            {d}
+        {(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const).map((day) => (
+          <div key={day} className="text-center text-[9px] text-text-muted font-mono py-0.5">
+            {day[0]}
           </div>
         ))}
       </div>

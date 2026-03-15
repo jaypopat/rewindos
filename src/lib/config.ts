@@ -16,8 +16,10 @@ export interface AppConfig {
   };
   ocr: {
     enabled: boolean;
+    engine: string;
     tesseract_lang: string;
     max_workers: number;
+    model_dir: string;
   };
   ui: {
     global_hotkey: string;

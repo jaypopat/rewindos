@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import type { SearchFilters } from "@/lib/api";
 import { useDebounce } from "@/hooks/useDebounce";
@@ -24,18 +24,57 @@ import { Clock } from "lucide-react";
 
 type SubView = "list" | "detail";
 
+interface NavState {
+  view: View;
+  subView: SubView;
+  selectedScreenshotId: number | null;
+  screenshotIds: number[];
+  rewindTimeRange: { start: number; end: number } | null;
+}
+
+type NavAction =
+  | { type: "SELECT_RESULT"; id: number; siblingIds?: number[] }
+  | { type: "NAVIGATE_SCREENSHOT"; id: number }
+  | { type: "GO_BACK" }
+  | { type: "CHANGE_VIEW"; view: View }
+  | { type: "REWIND_TO_RANGE"; start: number; end: number }
+  | { type: "CLEAR_REWIND_RANGE" };
+
+function navReducer(state: NavState, action: NavAction): NavState {
+  switch (action.type) {
+    case "SELECT_RESULT":
+      return { ...state, selectedScreenshotId: action.id, screenshotIds: action.siblingIds ?? [], subView: "detail" };
+    case "NAVIGATE_SCREENSHOT":
+      return { ...state, selectedScreenshotId: action.id };
+    case "GO_BACK":
+      return { ...state, subView: "list", selectedScreenshotId: null, screenshotIds: [] };
+    case "CHANGE_VIEW":
+      return { ...state, view: action.view, subView: "list", selectedScreenshotId: null, rewindTimeRange: null };
+    case "REWIND_TO_RANGE":
+      return { ...state, rewindTimeRange: { start: action.start, end: action.end }, view: "rewind", subView: "list", selectedScreenshotId: null };
+    case "CLEAR_REWIND_RANGE":
+      return { ...state, rewindTimeRange: null };
+  }
+}
+
+const initialNavState: NavState = {
+  view: "dashboard",
+  subView: "list",
+  selectedScreenshotId: null,
+  screenshotIds: [],
+  rewindTimeRange: null,
+};
+
 function App() {
-  const [view, setView] = useState<View>("dashboard");
-  const [subView, setSubView] = useState<SubView>("list");
-  const [selectedScreenshotId, setSelectedScreenshotId] = useState<number | null>(null);
-  const [screenshotIds, setScreenshotIds] = useState<number[]>([]);
+  const [nav, dispatch] = useReducer(navReducer, initialNavState);
+  const { view, subView, selectedScreenshotId, screenshotIds, rewindTimeRange } = nav;
+
   const [query, setQuery] = useState("");
   const [appFilter, setAppFilter] = useState<string | undefined>();
   const [datePreset, setDatePreset] = useState(0);
   const [resultView, setResultView] = useState<"grid" | "list">("grid");
-
   const [showSaveMoment, setShowSaveMoment] = useState(false);
-  const [rewindTimeRange, setRewindTimeRange] = useState<{ start: number; end: number } | null>(null);
+
   const searchInputRef = useRef<HTMLInputElement>(null);
   const debouncedQuery = useDebounce(query, 300);
 
@@ -54,45 +93,27 @@ function App() {
   );
 
   const handleSelectResult = useCallback((id: number, siblingIds?: number[]) => {
-    setSelectedScreenshotId(id);
-    setScreenshotIds(siblingIds ?? []);
-    setSubView("detail");
+    dispatch({ type: "SELECT_RESULT", id, siblingIds });
   }, []);
 
   const handleNavigateScreenshot = useCallback((id: number) => {
-    setSelectedScreenshotId(id);
+    dispatch({ type: "NAVIGATE_SCREENSHOT", id });
   }, []);
 
   const handleBack = useCallback(() => {
-    setSubView("list");
-    setSelectedScreenshotId(null);
-    setScreenshotIds([]);
+    dispatch({ type: "GO_BACK" });
     setTimeout(() => searchInputRef.current?.focus(), 100);
   }, []);
 
   const handleViewChange = useCallback((v: View) => {
-    setView(v);
-    setSubView("list");
-    setSelectedScreenshotId(null);
-    setRewindTimeRange(null);
+    dispatch({ type: "CHANGE_VIEW", view: v });
     if (v === "search") {
       setTimeout(() => searchInputRef.current?.focus(), 100);
     }
   }, []);
 
-  const handleFilterApp = useCallback((appName: string) => {
-    setAppFilter(appName);
-    setView("search");
-    setSubView("list");
-    setQuery("");
-    setTimeout(() => searchInputRef.current?.focus(), 100);
-  }, []);
-
   const handleRewindToRange = useCallback((start: number, end: number) => {
-    setRewindTimeRange({ start, end });
-    setView("rewind");
-    setSubView("list");
-    setSelectedScreenshotId(null);
+    dispatch({ type: "REWIND_TO_RANGE", start, end });
   }, []);
 
   // Global keyboard shortcuts
@@ -161,9 +182,10 @@ function App() {
         {view === "rewind" && subView === "list" && (
           <ViewSuspense>
             <RewindView
+              key={rewindTimeRange ? `${rewindTimeRange.start}-${rewindTimeRange.end}` : "default"}
               onSelectScreenshot={handleSelectResult}
               initialTimeRange={rewindTimeRange}
-              onClearInitialRange={() => setRewindTimeRange(null)}
+              onClearInitialRange={() => dispatch({ type: "CLEAR_REWIND_RANGE" })}
             />
           </ViewSuspense>
         )}
@@ -181,12 +203,12 @@ function App() {
         )}
 
         {view === "dashboard" && subView === "list" && (
-          <DashboardView onSelectScreenshot={handleSelectResult} onFilterApp={handleFilterApp} />
+          <DashboardView onSelectScreenshot={handleSelectResult} />
         )}
 
         {view === "history" && subView === "list" && (
           <ViewSuspense>
-            <HistoryView onSelectScreenshot={handleSelectResult} />
+            <HistoryView onSelectScreenshot={handleSelectResult} onRewindToRange={handleRewindToRange} />
           </ViewSuspense>
         )}
 

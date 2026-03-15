@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo } from "react";
+import { useState, useRef, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { setJournalTags, listAllJournalTags, type JournalTag } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
@@ -48,15 +48,16 @@ export function TagEditor({ entryId, tags, onTagsChanged }: TagEditorProps) {
     setTagsMutation.mutate(tags.filter((t) => t.name !== name).map((t) => t.name));
   };
 
-  useEffect(() => {
-    if (isAdding && inputRef.current) inputRef.current.focus();
-  }, [isAdding]);
+  const startAdding = () => {
+    setIsAdding(true);
+    requestAnimationFrame(() => inputRef.current?.focus());
+  };
 
   if (tags.length === 0 && !isAdding) {
     return (
       <div className="px-5 py-1.5 border-b border-border/50">
         <button
-          onClick={() => setIsAdding(true)}
+          onClick={startAdding}
           className="flex items-center gap-1 text-[10px] text-text-muted/50 hover:text-text-muted transition-colors"
         >
           <Plus className="size-2.5" strokeWidth={2} />
@@ -127,7 +128,7 @@ export function TagEditor({ entryId, tags, onTagsChanged }: TagEditorProps) {
         </div>
       ) : (
         <button
-          onClick={() => setIsAdding(true)}
+          onClick={startAdding}
           className="text-text-muted/40 hover:text-text-muted transition-colors"
         >
           <Plus className="size-3" strokeWidth={2} />

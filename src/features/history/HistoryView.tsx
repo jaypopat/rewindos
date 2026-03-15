@@ -11,7 +11,7 @@ import { TimelineMode } from "./TimelineMode";
 import { RANGE_PRESETS, getRangeForDate } from "./history-utils";
 import type { HistoryMode, HistoryViewProps } from "./history-utils";
 
-export function HistoryView({ onSelectScreenshot }: HistoryViewProps) {
+export function HistoryView({ onSelectScreenshot, onRewindToRange }: HistoryViewProps) {
   const [rangeIdx, setRangeIdx] = useState<number | null>(0);
   const [customDate, setCustomDate] = useState<string | null>(null);
   const [mode, setMode] = useState<HistoryMode>("apps");
@@ -171,6 +171,7 @@ export function HistoryView({ onSelectScreenshot }: HistoryViewProps) {
           clearRange={range.clearRange}
           exitRangeSelect={range.exitRangeSelect}
           onSelectScreenshot={onSelectScreenshot}
+          onRewindToRange={onRewindToRange}
           start={start}
           end={end}
         />

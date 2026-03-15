@@ -1,15 +1,22 @@
-import { useState, useMemo } from "react";
+import { lazy, Suspense, useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { getActivity, getDaemonStatus } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import { formatNumber, formatBytes, formatDuration } from "@/lib/format";
 import { StatCard } from "./StatCard";
 import { HeatmapCalendar } from "./charts/HeatmapCalendar";
-import { AppDonutChart } from "./charts/AppDonutChart";
 import { WeeklyHeatmap } from "./charts/WeeklyHeatmap";
-import { DailyActivityChart } from "./charts/DailyActivityChart";
-import { HourlyActivityChart } from "./charts/HourlyActivityChart";
 import { cn } from "@/lib/utils";
+
+const AppDonutChart = lazy(() =>
+  import("./charts/AppDonutChart").then((m) => ({ default: m.AppDonutChart })),
+);
+const DailyActivityChart = lazy(() =>
+  import("./charts/DailyActivityChart").then((m) => ({ default: m.DailyActivityChart })),
+);
+const HourlyActivityChart = lazy(() =>
+  import("./charts/HourlyActivityChart").then((m) => ({ default: m.HourlyActivityChart })),
+);
 
 const RANGES = [
   { label: "7d", days: 7 },
@@ -145,7 +152,9 @@ export function ActivityView() {
           {/* Row 3: Two panels */}
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
             <ChartCard title="App Usage">
-              <AppDonutChart data={data.app_usage} />
+              <Suspense fallback={<div className="h-44" />}>
+                <AppDonutChart data={data.app_usage} />
+              </Suspense>
             </ChartCard>
             <ChartCard title="Weekly Pattern">
               <WeeklyHeatmap data={data.hourly_activity} />
@@ -155,10 +164,14 @@ export function ActivityView() {
           {/* Row 4: Full-width charts */}
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
             <ChartCard title="Daily Trend">
-              <DailyActivityChart data={data.daily_activity} />
+              <Suspense fallback={<div className="h-60" />}>
+                <DailyActivityChart data={data.daily_activity} />
+              </Suspense>
             </ChartCard>
             <ChartCard title="Hourly Distribution">
-              <HourlyActivityChart data={data.hourly_activity} />
+              <Suspense fallback={<div className="h-60" />}>
+                <HourlyActivityChart data={data.hourly_activity} />
+              </Suspense>
             </ChartCard>
           </div>
         </>

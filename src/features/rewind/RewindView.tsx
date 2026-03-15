@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useCallback, useEffect } from "react";
+import { useState, useMemo, useRef, useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { deleteScreenshotsInRange } from "@/lib/api";
 import { formatDuration } from "@/lib/format";
@@ -32,14 +32,6 @@ export function RewindView({ onSelectScreenshot, initialTimeRange, onClearInitia
   const [fixedRange, setFixedRange] = useState<{ start: number; end: number } | null>(
     initialTimeRange ?? null,
   );
-
-  // Sync fixedRange when initialTimeRange changes externally
-  useEffect(() => {
-    if (initialTimeRange) {
-      setFixedRange(initialTimeRange);
-      setCustomDate(null);
-    }
-  }, [initialTimeRange]);
 
   const clearFixedRange = useCallback(() => {
     setFixedRange(null);

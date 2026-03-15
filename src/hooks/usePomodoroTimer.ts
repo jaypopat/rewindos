@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef } from "react";
 
 export type PomodoroPhase = "work" | "short_break" | "long_break" | "idle";
 
@@ -11,13 +11,107 @@ export interface PomodoroConfig {
   autoStartWork: boolean;
 }
 
-export interface PomodoroState {
+interface PomodoroState {
   phase: PomodoroPhase;
   secondsRemaining: number;
   totalSeconds: number;
   isRunning: boolean;
   completedSessions: number;
   totalWorkSeconds: number;
+}
+
+type TimerAction =
+  | { type: "TICK" }
+  | { type: "PHASE_COMPLETE"; config: PomodoroConfig }
+  | { type: "START"; config: PomodoroConfig }
+  | { type: "PAUSE" }
+  | { type: "SKIP"; config: PomodoroConfig }
+  | { type: "RESET"; config: PomodoroConfig };
+
+function timerReducer(state: PomodoroState, action: TimerAction): PomodoroState {
+  switch (action.type) {
+    case "TICK": {
+      if (state.secondsRemaining <= 1) {
+        return { ...state, secondsRemaining: 0 };
+      }
+      return {
+        ...state,
+        secondsRemaining: state.secondsRemaining - 1,
+        totalWorkSeconds: state.phase === "work" ? state.totalWorkSeconds + 1 : state.totalWorkSeconds,
+      };
+    }
+    case "PHASE_COMPLETE": {
+      const cfg = action.config;
+      if (state.phase === "work") {
+        const newCompleted = state.completedSessions + 1;
+        const isLongBreak = newCompleted % cfg.sessionsBeforeLongBreak === 0;
+        const nextPhase = isLongBreak ? "long_break" as const : "short_break" as const;
+        const nextDuration = isLongBreak ? cfg.longBreakMinutes * 60 : cfg.shortBreakMinutes * 60;
+        return {
+          ...state,
+          isRunning: cfg.autoStartBreaks,
+          completedSessions: newCompleted,
+          phase: nextPhase,
+          secondsRemaining: nextDuration,
+          totalSeconds: nextDuration,
+        };
+      }
+      const workDuration = cfg.workMinutes * 60;
+      return {
+        ...state,
+        isRunning: cfg.autoStartWork,
+        phase: "work",
+        secondsRemaining: workDuration,
+        totalSeconds: workDuration,
+      };
+    }
+    case "START": {
+      if (state.phase === "idle") {
+        const workDuration = action.config.workMinutes * 60;
+        return { ...state, phase: "work", secondsRemaining: workDuration, totalSeconds: workDuration, isRunning: true };
+      }
+      return { ...state, isRunning: true };
+    }
+    case "PAUSE":
+      return { ...state, isRunning: false };
+    case "SKIP": {
+      // Delegate to PHASE_COMPLETE logic by zeroing remaining and completing
+      const cfg = action.config;
+      if (state.phase === "work") {
+        const newCompleted = state.completedSessions + 1;
+        const isLongBreak = newCompleted % cfg.sessionsBeforeLongBreak === 0;
+        const nextPhase = isLongBreak ? "long_break" as const : "short_break" as const;
+        const nextDuration = isLongBreak ? cfg.longBreakMinutes * 60 : cfg.shortBreakMinutes * 60;
+        return {
+          ...state,
+          isRunning: cfg.autoStartBreaks,
+          completedSessions: newCompleted,
+          phase: nextPhase,
+          secondsRemaining: nextDuration,
+          totalSeconds: nextDuration,
+        };
+      }
+      const workDuration = cfg.workMinutes * 60;
+      return {
+        ...state,
+        isRunning: cfg.autoStartWork,
+        phase: "work",
+        secondsRemaining: workDuration,
+        totalSeconds: workDuration,
+      };
+    }
+    case "RESET": {
+      const workDuration = action.config.workMinutes * 60;
+      return {
+        phase: "idle",
+        secondsRemaining: workDuration,
+        totalSeconds: workDuration,
+        isRunning: false,
+        completedSessions: 0,
+        totalWorkSeconds: 0,
+      };
+    }
+  }
 }
 
 const DEFAULT_CONFIG: PomodoroConfig = {
@@ -29,13 +123,19 @@ const DEFAULT_CONFIG: PomodoroConfig = {
   autoStartWork: false,
 };
 
+function createInitialState(config: PomodoroConfig): PomodoroState {
+  return {
+    phase: "idle",
+    secondsRemaining: config.workMinutes * 60,
+    totalSeconds: config.workMinutes * 60,
+    isRunning: false,
+    completedSessions: 0,
+    totalWorkSeconds: 0,
+  };
+}
+
 export function usePomodoroTimer(config: PomodoroConfig = DEFAULT_CONFIG) {
-  const [phase, setPhase] = useState<PomodoroPhase>("idle");
-  const [secondsRemaining, setSecondsRemaining] = useState(config.workMinutes * 60);
-  const [totalSeconds, setTotalSeconds] = useState(config.workMinutes * 60);
-  const [isRunning, setIsRunning] = useState(false);
-  const [completedSessions, setCompletedSessions] = useState(0);
-  const [totalWorkSeconds, setTotalWorkSeconds] = useState(0);
+  const [state, dispatch] = useReducer(timerReducer, config, createInitialState);
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const configRef = useRef(config);
@@ -43,7 +143,7 @@ export function usePomodoroTimer(config: PomodoroConfig = DEFAULT_CONFIG) {
 
   // Tick
   useEffect(() => {
-    if (!isRunning) {
+    if (!state.isRunning) {
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
         intervalRef.current = null;
@@ -52,19 +152,7 @@ export function usePomodoroTimer(config: PomodoroConfig = DEFAULT_CONFIG) {
     }
 
     intervalRef.current = setInterval(() => {
-      setSecondsRemaining((prev) => {
-        if (prev <= 1) {
-          // Phase complete
-          handlePhaseComplete();
-          return 0;
-        }
-        return prev - 1;
-      });
-
-      // Track work time
-      if (phase === "work") {
-        setTotalWorkSeconds((prev) => prev + 1);
-      }
+      dispatch({ type: "TICK" });
     }, 1000);
 
     return () => {
@@ -73,81 +161,33 @@ export function usePomodoroTimer(config: PomodoroConfig = DEFAULT_CONFIG) {
         intervalRef.current = null;
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isRunning, phase]);
+  }, [state.isRunning]);
 
-  const handlePhaseComplete = useCallback(() => {
-    const cfg = configRef.current;
-    setIsRunning(false);
-
-    if (phase === "work") {
-      const newCompleted = completedSessions + 1;
-      setCompletedSessions(newCompleted);
-
-      // Determine next break type
-      const isLongBreak = newCompleted % cfg.sessionsBeforeLongBreak === 0;
-      const nextPhase = isLongBreak ? "long_break" : "short_break";
-      const nextDuration = isLongBreak
-        ? cfg.longBreakMinutes * 60
-        : cfg.shortBreakMinutes * 60;
-
-      setPhase(nextPhase);
-      setSecondsRemaining(nextDuration);
-      setTotalSeconds(nextDuration);
-
-      if (cfg.autoStartBreaks) {
-        setIsRunning(true);
-      }
-    } else {
-      // Break finished → back to work
-      const workDuration = cfg.workMinutes * 60;
-      setPhase("work");
-      setSecondsRemaining(workDuration);
-      setTotalSeconds(workDuration);
-
-      if (cfg.autoStartWork) {
-        setIsRunning(true);
-      }
+  // Handle phase completion when timer reaches 0
+  useEffect(() => {
+    if (state.secondsRemaining === 0 && state.phase !== "idle") {
+      dispatch({ type: "PHASE_COMPLETE", config: configRef.current });
     }
-  }, [phase, completedSessions]);
+  }, [state.secondsRemaining, state.phase]);
 
   const start = useCallback(() => {
-    if (phase === "idle") {
-      const workDuration = configRef.current.workMinutes * 60;
-      setPhase("work");
-      setSecondsRemaining(workDuration);
-      setTotalSeconds(workDuration);
-    }
-    setIsRunning(true);
-  }, [phase]);
+    dispatch({ type: "START", config: configRef.current });
+  }, []);
 
   const pause = useCallback(() => {
-    setIsRunning(false);
+    dispatch({ type: "PAUSE" });
   }, []);
 
   const skip = useCallback(() => {
-    setSecondsRemaining(0);
-    handlePhaseComplete();
-  }, [handlePhaseComplete]);
+    dispatch({ type: "SKIP", config: configRef.current });
+  }, []);
 
   const reset = useCallback(() => {
-    setIsRunning(false);
-    setPhase("idle");
-    setSecondsRemaining(configRef.current.workMinutes * 60);
-    setTotalSeconds(configRef.current.workMinutes * 60);
-    setCompletedSessions(0);
-    setTotalWorkSeconds(0);
+    dispatch({ type: "RESET", config: configRef.current });
   }, []);
 
   return {
-    state: {
-      phase,
-      secondsRemaining,
-      totalSeconds,
-      isRunning,
-      completedSessions,
-      totalWorkSeconds,
-    } satisfies PomodoroState,
+    state,
     start,
     pause,
     skip,

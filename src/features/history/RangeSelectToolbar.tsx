@@ -51,7 +51,7 @@ export function RangeSelectToolbar({
             className="flex items-center gap-2"
           >
             <input
-              autoFocus
+              ref={(el) => el?.focus()}
               value={rangeSaveName}
               onChange={(e) => setRangeSaveName(e.target.value)}
               placeholder="Collection name..."

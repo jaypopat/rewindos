@@ -1,10 +1,19 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { searchJournal } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import { useDebounce } from "@/hooks/useDebounce";
 import { Search, X } from "lucide-react";
 import { MOOD_EMOJIS } from "./constants";
+
+function renderSnippet(html: string): ReactNode {
+  const parts = html.split(/(<mark>[\s\S]*?<\/mark>)/g);
+  return parts.map((part) => {
+    const match = part.match(/^<mark>([\s\S]*)<\/mark>$/);
+    if (match) return <mark key={`m-${match[1]}`}>{match[1]}</mark>;
+    return part || null;
+  });
+}
 
 interface JournalSearchPanelProps {
   onNavigate: (date: string) => void;
@@ -73,10 +82,9 @@ export function JournalSearchPanel({ onNavigate, onClose }: JournalSearchPanelPr
                     )}
                     <span className="text-[10px] text-text-muted font-mono">{r.word_count}w</span>
                   </div>
-                  <div
-                    className="text-xs text-text-muted line-clamp-2 [&_mark]:bg-accent/30 [&_mark]:text-text-primary"
-                    dangerouslySetInnerHTML={{ __html: r.snippet }}
-                  />
+                  <div className="text-xs text-text-muted line-clamp-2 [&_mark]:bg-accent/30 [&_mark]:text-text-primary">
+                    {renderSnippet(r.snippet)}
+                  </div>
                 </button>
               ))}
             </div>

@@ -378,14 +378,14 @@ async fn run_daemon() -> anyhow::Result<()> {
     // Detect desktop environment and session type
     let desktop = detect::detect_desktop();
     let session = detect::detect_session();
-    info!(desktop = ?desktop, session = ?session, "detected environment");
+    detect::log_environment_diagnostic(&desktop, &session);
 
     // Create window info provider
     let (window_info, kwin_window_info) =
         detect::create_window_info_provider(&desktop, &session, &dbus_conn).await;
 
     // Create capture backend
-    let capture_backend = detect::create_capture_backend(&desktop, &session, &dbus_conn)?;
+    let capture_backend = detect::create_capture_backend(&desktop, &session, &dbus_conn).await?;
     let capture_backend_name = capture_backend.name().to_string();
 
     // Start the capture pipeline

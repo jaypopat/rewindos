@@ -29,7 +29,7 @@ export function ExportDialog({ onClose }: ExportDialogProps) {
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={onClose} onKeyDown={(e) => { if (e.key === "Escape") onClose(); }} role="dialog" aria-modal="true" tabIndex={-1}>
       <div
         className="bg-surface border border-border/50 rounded-xl shadow-xl w-[480px] max-h-[80vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
@@ -44,10 +44,11 @@ export function ExportDialog({ onClose }: ExportDialogProps) {
         <div className="px-5 py-4 space-y-4">
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="text-[10px] text-text-muted font-mono uppercase tracking-wider">
+              <label htmlFor="export-start-date" className="text-[10px] text-text-muted font-mono uppercase tracking-wider">
                 From
               </label>
               <input
+                id="export-start-date"
                 type="date"
                 value={startDate}
                 onChange={(e) => setStartDate(e.target.value)}
@@ -55,10 +56,11 @@ export function ExportDialog({ onClose }: ExportDialogProps) {
               />
             </div>
             <div className="flex-1">
-              <label className="text-[10px] text-text-muted font-mono uppercase tracking-wider">
+              <label htmlFor="export-end-date" className="text-[10px] text-text-muted font-mono uppercase tracking-wider">
                 To
               </label>
               <input
+                id="export-end-date"
                 type="date"
                 value={endDate}
                 onChange={(e) => setEndDate(e.target.value)}

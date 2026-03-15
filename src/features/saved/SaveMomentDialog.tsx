@@ -63,7 +63,7 @@ export function SaveMomentDialog({ onClose }: SaveMomentDialogProps) {
   });
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={onClose} onKeyDown={(e) => { if (e.key === "Escape") onClose(); }} role="dialog" aria-modal="true" tabIndex={-1}>
       <div
         className="bg-surface border border-border/50 rounded-xl shadow-xl w-[400px] flex flex-col"
         onClick={(e) => e.stopPropagation()}
@@ -86,10 +86,11 @@ export function SaveMomentDialog({ onClose }: SaveMomentDialogProps) {
           className="px-5 py-4 space-y-4"
         >
           <div>
-            <label className="text-[10px] text-text-muted font-mono uppercase tracking-wider">
+            <label htmlFor="moment-name" className="text-[10px] text-text-muted font-mono uppercase tracking-wider">
               Name
             </label>
             <input
+              id="moment-name"
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
@@ -99,10 +100,11 @@ export function SaveMomentDialog({ onClose }: SaveMomentDialogProps) {
           </div>
 
           <div>
-            <label className="text-[10px] text-text-muted font-mono uppercase tracking-wider">
+            <label htmlFor="moment-date" className="text-[10px] text-text-muted font-mono uppercase tracking-wider">
               Date
             </label>
             <input
+              id="moment-date"
               type="date"
               value={date}
               onChange={(e) => setDate(e.target.value)}
@@ -112,10 +114,11 @@ export function SaveMomentDialog({ onClose }: SaveMomentDialogProps) {
 
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="text-[10px] text-text-muted font-mono uppercase tracking-wider">
+              <label htmlFor="moment-start-time" className="text-[10px] text-text-muted font-mono uppercase tracking-wider">
                 Start time
               </label>
               <input
+                id="moment-start-time"
                 type="time"
                 value={startTime}
                 onChange={(e) => setStartTime(e.target.value)}
@@ -123,10 +126,11 @@ export function SaveMomentDialog({ onClose }: SaveMomentDialogProps) {
               />
             </div>
             <div className="flex-1">
-              <label className="text-[10px] text-text-muted font-mono uppercase tracking-wider">
+              <label htmlFor="moment-end-time" className="text-[10px] text-text-muted font-mono uppercase tracking-wider">
                 End time
               </label>
               <input
+                id="moment-end-time"
                 type="time"
                 value={endTime}
                 onChange={(e) => setEndTime(e.target.value)}

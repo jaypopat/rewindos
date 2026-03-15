@@ -2,6 +2,7 @@ import { useState, useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { deleteScreenshotsInRange } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
+import { Play } from "lucide-react";
 import { HourGroupRow } from "./HourGroup";
 import { RangeSelectToolbar } from "./RangeSelectToolbar";
 import type { DayGroup, HourGroup } from "./history-utils";
@@ -25,6 +26,7 @@ interface TimelineModeProps {
   clearRange: () => void;
   exitRangeSelect: () => void;
   onSelectScreenshot?: (id: number, siblingIds?: number[]) => void;
+  onRewindToRange?: (start: number, end: number) => void;
   start: number;
   end: number;
 }
@@ -48,6 +50,7 @@ export function TimelineMode({
   clearRange,
   exitRangeSelect,
   onSelectScreenshot,
+  onRewindToRange,
   start,
   end,
 }: TimelineModeProps) {
@@ -163,6 +166,18 @@ export function TimelineMode({
               <span className="text-xs text-text-muted">
                 {day.totalEntries} capture{day.totalEntries !== 1 ? "s" : ""} across {day.hours.length} hour{day.hours.length !== 1 ? "s" : ""}
               </span>
+              {onRewindToRange && (
+                <button
+                  onClick={() => {
+                    const dayStart = Math.floor(new Date(day.date + "T00:00:00").getTime() / 1000);
+                    onRewindToRange(dayStart, dayStart + 86400);
+                  }}
+                  className="p-1 text-text-muted hover:text-accent transition-colors rounded-md hover:bg-accent/10"
+                  title={`Rewind ${day.label}`}
+                >
+                  <Play className="size-3.5" />
+                </button>
+              )}
               <div className="flex-1 h-px bg-border/30" />
             </div>
 
