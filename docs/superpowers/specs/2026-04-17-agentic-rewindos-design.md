@@ -68,7 +68,7 @@ Stdio (standard MCP transport for Claude Code). The daemon binary acts as the MC
 - New module: `crates/rewindos-daemon/src/mcp.rs`
 - Uses the `rmcp` crate (Rust MCP SDK) for protocol handling
 - Each tool is a thin wrapper around existing `Database` methods in `db.rs`
-- `search_screenshots` uses the existing `hybrid_search` (FTS5 + sqlite-vec RRF fusion) when Ollama is available, falls back to FTS-only
+- `search_screenshots` uses the existing `hybrid_search` (FTS5 + sqlite-vec RRF fusion) when Ollama is reachable (the MCP process connects to Ollama over HTTP to embed the query, same as the daemon does), falls back to FTS-only
 - Daemon entry point gets a new flag: `rewindos-daemon --mcp` starts a **separate process** in MCP server mode (stdio transport, no PipeWire capture, no D-Bus server). This is spawned by Claude Code, not the running daemon. It opens its own read-only SQLite connection — WAL mode allows concurrent readers alongside the capture pipeline.
 
 ### Registration
@@ -103,15 +103,14 @@ Route Ask view queries through Claude Code when available, with cleaner streamin
 
 ### Claude Code chat path
 
-When Claude Code is detected:
+When Claude Code is detected (and MCP server is registered via one-click setup or manual config):
 
 1. User submits query in Ask view
 2. Tauri command spawns `claude` CLI as a subprocess:
    ```
-   claude -p "{user_query}" \
-     --mcp-config '{"rewindos": {"command": "rewindos-daemon", "args": ["--mcp"]}}' \
-     --output-format stream-json
+   claude -p "{user_query}" --output-format stream-json
    ```
+   The MCP server is already registered in Claude Code's settings, so `claude` automatically has access to the `rewindos` tools — no inline config needed per invocation.
 3. Stream stdout line-by-line back to the frontend via Tauri events
 4. Claude Code uses MCP tools to search, iterate, refine — multi-turn retrieval happens automatically
 5. Screenshot references in the response (`[REF:42]`) are parsed and made clickable in the UI (already supported)
@@ -146,7 +145,9 @@ Push-to-talk voice interaction. Hold hotkey, speak, release, get a spoken + visu
 
 ### Hotkey
 
-Default: `Ctrl+Shift+V` (V for voice). Configurable in settings. Registered as a global hotkey via the same mechanism as the existing `Ctrl+Shift+Space`.
+Default: `Ctrl+Shift+V` (V for voice). Configurable in settings. 
+
+**Note:** The existing `Ctrl+Shift+Space` hotkey is handled by the Tauri frontend (`useGlobalKeyboard.ts`), not the daemon. Wayland has no universal global hotkey mechanism for background processes. For v1, the voice hotkey follows the same pattern: Tauri app captures the keypress and signals the daemon to start/stop mic capture via D-Bus (`com.rewindos.Daemon.StartVoiceCapture` / `StopVoiceCapture`). This means voice requires the Tauri app to be running (can be minimized to tray).
 
 ### Speech-to-Text
 
