@@ -38,7 +38,7 @@ Make RewindOS intelligent by exposing its data to Claude Code via MCP, adding vo
          │                          ▼
 ┌─────────────────────────────────────────────────┐
 │              Claude Code (external)              │
-│  Invoked via CLI: claude -p "..." --mcp-server  │
+│  Invoked via CLI: claude -p "..." (MCP in config)│
 │  Multi-turn retrieval, reasoning, action         │
 └─────────────────────────────────────────────────┘
 ```
