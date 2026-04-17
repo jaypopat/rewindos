@@ -4,9 +4,45 @@
 
 **Goal:** Expose RewindOS data to Claude Code via an MCP server, and route the in-app Ask view through the `claude` CLI when available, giving users multi-turn agentic retrieval over their screen history.
 
-**Architecture:** The `rewindos-daemon` binary gains an `--mcp` mode that starts a stdio MCP server (separate process, read-only DB). Claude Code spawns it on demand when a tool is called. The Tauri app detects `claude` on PATH and, when present, routes Ask queries to `claude -p "..." --output-format stream-json` instead of Ollama. A unified `ask-stream` event replaces the three-event (`ask-token`/`ask-done`/`ask-error`) protocol on the Claude path.
+**Architecture:** The `rewindos-daemon` binary gains an `--mcp` mode that starts a stdio MCP server. Claude Code spawns it on demand. For the UI chat, responsibilities are split: **Rust** handles DB queries (`build_chat_context`) and Claude Code subprocess spawning (`ask_claude`, blocking); **the client** handles Ollama HTTP streaming directly via `fetch` + `ReadableStream` + `AbortController`, and React state holds session history. No Tauri events for chat — the old `ask-token`/`ask-done`/`ask-error` plumbing is removed.
 
-**Tech Stack:** Rust (`rmcp` crate for MCP server), `rusqlite` (existing), Tauri v2 (`Command::new` for subprocess), React 19 + TanStack Query (frontend).
+**Tech Stack:** Rust (`rmcp` crate for MCP server, `tokio::process::Command` for Claude spawn), `rusqlite` (existing), React 19 + native `fetch` streaming (frontend), Tauri v2 (`invoke` only, no event plumbing for chat).
+
+---
+
+## Architectural Principle
+
+Tauri commands are for things that **need** native access: DB queries, subprocess spawning, filesystem, D-Bus. HTTP calls to localhost (Ollama at `:11434`) don't need native access — the browser can do them directly. This split removes ~500 lines of IPC plumbing (event listeners, mutex-locked session maps, watch-channel cancellation, NDJSON parsers in Rust).
+
+```
+┌─────────────────────────────────────────────────────┐
+│  Frontend (React/TS)                                 │
+│                                                      │
+│  Ask view:                                           │
+│    - invoke("build_chat_context", { query })        │
+│      → { context, references }                       │
+│    - If Claude: invoke("ask_claude", { prompt })    │
+│      → String (full response)                        │
+│    - If Ollama: fetch to :11434, stream tokens      │
+│      natively via ReadableStream + AbortController   │
+│    - History: React useState                         │
+└─────────────────────────────────────────────────────┘
+                    │ invoke()
+                    ▼
+┌─────────────────────────────────────────────────────┐
+│  Tauri (Rust)                                        │
+│                                                      │
+│  build_chat_context(query) → { context, refs }      │
+│  ask_claude(prompt, session_id) → String            │
+│  ask_claude_cancel(session_id) → ()                 │
+│  claude_detect() / claude_register_mcp()            │
+└─────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────┐
+│  rewindos-daemon --mcp (spawned by Claude Code)     │
+│    MCP stdio server with 5 tools                    │
+└─────────────────────────────────────────────────────┘
+```
 
 ---
 
@@ -18,7 +54,9 @@
 |---|---|
 | `crates/rewindos-core/src/mcp.rs` | MCP tool implementations — thin functions over `Database` that return JSON-serializable structs. Pure, testable. |
 | `crates/rewindos-daemon/src/mcp_server.rs` | MCP stdio server — wires the tools from `mcp.rs` into `rmcp`'s protocol handler. |
-| `src-tauri/src/claude_code.rs` | Claude Code subprocess orchestration — detects `claude` on PATH, spawns with streaming, parses `stream-json` output, emits Tauri events. |
+| `src-tauri/src/claude_code.rs` | Claude Code CLI helpers — `detect`, `register_mcp`, `ask_claude` (simple blocking spawn). |
+| `src-tauri/src/chat_context.rs` | Chat context assembly — wraps the existing intent classifier and DB search logic into a single Tauri command. |
+| `src/lib/ollama-chat.ts` | Client-side Ollama streaming — `chatStream(messages, signal)` using `fetch` + `ReadableStream`. |
 | `src/features/settings/tabs/AITab/ClaudeCodeSection.tsx` | Settings UI section — one-click MCP registration, connection status. |
 
 ### Modified files
@@ -27,19 +65,20 @@
 |---|---|
 | `crates/rewindos-core/Cargo.toml` | Add `rmcp` dependency. |
 | `crates/rewindos-daemon/Cargo.toml` | Add `rmcp` dependency. |
-| `crates/rewindos-daemon/src/main.rs` | Add `Mcp` subcommand that starts MCP server mode instead of the capture pipeline. |
-| `src-tauri/src/lib.rs` | Add `claude_detect`, `claude_register_mcp` commands; refactor `ask` to route to Claude Code when available; emit unified `ask-stream` events on the Claude path. |
-| `src-tauri/Cargo.toml` | Add `which = "7"` dependency for PATH detection. |
-| `src/lib/api.ts` | Add `claudeDetect`, `claudeRegisterMcp` functions and `AskStreamPayload` type. |
-| `src/context/AskContext.tsx` | Listen for unified `ask-stream` event alongside existing ones. |
-| `src/features/ask/AskView.tsx` | Show "claude" or "local" indicator next to the Ollama online dot. |
+| `crates/rewindos-daemon/src/main.rs` | Add `Mcp` subcommand. |
+| `src-tauri/src/lib.rs` | Register new commands, **remove** the old `ask`/`ask_cancel`/`ask_new_session`/`ask_health` commands and their state (`chat_sessions`, `ask_cancel_tokens`). |
+| `src-tauri/Cargo.toml` | Add `which = "7"`. |
+| `src/lib/api.ts` | Add `buildChatContext`, `askClaude`, `askClaudeCancel`, `claudeDetect`, `claudeRegisterMcp`. **Remove** `ask`, `askCancel`, `askHealth`, `askNewSession`. |
+| `src/context/AskContext.tsx` | Rewrite to use client-side streaming for Ollama and `invoke` for Claude. No event listeners. |
+| `src/features/ask/AskView.tsx` | Replace Ollama health from Tauri command with client-side fetch; show "claude" / "local" indicator. |
 | `src/features/settings/tabs/AITab.tsx` | Render `ClaudeCodeSection`. |
+| `src/lib/query-keys.ts` | Add `claudeStatus`, `ollamaHealth`. Remove `askHealth`. |
 
 ### Out of scope (deferred)
 
 - Voice pipeline (separate plan)
 - Proactive features / daily digests (P2)
-- Unifying the local Ollama path to `ask-stream` (keep it on the old event protocol for now — can be cleaned up later)
+- Journal AI summary generation still uses `ask` — leave the old path dead-code free by updating journal to use the new pattern (addressed in Task 14)
 
 ---
 
@@ -65,11 +104,11 @@ rmcp = { version = "0.2", features = ["server", "transport-io"] }
 - [ ] **Step 2: Verify the crate resolves**
 
 Run: `cargo check -p rewindos-core -p rewindos-daemon`
-Expected: Compiles (warnings OK). If `rmcp` version 0.2 doesn't exist, run `cargo search rmcp` and use the latest published version. Feature names (`server`, `transport-io`) may differ by version — check the crate docs and use the equivalent features that provide server-side stdio transport.
+Expected: Compiles. If `rmcp` 0.2 doesn't exist, run `cargo search rmcp` and use the latest published version; feature names may differ — check `cargo doc -p rmcp --open` for the stdio server transport feature.
 
 - [ ] **Step 3: Add `Mcp` subcommand to the daemon CLI**
 
-In `crates/rewindos-daemon/src/main.rs`, extend the `Command` enum (currently around line 29):
+In `crates/rewindos-daemon/src/main.rs`, extend the `Command` enum:
 
 ```rust
 #[derive(Subcommand)]
@@ -91,23 +130,13 @@ enum Command {
 }
 ```
 
-And extend the match in `main()`:
+Extend the match in `main()`:
 
 ```rust
-match cli.command.unwrap_or(Command::Run) {
-    Command::Run => run_daemon().await,
-    Command::Pause => dbus_client_call("Pause").await,
-    Command::Resume => dbus_client_call("Resume").await,
-    Command::Status => dbus_client_status().await,
-    Command::Backfill { batch_size } => run_backfill(batch_size).await,
-    Command::BackfillOcr { batch_size } => run_backfill_ocr(batch_size).await,
-    Command::Recompress { quality, max_width, thumb_width, dry_run } =>
-        run_recompress(quality, max_width, thumb_width, dry_run).await,
-    Command::Mcp => run_mcp_server().await,
-}
+Command::Mcp => run_mcp_server().await,
 ```
 
-Add a stub function at the end of `main.rs`:
+Add a stub:
 
 ```rust
 async fn run_mcp_server() -> anyhow::Result<()> {
@@ -115,10 +144,10 @@ async fn run_mcp_server() -> anyhow::Result<()> {
 }
 ```
 
-- [ ] **Step 4: Verify the CLI accepts the new subcommand**
+- [ ] **Step 4: Verify**
 
 Run: `cargo run -p rewindos-daemon -- mcp`
-Expected: Prints the bail error "MCP server not yet implemented" and exits non-zero.
+Expected: Prints "MCP server not yet implemented" and exits non-zero.
 
 - [ ] **Step 5: Commit**
 
@@ -133,19 +162,13 @@ git commit -m "scaffold MCP subcommand and add rmcp dependency"
 
 **Files:**
 - Create: `crates/rewindos-core/src/mcp.rs`
-- Modify: `crates/rewindos-core/src/lib.rs` (export new module)
-
-The tool functions live in `rewindos-core` because they wrap `Database` methods. The daemon's `mcp_server.rs` will just register them with `rmcp`.
+- Modify: `crates/rewindos-core/src/lib.rs`
 
 - [ ] **Step 1: Export the module**
 
-In `crates/rewindos-core/src/lib.rs`, add:
-```rust
-pub mod mcp;
-```
-(If `lib.rs` uses `mod foo; pub use foo::*;` style for other modules, match that pattern instead.)
+In `crates/rewindos-core/src/lib.rs`, add `pub mod mcp;` (matching the style of other modules in that file).
 
-- [ ] **Step 2: Write the failing test**
+- [ ] **Step 2: Write the implementation + failing tests**
 
 Create `crates/rewindos-core/src/mcp.rs`:
 
@@ -196,16 +219,17 @@ pub fn search_screenshots(
             timestamp: r.timestamp,
             app_name: r.app_name,
             window_title: r.window_title,
-            ocr_snippet: {
-                let s = r.matched_text;
-                if s.chars().count() > 400 {
-                    s.chars().take(400).collect::<String>() + "..."
-                } else {
-                    s
-                }
-            },
+            ocr_snippet: truncate_chars(&r.matched_text, 400),
         })
         .collect())
+}
+
+fn truncate_chars(s: &str, max: usize) -> String {
+    if s.chars().count() > max {
+        s.chars().take(max).collect::<String>() + "..."
+    } else {
+        s.to_string()
+    }
 }
 
 #[cfg(test)]
@@ -238,21 +262,13 @@ mod tests {
         let id = seed_screenshot(&db, "firefox", "GitHub", "rust async patterns", 1_700_000_000);
         seed_screenshot(&db, "code", "main.py", "def foo(): pass", 1_700_000_100);
 
-        let results = search_screenshots(
-            &db,
-            SearchScreenshotsInput {
-                query: "rust".to_string(),
-                start_time: None,
-                end_time: None,
-                app_filter: None,
-                limit: 10,
-            },
-        )
-        .unwrap();
+        let results = search_screenshots(&db, SearchScreenshotsInput {
+            query: "rust".to_string(),
+            start_time: None, end_time: None, app_filter: None, limit: 10,
+        }).unwrap();
 
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].id, id);
-        assert_eq!(results[0].app_name.as_deref(), Some("firefox"));
         assert!(results[0].ocr_snippet.contains("rust"));
     }
 
@@ -262,17 +278,11 @@ mod tests {
         seed_screenshot(&db, "firefox", "A", "common word", 1_700_000_000);
         let id = seed_screenshot(&db, "code", "B", "common word", 1_700_000_100);
 
-        let results = search_screenshots(
-            &db,
-            SearchScreenshotsInput {
-                query: "common".to_string(),
-                start_time: None,
-                end_time: None,
-                app_filter: Some("code".to_string()),
-                limit: 10,
-            },
-        )
-        .unwrap();
+        let results = search_screenshots(&db, SearchScreenshotsInput {
+            query: "common".to_string(),
+            start_time: None, end_time: None,
+            app_filter: Some("code".to_string()), limit: 10,
+        }).unwrap();
 
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].id, id);
@@ -280,16 +290,16 @@ mod tests {
 }
 ```
 
-- [ ] **Step 3: Run the tests and verify they pass**
+- [ ] **Step 3: Run tests**
 
-Run: `cargo test -p rewindos-core mcp::tests -- --nocapture`
-Expected: Both tests pass. Some fields in `NewScreenshot` may not match the exact struct — check `crates/rewindos-core/src/schema.rs` and fix the field names. If `insert_screenshot` has a different signature, adjust. The test intent (seed → search → assert) stays the same.
+Run: `cargo test -p rewindos-core mcp::tests`
+Expected: Both tests pass. If `NewScreenshot` fields differ, fix them by consulting `crates/rewindos-core/src/schema.rs`.
 
 - [ ] **Step 4: Commit**
 
 ```bash
 git add crates/rewindos-core/src/mcp.rs crates/rewindos-core/src/lib.rs
-git commit -m "add search_screenshots MCP tool implementation"
+git commit -m "add search_screenshots MCP tool"
 ```
 
 ---
@@ -299,7 +309,7 @@ git commit -m "add search_screenshots MCP tool implementation"
 **Files:**
 - Modify: `crates/rewindos-core/src/mcp.rs`
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Add implementation and tests**
 
 Append to `crates/rewindos-core/src/mcp.rs`:
 
@@ -336,23 +346,14 @@ pub fn get_timeline(
             None => true,
         })
         .map(|(id, app_name, window_title, timestamp, _file_path, ocr_text)| TimelineEntry {
-            id,
-            timestamp,
-            app_name,
-            window_title,
-            ocr_snippet: {
-                if ocr_text.chars().count() > 300 {
-                    ocr_text.chars().take(300).collect::<String>() + "..."
-                } else {
-                    ocr_text
-                }
-            },
+            id, timestamp, app_name, window_title,
+            ocr_snippet: truncate_chars(&ocr_text, 300),
         })
         .collect())
 }
 ```
 
-Add to the `tests` module:
+In the `tests` module, add:
 
 ```rust
     #[test]
@@ -362,16 +363,10 @@ Add to the `tests` module:
         seed_screenshot(&db, "code", "B", "middle", 1_700_000_500);
         seed_screenshot(&db, "slack", "C", "late", 1_700_001_000);
 
-        let entries = get_timeline(
-            &db,
-            GetTimelineInput {
-                start_time: 1_700_000_000,
-                end_time: 1_700_001_500,
-                app_filter: None,
-                limit: 10,
-            },
-        )
-        .unwrap();
+        let entries = get_timeline(&db, GetTimelineInput {
+            start_time: 1_700_000_000, end_time: 1_700_001_500,
+            app_filter: None, limit: 10,
+        }).unwrap();
 
         assert_eq!(entries.len(), 3);
     }
@@ -382,23 +377,17 @@ Add to the `tests` module:
         seed_screenshot(&db, "firefox", "A", "abc", 1_700_000_000);
         seed_screenshot(&db, "code", "B", "xyz", 1_700_000_500);
 
-        let entries = get_timeline(
-            &db,
-            GetTimelineInput {
-                start_time: 0,
-                end_time: 2_000_000_000,
-                app_filter: Some("code".to_string()),
-                limit: 10,
-            },
-        )
-        .unwrap();
+        let entries = get_timeline(&db, GetTimelineInput {
+            start_time: 0, end_time: 2_000_000_000,
+            app_filter: Some("code".to_string()), limit: 10,
+        }).unwrap();
 
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].app_name.as_deref(), Some("code"));
     }
 ```
 
-- [ ] **Step 2: Run the tests and verify they pass**
+- [ ] **Step 2: Run tests**
 
 Run: `cargo test -p rewindos-core mcp::tests`
 Expected: 4 tests pass.
@@ -417,7 +406,7 @@ git commit -m "add get_timeline MCP tool"
 **Files:**
 - Modify: `crates/rewindos-core/src/mcp.rs`
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Add implementation and test**
 
 Append to `crates/rewindos-core/src/mcp.rs`:
 
@@ -453,7 +442,7 @@ pub fn get_app_usage(
 }
 ```
 
-Add to the tests module:
+In the `tests` module, add:
 
 ```rust
     #[test]
@@ -463,15 +452,9 @@ Add to the tests module:
         seed_screenshot(&db, "firefox", "B", "b", 1_700_000_030);
         seed_screenshot(&db, "code", "C", "c", 1_700_000_060);
 
-        let usage = get_app_usage(
-            &db,
-            GetAppUsageInput {
-                start_time: 0,
-                end_time: 2_000_000_000,
-            },
-            5, // 5-second capture interval
-        )
-        .unwrap();
+        let usage = get_app_usage(&db, GetAppUsageInput {
+            start_time: 0, end_time: 2_000_000_000,
+        }, 5).unwrap();
 
         let firefox = usage.iter().find(|u| u.app_name == "firefox").unwrap();
         assert_eq!(firefox.screenshot_count, 2);
@@ -479,7 +462,7 @@ Add to the tests module:
     }
 ```
 
-- [ ] **Step 2: Run the tests and verify they pass**
+- [ ] **Step 2: Run tests**
 
 Run: `cargo test -p rewindos-core mcp::tests`
 Expected: 5 tests pass.
@@ -498,7 +481,7 @@ git commit -m "add get_app_usage MCP tool"
 **Files:**
 - Modify: `crates/rewindos-core/src/mcp.rs`
 
-- [ ] **Step 1: Write the failing tests and implementations**
+- [ ] **Step 1: Add implementations and tests**
 
 Append to `crates/rewindos-core/src/mcp.rs`:
 
@@ -550,33 +533,22 @@ pub fn get_recent_activity(
     now: i64,
 ) -> crate::error::Result<Vec<TimelineEntry>> {
     let start = now - input.minutes * 60;
-    get_timeline(
-        db,
-        GetTimelineInput {
-            start_time: start,
-            end_time: now,
-            app_filter: None,
-            limit: 100,
-        },
-    )
+    get_timeline(db, GetTimelineInput {
+        start_time: start, end_time: now,
+        app_filter: None, limit: 100,
+    })
 }
 ```
 
-Add to tests module:
+In the `tests` module, add:
 
 ```rust
     #[test]
     fn screenshot_detail_returns_full_ocr() {
         let db = Database::open_in_memory().unwrap();
         let id = seed_screenshot(&db, "firefox", "title", "the full OCR body", 1_700_000_000);
-
-        let detail = get_screenshot_detail(
-            &db,
-            GetScreenshotDetailInput { screenshot_id: id },
-        )
-        .unwrap()
-        .unwrap();
-
+        let detail = get_screenshot_detail(&db, GetScreenshotDetailInput { screenshot_id: id })
+            .unwrap().unwrap();
         assert_eq!(detail.id, id);
         assert_eq!(detail.full_ocr_text, "the full OCR body");
     }
@@ -584,11 +556,7 @@ Add to tests module:
     #[test]
     fn screenshot_detail_returns_none_for_missing() {
         let db = Database::open_in_memory().unwrap();
-        let detail = get_screenshot_detail(
-            &db,
-            GetScreenshotDetailInput { screenshot_id: 9999 },
-        )
-        .unwrap();
+        let detail = get_screenshot_detail(&db, GetScreenshotDetailInput { screenshot_id: 9999 }).unwrap();
         assert!(detail.is_none());
     }
 
@@ -596,22 +564,15 @@ Add to tests module:
     fn recent_activity_filters_by_time() {
         let db = Database::open_in_memory().unwrap();
         let now = 1_700_000_000;
-        seed_screenshot(&db, "firefox", "A", "old", now - 3600); // 1hr ago
-        seed_screenshot(&db, "code", "B", "new", now - 300);     // 5min ago
-
-        let entries = get_recent_activity(
-            &db,
-            GetRecentActivityInput { minutes: 30 },
-            now,
-        )
-        .unwrap();
-
+        seed_screenshot(&db, "firefox", "A", "old", now - 3600);
+        seed_screenshot(&db, "code", "B", "new", now - 300);
+        let entries = get_recent_activity(&db, GetRecentActivityInput { minutes: 30 }, now).unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].ocr_snippet.trim(), "new");
     }
 ```
 
-- [ ] **Step 2: Run the tests and verify they pass**
+- [ ] **Step 2: Run tests**
 
 Run: `cargo test -p rewindos-core mcp::tests`
 Expected: 8 tests pass.
@@ -625,22 +586,17 @@ git commit -m "add get_screenshot_detail and get_recent_activity MCP tools"
 
 ---
 
-## Task 6: Wire MCP tools into an rmcp stdio server
+## Task 6: Wire MCP tools into rmcp stdio server
 
 **Files:**
 - Create: `crates/rewindos-daemon/src/mcp_server.rs`
 - Modify: `crates/rewindos-daemon/src/main.rs`
 
-**Note on rmcp API:** The exact API (trait names, macro names, tool registration patterns) depends on which version of `rmcp` resolved in Task 1. Check `cargo doc -p rmcp --open` for the actual API. The code below uses the pattern from `rmcp 0.2.x` — if the resolved version differs, adapt. The *contract* to preserve:
-- stdio transport (server reads from stdin, writes to stdout)
-- 5 tools registered: `search_screenshots`, `get_timeline`, `get_app_usage`, `get_screenshot_detail`, `get_recent_activity`
-- Each tool accepts JSON matching the input structs from `rewindos_core::mcp` and returns JSON of the output structs
-- The server opens the database read-only and connects to Ollama only if reachable (for `search_screenshots` hybrid mode)
+**Note:** The exact `rmcp` API depends on the version resolved in Task 1. The contract to preserve: stdio transport, 5 tools registered, each accepting JSON matching `rewindos_core::mcp` input structs and returning JSON of the output structs.
 
 - [ ] **Step 1: Add the module**
 
-In `crates/rewindos-daemon/src/main.rs`, at the top with the other `mod` declarations:
-
+In `crates/rewindos-daemon/src/main.rs`, near the top with the other `mod` declarations, add:
 ```rust
 mod mcp_server;
 ```
@@ -660,7 +616,7 @@ use rewindos_core::mcp::{
     SearchScreenshotsInput,
 };
 
-// rmcp imports — adapt to the resolved version. These names match rmcp 0.2.x.
+// rmcp imports — adapt to the resolved version. These match rmcp 0.2.x.
 use rmcp::{
     model::{CallToolResult, Content, Tool},
     service::{RequestContext, RoleServer, Server, ServerHandler},
@@ -677,14 +633,10 @@ pub struct RewindosMcpServer {
 
 impl RewindosMcpServer {
     pub fn new(db: Database, capture_interval_seconds: u32) -> Self {
-        Self {
-            db: Arc::new(db),
-            capture_interval_seconds,
-        }
+        Self { db: Arc::new(db), capture_interval_seconds }
     }
 
     fn tool_definitions() -> Vec<Tool> {
-        // Each Tool wraps a name + JSON Schema for its input. See rmcp::model::Tool docs.
         vec![
             Tool::new(
                 "search_screenshots",
@@ -750,38 +702,29 @@ impl RewindosMcpServer {
     fn dispatch_tool(&self, name: &str, args: Value) -> Result<Value, String> {
         match name {
             "search_screenshots" => {
-                let input: SearchScreenshotsInput =
-                    serde_json::from_value(args).map_err(|e| e.to_string())?;
-                let out =
-                    search_screenshots(&self.db, input).map_err(|e| e.to_string())?;
+                let input: SearchScreenshotsInput = serde_json::from_value(args).map_err(|e| e.to_string())?;
+                let out = search_screenshots(&self.db, input).map_err(|e| e.to_string())?;
                 serde_json::to_value(out).map_err(|e| e.to_string())
             }
             "get_timeline" => {
-                let input: GetTimelineInput =
-                    serde_json::from_value(args).map_err(|e| e.to_string())?;
+                let input: GetTimelineInput = serde_json::from_value(args).map_err(|e| e.to_string())?;
                 let out = get_timeline(&self.db, input).map_err(|e| e.to_string())?;
                 serde_json::to_value(out).map_err(|e| e.to_string())
             }
             "get_app_usage" => {
-                let input: GetAppUsageInput =
-                    serde_json::from_value(args).map_err(|e| e.to_string())?;
-                let out = get_app_usage(&self.db, input, self.capture_interval_seconds)
-                    .map_err(|e| e.to_string())?;
+                let input: GetAppUsageInput = serde_json::from_value(args).map_err(|e| e.to_string())?;
+                let out = get_app_usage(&self.db, input, self.capture_interval_seconds).map_err(|e| e.to_string())?;
                 serde_json::to_value(out).map_err(|e| e.to_string())
             }
             "get_screenshot_detail" => {
-                let input: GetScreenshotDetailInput =
-                    serde_json::from_value(args).map_err(|e| e.to_string())?;
-                let out =
-                    get_screenshot_detail(&self.db, input).map_err(|e| e.to_string())?;
+                let input: GetScreenshotDetailInput = serde_json::from_value(args).map_err(|e| e.to_string())?;
+                let out = get_screenshot_detail(&self.db, input).map_err(|e| e.to_string())?;
                 serde_json::to_value(out).map_err(|e| e.to_string())
             }
             "get_recent_activity" => {
-                let input: GetRecentActivityInput =
-                    serde_json::from_value(args).map_err(|e| e.to_string())?;
+                let input: GetRecentActivityInput = serde_json::from_value(args).map_err(|e| e.to_string())?;
                 let now = chrono::Local::now().timestamp();
-                let out = get_recent_activity(&self.db, input, now)
-                    .map_err(|e| e.to_string())?;
+                let out = get_recent_activity(&self.db, input, now).map_err(|e| e.to_string())?;
                 serde_json::to_value(out).map_err(|e| e.to_string())
             }
             _ => Err(format!("unknown tool: {name}")),
@@ -789,13 +732,8 @@ impl RewindosMcpServer {
     }
 }
 
-// Implement ServerHandler per rmcp's trait. The exact method signatures may differ —
-// check `cargo doc -p rmcp` for the resolved version.
 impl ServerHandler for RewindosMcpServer {
-    async fn list_tools(
-        &self,
-        _ctx: RequestContext<RoleServer>,
-    ) -> Result<Vec<Tool>, McpError> {
+    async fn list_tools(&self, _ctx: RequestContext<RoleServer>) -> Result<Vec<Tool>, McpError> {
         Ok(Self::tool_definitions())
     }
 
@@ -816,10 +754,8 @@ impl ServerHandler for RewindosMcpServer {
 }
 
 pub async fn run(config: AppConfig) -> anyhow::Result<()> {
-    // Open DB read-only. The running daemon holds a writer in WAL mode; concurrent readers are fine.
     let db_path = config.db_path()?;
     let db = Database::open(&db_path)?;
-
     let server = RewindosMcpServer::new(db, config.capture.interval_seconds);
     let (stdin, stdout) = stdio();
     Server::new(server).serve(stdin, stdout).await?;
@@ -827,33 +763,29 @@ pub async fn run(config: AppConfig) -> anyhow::Result<()> {
 }
 ```
 
-- [ ] **Step 3: Wire the run function into the CLI**
+- [ ] **Step 3: Wire into the CLI**
 
-In `crates/rewindos-daemon/src/main.rs`, replace the stub `run_mcp_server`:
+In `crates/rewindos-daemon/src/main.rs`, replace `run_mcp_server`:
 
 ```rust
 async fn run_mcp_server() -> anyhow::Result<()> {
-    // Deliberately do NOT call init_logging() — it would write tracing to stdout/stderr
-    // and corrupt the MCP stdio protocol. If diagnostics are needed, write to a file.
+    // Do NOT call init_logging() — it would corrupt the stdio MCP protocol.
     let config = AppConfig::load()?;
     mcp_server::run(config).await
 }
 ```
 
-- [ ] **Step 4: Verify it compiles**
+- [ ] **Step 4: Verify compilation**
 
 Run: `cargo check -p rewindos-daemon`
-Expected: Compiles. If rmcp's API names don't match (e.g. `ServerHandler` is actually `ToolsServer`, `stdio()` is `io::stdio()`, etc.), fix them. The *shape* — a server struct that registers tools and handles `call_tool` — is the contract.
+Expected: Compiles. If rmcp's API names don't match, adapt — the shape (struct implementing a server trait + tool dispatcher) is what matters.
 
 - [ ] **Step 5: Manual smoke test**
-
-Run the binary in MCP mode and send a simple MCP `initialize` message:
 
 ```bash
 echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"0"}}}' | cargo run -p rewindos-daemon -- mcp
 ```
-
-Expected: A JSON-RPC response on stdout with `serverInfo.name` and capabilities. If this works, the stdio protocol is wired correctly.
+Expected: A JSON-RPC response on stdout with `serverInfo`.
 
 - [ ] **Step 6: Commit**
 
@@ -866,10 +798,9 @@ git commit -m "wire MCP tools into rmcp stdio server"
 
 ## Task 7: End-to-end test with Claude Code
 
-**Files:**
-- No code changes — manual verification
+**Files:** None — manual verification.
 
-- [ ] **Step 1: Register the MCP server in Claude Code**
+- [ ] **Step 1: Register MCP server in Claude Code settings**
 
 Add to `~/.claude/settings.json` under `mcpServers`:
 
@@ -884,23 +815,23 @@ Add to `~/.claude/settings.json` under `mcpServers`:
 }
 ```
 
-Get the absolute path with: `ls $PWD/target/debug/rewindos-daemon`
+Use: `realpath target/debug/rewindos-daemon`
 
-- [ ] **Step 2: Verify Claude Code discovers the tools**
+- [ ] **Step 2: Verify tool discovery**
 
 Run: `claude mcp list`
-Expected: `rewindos` shown with its 5 tools.
+Expected: `rewindos` listed with its 5 tools.
 
-- [ ] **Step 3: Invoke a tool via Claude Code**
+- [ ] **Step 3: Invoke via Claude Code**
 
-Run: `claude -p "Use the rewindos MCP to list recent activity from the last 30 minutes, then summarize"`
-Expected: Claude Code calls `get_recent_activity` and responds with a summary based on real data. If the DB is empty, it should say so.
+Run: `claude -p "Use the rewindos MCP to list activity from the last 30 minutes and summarize"`
+Expected: Claude calls `get_recent_activity` and responds with a real summary (or "no data" if DB is empty).
 
-- [ ] **Step 4: No commit** — this is a verification checkpoint only.
+- [ ] **Step 4: No commit** — verification checkpoint only.
 
 ---
 
-## Task 8: Tauri command to detect Claude Code
+## Task 8: `claude_detect` Tauri command
 
 **Files:**
 - Create: `src-tauri/src/claude_code.rs`
@@ -908,14 +839,14 @@ Expected: Claude Code calls `get_recent_activity` and responds with a summary ba
 - Modify: `src-tauri/Cargo.toml`
 - Modify: `src/lib/api.ts`
 
-- [ ] **Step 1: Add `which` dependency**
+- [ ] **Step 1: Add the `which` dependency**
 
 In `src-tauri/Cargo.toml`, add to `[dependencies]`:
 ```toml
 which = "7"
 ```
 
-- [ ] **Step 2: Create the module skeleton**
+- [ ] **Step 2: Create the module**
 
 Create `src-tauri/src/claude_code.rs`:
 
@@ -941,31 +872,22 @@ pub fn detect() -> ClaudeCodeStatus {
 }
 
 fn is_mcp_registered() -> bool {
-    let Some(home) = dirs::home_dir() else {
-        return false;
-    };
+    let Some(home) = dirs::home_dir() else { return false; };
     let settings_path = home.join(".claude").join("settings.json");
-    let Ok(contents) = std::fs::read_to_string(&settings_path) else {
-        return false;
-    };
-    let Ok(json) = serde_json::from_str::<serde_json::Value>(&contents) else {
-        return false;
-    };
-    json.get("mcpServers")
-        .and_then(|m| m.get("rewindos"))
-        .is_some()
+    let Ok(contents) = std::fs::read_to_string(&settings_path) else { return false; };
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(&contents) else { return false; };
+    json.get("mcpServers").and_then(|m| m.get("rewindos")).is_some()
 }
 ```
 
-- [ ] **Step 3: Declare the module and command**
+- [ ] **Step 3: Register in lib.rs**
 
 In `src-tauri/src/lib.rs`, near the top:
-
 ```rust
 mod claude_code;
 ```
 
-Add the Tauri command (near the other `ask_*` commands around line 649):
+Add the command (alongside the other commands, e.g. after `ask_cancel` around line 683):
 
 ```rust
 #[tauri::command]
@@ -974,15 +896,7 @@ fn claude_detect() -> claude_code::ClaudeCodeStatus {
 }
 ```
 
-Register it in `invoke_handler` (around line 1780):
-
-```rust
-// ... existing commands ...
-ask_new_session,
-ask_health,
-ask_cancel,
-claude_detect,
-```
+In `invoke_handler`, add `claude_detect,` to the list.
 
 - [ ] **Step 4: Expose in the frontend API**
 
@@ -1002,15 +916,11 @@ export async function claudeDetect(): Promise<ClaudeCodeStatus> {
 
 - [ ] **Step 5: Verify**
 
-Run: `cargo check -p rewindos` (the Tauri crate)
-Expected: Compiles.
-
-Start the app: `bun run tauri dev`
-In DevTools console:
+Run `cargo check -p rewindos`, then `bun run tauri dev`. In DevTools:
 ```javascript
 await window.__TAURI__.core.invoke("claude_detect")
 ```
-Expected: `{available: true/false, path: "...", mcp_registered: true/false}`
+Expected: `{available, path, mcp_registered}` object.
 
 - [ ] **Step 6: Commit**
 
@@ -1021,7 +931,7 @@ git commit -m "add claude_detect Tauri command"
 
 ---
 
-## Task 9: One-click MCP registration command
+## Task 9: `claude_register_mcp` Tauri command
 
 **Files:**
 - Modify: `src-tauri/src/claude_code.rs`
@@ -1040,8 +950,7 @@ pub fn register_mcp() -> Result<(), String> {
     let settings_path = settings_dir.join("settings.json");
 
     let mut json: serde_json::Value = if settings_path.exists() {
-        let contents =
-            std::fs::read_to_string(&settings_path).map_err(|e| format!("read: {e}"))?;
+        let contents = std::fs::read_to_string(&settings_path).map_err(|e| format!("read: {e}"))?;
         if contents.trim().is_empty() {
             serde_json::json!({})
         } else {
@@ -1079,7 +988,7 @@ pub fn register_mcp() -> Result<(), String> {
 
 - [ ] **Step 2: Add the Tauri command**
 
-In `src-tauri/src/lib.rs`, next to `claude_detect`:
+In `src-tauri/src/lib.rs`:
 
 ```rust
 #[tauri::command]
@@ -1089,14 +998,9 @@ fn claude_register_mcp() -> Result<claude_code::ClaudeCodeStatus, String> {
 }
 ```
 
-Register it in `invoke_handler`:
+Register `claude_register_mcp,` in `invoke_handler`.
 
-```rust
-claude_detect,
-claude_register_mcp,
-```
-
-- [ ] **Step 3: Expose in the frontend API**
+- [ ] **Step 3: Expose in the frontend**
 
 In `src/lib/api.ts`:
 
@@ -1108,430 +1012,898 @@ export async function claudeRegisterMcp(): Promise<ClaudeCodeStatus> {
 
 - [ ] **Step 4: Manual test**
 
-Start the app. In DevTools:
-```javascript
-await window.__TAURI__.core.invoke("claude_register_mcp")
-```
-Then inspect `~/.claude/settings.json` — it should contain an `mcpServers.rewindos` entry pointing at the daemon binary.
-
-Confirm with: `claude mcp list`
-Expected: `rewindos` listed.
+In DevTools: `await window.__TAURI__.core.invoke("claude_register_mcp")`
+Then inspect `~/.claude/settings.json` — should contain the `mcpServers.rewindos` entry.
+Verify: `claude mcp list` shows `rewindos`.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add src-tauri/src/claude_code.rs src-tauri/src/lib.rs src/lib/api.ts
-git commit -m "add claude_register_mcp command for one-click MCP setup"
+git commit -m "add claude_register_mcp for one-click MCP setup"
 ```
 
 ---
 
-## Task 10: Claude Code chat streaming via subprocess
+## Task 10: `build_chat_context` Tauri command
+
+Moves the existing context-building logic (currently buried inside `src-tauri/src/lib.rs` `ask` command, lines ~711-860) into a focused command. Pure function: `(query) → (context, references)`. The client calls this to get ready-to-use context, then chats with Ollama or Claude.
+
+**Files:**
+- Create: `src-tauri/src/chat_context.rs`
+- Modify: `src-tauri/src/lib.rs`
+- Modify: `src/lib/api.ts`
+
+- [ ] **Step 1: Create the module**
+
+Create `src-tauri/src/chat_context.rs`:
+
+```rust
+use rewindos_core::chat::{
+    ContextAssembler, IntentCategory, IntentClassifier, OllamaChatClient, QueryConfidence,
+    ScreenshotReference,
+};
+use rewindos_core::config::AppConfig;
+use rewindos_core::db::Database;
+use rewindos_core::embedding::OllamaClient as EmbeddingClient;
+use rewindos_core::schema::SearchFilters;
+use serde::Serialize;
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ChatContext {
+    pub context: String,
+    pub references: Vec<ScreenshotReference>,
+    pub intent_category: String,
+}
+
+pub async fn build(
+    db: &std::sync::Mutex<Database>,
+    embedding_client: Option<&EmbeddingClient>,
+    config: &AppConfig,
+    query: &str,
+) -> Result<ChatContext, String> {
+    let chat_client = OllamaChatClient::new(&config.chat);
+
+    // Intent — LLM first, regex fallback
+    let intent = match chat_client.analyze_query(query).await {
+        Ok(i) => i,
+        Err(_) => IntentClassifier::classify(query),
+    };
+
+    let max_context_tokens = config.chat.max_context_tokens;
+
+    let (context, references) = match intent.category {
+        IntentCategory::Recall | IntentCategory::General | IntentCategory::AppSpecific => {
+            let search_query = if intent.search_terms.is_empty() {
+                query.to_string()
+            } else {
+                intent.search_terms.join(" ")
+            };
+
+            let filters = SearchFilters {
+                query: search_query.clone(),
+                start_time: intent.time_range.map(|(s, _)| s),
+                end_time: intent.time_range.map(|(_, e)| e),
+                app_name: intent.app_filter.clone(),
+                limit: 15,
+                offset: 0,
+            };
+
+            // Layer 1: hybrid search if embedding client is available
+            let mut search_response = None;
+            if let Some(embed_client) = embedding_client {
+                let embedding = embed_client.embed(&search_query).await.ok().flatten();
+                if let Some(emb) = embedding {
+                    let db = db.lock().map_err(|e| format!("db lock: {e}"))?;
+                    search_response = db.hybrid_search(&filters, Some(&emb)).ok();
+                }
+            }
+
+            let result_count = search_response.as_ref().map(|r| r.results.len()).unwrap_or(0);
+
+            // Layer 2: FTS5 exact
+            if result_count < 3 {
+                let db = db.lock().map_err(|e| format!("db lock: {e}"))?;
+                if let Ok(r) = db.search(&filters) {
+                    if r.results.len() > result_count {
+                        search_response = Some(r);
+                    }
+                }
+            }
+
+            let result_count = search_response.as_ref().map(|r| r.results.len()).unwrap_or(0);
+
+            // Layer 3: FTS5 OR query
+            if (intent.confidence == QueryConfidence::Low || result_count < 3)
+                && intent.search_terms.len() > 1
+            {
+                let or_filters = SearchFilters {
+                    query: intent.search_terms.join(" OR "),
+                    ..filters.clone()
+                };
+                let db = db.lock().map_err(|e| format!("db lock: {e}"))?;
+                if let Ok(r) = db.search(&or_filters) {
+                    if r.results.len() > result_count {
+                        search_response = Some(r);
+                    }
+                }
+            }
+
+            let has_results = search_response.as_ref().map(|r| !r.results.is_empty()).unwrap_or(false);
+
+            if has_results {
+                let response = search_response.unwrap();
+                let db = db.lock().map_err(|e| format!("db lock: {e}"))?;
+                let results: Vec<_> = response.results.iter().map(|r| {
+                    let ocr = db.get_ocr_text(r.id).unwrap_or(None).unwrap_or_default();
+                    (r.id, r.timestamp, r.app_name.clone(), r.window_title.clone(), r.file_path.clone(), ocr)
+                }).collect();
+                ContextAssembler::from_search_results_budgeted(&results, max_context_tokens)
+            } else {
+                // Layer 4: timeline fallback
+                let now = chrono::Local::now().timestamp();
+                let (start, end) = intent.time_range.unwrap_or((now - 86400, now));
+                let db = db.lock().map_err(|e| format!("db lock: {e}"))?;
+                let sessions = db.get_ocr_sessions_with_ids(start, end, 80).unwrap_or_default();
+                ContextAssembler::from_sessions_with_refs_budgeted(&sessions, max_context_tokens, 20)
+            }
+        }
+        IntentCategory::TimeBased => {
+            let (start, end) = intent.time_range.unwrap_or_else(|| {
+                let now = chrono::Local::now().timestamp();
+                (now - 86400, now)
+            });
+            let db = db.lock().map_err(|e| format!("db lock: {e}"))?;
+            match db.get_ocr_sessions_with_ids(start, end, 80) {
+                Ok(sessions) => ContextAssembler::from_sessions_with_refs_budgeted(&sessions, max_context_tokens, 20),
+                Err(_) => ("No activity data found for this time range.".to_string(), Vec::new()),
+            }
+        }
+        IntentCategory::Productivity => {
+            let (start, end) = intent.time_range.unwrap_or_else(|| {
+                let now = chrono::Local::now().timestamp();
+                (now - 86400, now)
+            });
+            let db = db.lock().map_err(|e| format!("db lock: {e}"))?;
+            let stats = db.get_app_usage_stats(start, Some(end)).unwrap_or_default();
+            let sessions = db.get_ocr_sessions_with_ids(start, end, 80).unwrap_or_default();
+            let secs = config.capture.interval_seconds as f64;
+            let stat_tuples: Vec<_> = stats.iter().map(|s| {
+                (s.app_name.clone(), s.screenshot_count as f64 * secs / 60.0, s.screenshot_count as usize)
+            }).collect();
+            ContextAssembler::from_app_stats(&stat_tuples, &sessions, max_context_tokens)
+        }
+    };
+
+    let intent_category = match intent.category {
+        IntentCategory::Recall => "recall",
+        IntentCategory::TimeBased => "time_based",
+        IntentCategory::Productivity => "productivity",
+        IntentCategory::AppSpecific => "app_specific",
+        IntentCategory::General => "general",
+    }.to_string();
+
+    Ok(ChatContext { context, references, intent_category })
+}
+```
+
+- [ ] **Step 2: Add the command**
+
+In `src-tauri/src/lib.rs`, near the top: `mod chat_context;`
+
+Add the command:
+
+```rust
+#[tauri::command]
+async fn build_chat_context(
+    state: State<'_, AppState>,
+    query: String,
+) -> Result<chat_context::ChatContext, String> {
+    let config = state.config.lock().map_err(|e| format!("config lock: {e}"))?.clone();
+    chat_context::build(&state.db, state.embedding_client.as_ref(), &config, &query).await
+}
+```
+
+Register `build_chat_context,` in `invoke_handler`.
+
+- [ ] **Step 3: Expose in frontend**
+
+In `src/lib/api.ts`:
+
+```typescript
+export interface ChatContext {
+  context: string;
+  references: ScreenshotRef[];
+  intent_category: string;
+}
+
+export async function buildChatContext(query: string): Promise<ChatContext> {
+  return invoke("build_chat_context", { query });
+}
+```
+
+- [ ] **Step 4: Verify**
+
+Run `cargo check -p rewindos`. Start the app. In DevTools:
+```javascript
+await window.__TAURI__.core.invoke("build_chat_context", { query: "test" })
+```
+Expected: `{context: "...", references: [...], intent_category: "..."}`.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src-tauri/src/chat_context.rs src-tauri/src/lib.rs src/lib/api.ts
+git commit -m "add build_chat_context Tauri command"
+```
+
+---
+
+## Task 11: `ask_claude` command (simple blocking spawn)
+
+No streaming, no events. Spawn → wait → return. Cancellation by killing the child.
 
 **Files:**
 - Modify: `src-tauri/src/claude_code.rs`
 - Modify: `src-tauri/src/lib.rs`
+- Modify: `src/lib/api.ts`
 
-This is the key integration: spawn `claude -p "..." --output-format stream-json`, parse NDJSON from stdout, emit `ask-stream` events, and support cancellation via killing the child process.
+We track PIDs (not `Child` objects) in `AppState` because `Child::wait_with_output` consumes the child by value — you can't both wait and separately kill through a shared handle. PID + SIGTERM via `nix` is the clean pattern.
 
-- [ ] **Step 1: Add the streaming function**
+- [ ] **Step 1: Add `nix` dependency**
+
+In `src-tauri/Cargo.toml`, add to `[dependencies]`:
+```toml
+nix = { version = "0.29", features = ["signal"] }
+```
+
+- [ ] **Step 2: Add PID tracking to AppState**
+
+In `src-tauri/src/lib.rs`, extend `AppState`:
+
+```rust
+struct AppState {
+    dbus: zbus::Connection,
+    db: Mutex<Database>,
+    config: Mutex<AppConfig>,
+    chat_sessions: Arc<Mutex<HashMap<String, Vec<ChatMessage>>>>,
+    ask_cancel_tokens: Arc<Mutex<HashMap<String, watch::Sender<bool>>>>,
+    embedding_client: Option<EmbeddingClient>,
+    claude_pids: Arc<tokio::sync::Mutex<HashMap<String, u32>>>, // NEW
+}
+```
+
+(The `chat_sessions` and `ask_cancel_tokens` fields will be removed in Task 14 — leave them for now so this task compiles in isolation.)
+
+In the `AppState` construction (inside `setup`, around line 1592), initialize:
+```rust
+claude_pids: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+```
+
+- [ ] **Step 3: Add the spawn helper**
 
 In `src-tauri/src/claude_code.rs`, append:
 
 ```rust
 use std::process::Stdio;
-use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::{Child, Command};
-use tokio::sync::watch;
+use tokio::process::Command;
 
-#[derive(Debug, Clone, serde::Serialize)]
-#[serde(tag = "type", rename_all = "lowercase")]
-pub enum AskStreamChunk {
-    Text { content: String },
-    ToolUse { tool: String },
-    Done { content: String },
-    Error { message: String },
-}
-
-pub async fn spawn_claude_chat(prompt: &str) -> Result<Child, String> {
+pub async fn ask_claude_spawn(prompt: &str) -> Result<tokio::process::Child, String> {
     Command::new("claude")
         .arg("-p")
         .arg(prompt)
-        .arg("--output-format")
-        .arg("stream-json")
-        .arg("--verbose") // required when using stream-json per Claude Code docs
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true)
         .spawn()
         .map_err(|e| format!("spawn claude: {e}"))
 }
-
-/// Consume stdout NDJSON from claude, yielding parsed AskStreamChunk events.
-/// Returns when the child exits (done) or the cancel signal fires.
-pub async fn stream_chunks<F>(
-    mut child: Child,
-    mut cancel: watch::Receiver<bool>,
-    mut on_chunk: F,
-) -> Result<String, String>
-where
-    F: FnMut(AskStreamChunk),
-{
-    let stdout = child.stdout.take().ok_or("no stdout")?;
-    let mut reader = BufReader::new(stdout).lines();
-    let mut accumulated = String::new();
-
-    loop {
-        tokio::select! {
-            line = reader.next_line() => {
-                match line {
-                    Ok(Some(line)) => {
-                        if line.trim().is_empty() { continue; }
-                        match parse_stream_line(&line) {
-                            Some(AskStreamChunk::Text { content }) => {
-                                accumulated.push_str(&content);
-                                on_chunk(AskStreamChunk::Text { content });
-                            }
-                            Some(chunk) => on_chunk(chunk),
-                            None => {
-                                // Unknown event type — skip silently
-                            }
-                        }
-                    }
-                    Ok(None) => break, // EOF
-                    Err(e) => return Err(format!("read stdout: {e}")),
-                }
-            }
-            _ = cancel.changed() => {
-                if *cancel.borrow() {
-                    let _ = child.kill().await;
-                    break;
-                }
-            }
-        }
-    }
-
-    on_chunk(AskStreamChunk::Done {
-        content: accumulated.clone(),
-    });
-    Ok(accumulated)
-}
-
-/// Parse one line of Claude Code's `stream-json` output into our event type.
-/// Claude Code emits events like:
-///   {"type":"assistant","message":{"content":[{"type":"text","text":"..."}]}}
-///   {"type":"assistant","message":{"content":[{"type":"tool_use","name":"search_screenshots"}]}}
-///   {"type":"result","result":"..."}
-fn parse_stream_line(line: &str) -> Option<AskStreamChunk> {
-    let v: serde_json::Value = serde_json::from_str(line).ok()?;
-    let kind = v.get("type")?.as_str()?;
-
-    match kind {
-        "assistant" => {
-            let content_arr = v.get("message")?.get("content")?.as_array()?;
-            for item in content_arr {
-                let item_type = item.get("type")?.as_str()?;
-                match item_type {
-                    "text" => {
-                        if let Some(text) = item.get("text").and_then(|t| t.as_str()) {
-                            return Some(AskStreamChunk::Text {
-                                content: text.to_string(),
-                            });
-                        }
-                    }
-                    "tool_use" => {
-                        if let Some(name) = item.get("name").and_then(|t| t.as_str()) {
-                            return Some(AskStreamChunk::ToolUse {
-                                tool: name.to_string(),
-                            });
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            None
-        }
-        "result" => {
-            // Final aggregated result — we already streamed text chunks, so ignore.
-            None
-        }
-        _ => None,
-    }
-}
 ```
 
-- [ ] **Step 2: Route `ask` through Claude Code when available**
+- [ ] **Step 4: Add the Tauri commands**
 
-In `src-tauri/src/lib.rs`, inside the `ask` command function, just after building the `user_message` and history (around line 892), add a branch that takes the Claude path. Insert this block right before the existing `tokio::spawn(async move { ... ollama chat ... })`:
-
-Find this section in the existing `ask` function:
-```rust
-    // 4. Spawn streaming task with cancel support
-    let session_id_clone = session_id.clone();
-    let chat_sessions = state.chat_sessions.clone();
-    let cancel_tokens = state.ask_cancel_tokens.clone();
-
-    // Create cancel channel
-    let (cancel_tx, mut cancel_rx) = watch::channel(false);
-```
-
-Just before this section, add:
+In `src-tauri/src/lib.rs`:
 
 ```rust
-    // Detect Claude Code once per call (cheap — it's a PATH lookup + file read)
-    let claude_status = claude_code::detect();
-    let use_claude = claude_status.available && claude_status.mcp_registered;
-```
+#[tauri::command]
+async fn ask_claude(
+    state: State<'_, AppState>,
+    session_id: String,
+    prompt: String,
+) -> Result<String, String> {
+    let child = claude_code::ask_claude_spawn(&prompt).await?;
+    let pid = child.id().ok_or("no pid for claude child")?;
 
-Then rewrite the spawn block to branch on `use_claude`:
-
-```rust
-    // 4. Spawn streaming task with cancel support
-    let session_id_clone = session_id.clone();
-    let chat_sessions = state.chat_sessions.clone();
-    let cancel_tokens = state.ask_cancel_tokens.clone();
-
-    let (cancel_tx, cancel_rx) = watch::channel(false);
+    // Register pid so ask_claude_cancel can find it
     {
-        let mut tokens = cancel_tokens
-            .lock()
-            .map_err(|e| format!("lock: {e}"))?;
-        tokens.insert(session_id.clone(), cancel_tx);
+        let mut map = state.claude_pids.lock().await;
+        map.insert(session_id.clone(), pid);
     }
 
-    if use_claude {
-        // Build the prompt: inline the context and user message, since Claude Code
-        // will call MCP tools itself for retrieval when it needs more data.
-        let prompt = format!(
-            "{}\n\nUser question: {}\n\nInitial context from RewindOS:\n{}",
-            SYSTEM_PROMPT, message, context
-        );
+    let output_result = child.wait_with_output().await;
 
-        let app_clone = app.clone();
-        tokio::spawn(async move {
-            let child = match claude_code::spawn_claude_chat(&prompt).await {
-                Ok(c) => c,
-                Err(e) => {
-                    let _ = app_clone.emit(
-                        "ask-stream",
-                        serde_json::json!({
-                            "session_id": session_id_clone,
-                            "type": "error",
-                            "message": e
-                        }),
-                    );
-                    return;
-                }
-            };
-
-            let emit_app = app_clone.clone();
-            let emit_sid = session_id_clone.clone();
-            let result = claude_code::stream_chunks(child, cancel_rx, move |chunk| {
-                let payload = match &chunk {
-                    claude_code::AskStreamChunk::Text { content } => serde_json::json!({
-                        "session_id": emit_sid,
-                        "type": "text",
-                        "content": content,
-                    }),
-                    claude_code::AskStreamChunk::ToolUse { tool } => serde_json::json!({
-                        "session_id": emit_sid,
-                        "type": "tool_use",
-                        "tool": tool,
-                    }),
-                    claude_code::AskStreamChunk::Done { content } => serde_json::json!({
-                        "session_id": emit_sid,
-                        "type": "done",
-                        "content": content,
-                    }),
-                    claude_code::AskStreamChunk::Error { message } => serde_json::json!({
-                        "session_id": emit_sid,
-                        "type": "error",
-                        "message": message,
-                    }),
-                };
-                let _ = emit_app.emit("ask-stream", payload);
-            })
-            .await;
-
-            // Store the full response in chat history
-            if let Ok(full) = result {
-                if !full.is_empty() {
-                    if let Ok(mut sessions) = chat_sessions.lock() {
-                        if let Some(history) = sessions.get_mut(&session_id_clone) {
-                            history.push(ChatMessage {
-                                role: ChatRole::Assistant,
-                                content: full,
-                            });
-                        }
-                    }
-                }
-            }
-
-            if let Ok(mut tokens) = cancel_tokens.lock() {
-                tokens.remove(&session_id_clone);
-            }
-        });
-
-        return Ok(AskResponse {
-            session_id,
-            references,
-        });
+    // Always clean up the pid entry, even on error or kill
+    {
+        let mut map = state.claude_pids.lock().await;
+        map.remove(&session_id);
     }
 
-    // --- Existing Ollama path below unchanged ---
-    let mut cancel_rx = cancel_rx; // keep compiler happy — old path consumes this
+    let output = output_result.map_err(|e| format!("wait: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        return Err(format!("claude exited {}: {}", output.status, stderr));
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+#[tauri::command]
+async fn ask_claude_cancel(
+    state: State<'_, AppState>,
+    session_id: String,
+) -> Result<(), String> {
+    let pid = {
+        let map = state.claude_pids.lock().await;
+        map.get(&session_id).copied()
+    };
+    if let Some(pid) = pid {
+        use nix::sys::signal::{kill, Signal};
+        use nix::unistd::Pid;
+        let _ = kill(Pid::from_raw(pid as i32), Signal::SIGTERM);
+    }
+    Ok(())
+}
 ```
 
-Note: the existing Ollama spawn code already takes `cancel_rx` by value. Make sure only one branch consumes it — the `if use_claude` branch returns early so the Ollama code still owns `cancel_rx` on its path.
+Register `ask_claude,` and `ask_claude_cancel,` in `invoke_handler`.
 
-- [ ] **Step 3: Verify it compiles**
+- [ ] **Step 5: Expose in frontend**
+
+In `src/lib/api.ts`:
+
+```typescript
+export async function askClaude(sessionId: string, prompt: string): Promise<string> {
+  return invoke("ask_claude", { sessionId, prompt });
+}
+
+export async function askClaudeCancel(sessionId: string): Promise<void> {
+  return invoke("ask_claude_cancel", { sessionId });
+}
+```
+
+- [ ] **Step 6: Verify**
 
 Run: `cargo check -p rewindos`
-Expected: Compiles. Watch for borrow errors around `cancel_rx` — if both branches try to move it, restructure with `let (cancel_tx, cancel_rx) = watch::channel(false)` moved inside each branch instead.
+Expected: Compiles.
 
-- [ ] **Step 4: Commit**
+Start app, in DevTools:
+```javascript
+await window.__TAURI__.core.invoke("ask_claude", {
+  sessionId: "test",
+  prompt: "say hello in exactly 3 words"
+})
+```
+Expected: Returns a string (Claude's output).
+
+- [ ] **Step 7: Commit**
 
 ```bash
-git add src-tauri/src/claude_code.rs src-tauri/src/lib.rs
-git commit -m "route Ask view to Claude Code subprocess with stream-json parsing"
+git add src-tauri/src/claude_code.rs src-tauri/src/lib.rs src-tauri/Cargo.toml src/lib/api.ts Cargo.lock
+git commit -m "add ask_claude blocking spawn command with SIGTERM cancel"
 ```
 
 ---
 
-## Task 11: Frontend handling of `ask-stream` events
+## Task 12: Client-side Ollama streaming
 
 **Files:**
-- Modify: `src/lib/api.ts`
+- Create: `src/lib/ollama-chat.ts`
+
+- [ ] **Step 1: Create the module**
+
+Create `src/lib/ollama-chat.ts`:
+
+```typescript
+export interface OllamaMessage {
+  role: "system" | "user" | "assistant";
+  content: string;
+}
+
+export interface OllamaChatOptions {
+  baseUrl: string;
+  model: string;
+  temperature: number;
+  messages: OllamaMessage[];
+  signal: AbortSignal;
+  onToken: (token: string) => void;
+}
+
+export async function ollamaChat(opts: OllamaChatOptions): Promise<string> {
+  const response = await fetch(`${opts.baseUrl.replace(/\/$/, "")}/api/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    signal: opts.signal,
+    body: JSON.stringify({
+      model: opts.model,
+      messages: opts.messages,
+      stream: true,
+      options: { temperature: opts.temperature },
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Ollama returned ${response.status}: ${await response.text()}`);
+  }
+
+  const body = response.body;
+  if (!body) throw new Error("No response body");
+
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let full = "";
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      // Ollama emits NDJSON — one JSON object per line
+      let newlineIdx: number;
+      while ((newlineIdx = buffer.indexOf("\n")) !== -1) {
+        const line = buffer.slice(0, newlineIdx).trim();
+        buffer = buffer.slice(newlineIdx + 1);
+        if (!line) continue;
+
+        try {
+          const obj = JSON.parse(line);
+          const token = obj?.message?.content ?? "";
+          if (token) {
+            full += token;
+            opts.onToken(token);
+          }
+          if (obj?.done) return full;
+        } catch {
+          // Skip malformed lines
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  return full;
+}
+
+export async function ollamaHealth(baseUrl: string): Promise<boolean> {
+  try {
+    const response = await fetch(`${baseUrl.replace(/\/$/, "")}/api/tags`, {
+      signal: AbortSignal.timeout(2000),
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+```
+
+- [ ] **Step 2: Smoke test in browser console**
+
+Start the app. With Ollama running locally, in DevTools:
+
+```javascript
+const { ollamaChat } = await import("/src/lib/ollama-chat.ts");
+const ctrl = new AbortController();
+await ollamaChat({
+  baseUrl: "http://localhost:11434",
+  model: "qwen2.5:3b",
+  temperature: 0.7,
+  messages: [{ role: "user", content: "say hi in 3 words" }],
+  signal: ctrl.signal,
+  onToken: (t) => console.log(t),
+});
+```
+Expected: Tokens log one at a time, final return is the full response.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add src/lib/ollama-chat.ts
+git commit -m "add client-side Ollama streaming via fetch + ReadableStream"
+```
+
+---
+
+## Task 13: Rewrite AskContext using the new architecture
+
+The new `AskContext` holds history as plain React state, calls `buildChatContext` to get DB context, then either streams from Ollama directly or invokes `ask_claude` for the Claude path. No Tauri event listeners.
+
+**Files:**
 - Modify: `src/context/AskContext.tsx`
 
-- [ ] **Step 1: Add the stream payload type**
+- [ ] **Step 1: Rewrite the provider**
 
-In `src/lib/api.ts`, append:
+Replace the entire contents of `src/context/AskContext.tsx`:
 
-```typescript
-export type AskStreamPayload =
-  | { session_id: string; type: "text"; content: string }
-  | { session_id: string; type: "tool_use"; tool: string }
-  | { session_id: string; type: "done"; content: string }
-  | { session_id: string; type: "error"; message: string };
-```
+```tsx
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import {
+  askClaude,
+  askClaudeCancel,
+  buildChatContext,
+  claudeDetect,
+  getConfig,
+  type ScreenshotRef,
+} from "@/lib/api";
+import { ollamaChat, type OllamaMessage } from "@/lib/ollama-chat";
 
-- [ ] **Step 2: Subscribe to `ask-stream` in AskContext**
+let nextMsgId = 0;
 
-In `src/context/AskContext.tsx`, add a new listener alongside the existing `ask-token`/`ask-done`/`ask-error` listeners. Inside the `useEffect` at line 69:
-
-```typescript
-import { type AskStreamPayload } from "@/lib/api";
-
-// ... inside useEffect, after the existing unlisteners.push() calls:
-
-unlisteners.push(
-  listen<AskStreamPayload>("ask-stream", (event) => {
-    if (event.payload.session_id !== sessionIdRef.current) return;
-
-    const payload = event.payload;
-    if (payload.type === "text") {
-      setMessages((prev) => {
-        const last = prev[prev.length - 1];
-        if (last && last.role === "assistant") {
-          return [
-            ...prev.slice(0, -1),
-            { ...last, content: last.content + payload.content },
-          ];
-        }
-        return prev;
-      });
-    } else if (payload.type === "tool_use") {
-      // Show a subtle indicator that Claude is calling a tool
-      setMessages((prev) => {
-        const last = prev[prev.length - 1];
-        if (last && last.role === "assistant") {
-          return [
-            ...prev.slice(0, -1),
-            { ...last, toolUses: [...(last.toolUses ?? []), payload.tool] },
-          ];
-        }
-        return prev;
-      });
-    } else if (payload.type === "done") {
-      setIsStreaming(false);
-    } else if (payload.type === "error") {
-      setError(payload.message);
-      setIsStreaming(false);
-    }
-  }),
-);
-```
-
-- [ ] **Step 3: Extend the `ChatMessage` type with `toolUses`**
-
-In `src/context/AskContext.tsx`, at line 21:
-
-```typescript
 export interface ChatMessage {
   id: number;
   role: "user" | "assistant";
   content: string;
   references?: ScreenshotRef[];
-  toolUses?: string[];
+}
+
+const SYSTEM_PROMPT = `You are RewindOS, a local AI assistant with access to the user's screen capture history. You answer questions about what the user has seen, done, and worked on — based on OCR text extracted from periodic screenshots.
+
+## Core Rules
+- Answer directly. Start with the answer, not preamble.
+- When referencing a specific screenshot, use [REF:ID] format (e.g. [REF:42]).
+- Be specific: mention timestamps, window titles, app names.
+- Use markdown formatting.
+- Never fabricate information not present in the context.
+- If context has no relevant data, say "I don't have enough screen history for that time period."
+
+## Format
+- Keep answers under 300 words.
+- No filler phrases like "Based on the context" or "Let me analyze".
+- NEVER just rephrase the user's question.`;
+
+interface AskContextValue {
+  messages: ChatMessage[];
+  isStreaming: boolean;
+  error: string | null;
+  sendMessage: (text: string) => Promise<void>;
+  cancelStream: () => void;
+  newSession: () => void;
+}
+
+const AskContext = createContext<AskContextValue | null>(null);
+
+export function AskProvider({ children }: { children: ReactNode }) {
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Per-session id used only for cancelling Claude subprocess (local-only)
+  const sessionIdRef = useRef<string>(crypto.randomUUID());
+  const abortRef = useRef<AbortController | null>(null);
+
+  const sendMessage = useCallback(
+    async (text: string) => {
+      if (isStreaming || !text.trim()) return;
+
+      setError(null);
+      setIsStreaming(true);
+
+      // Add user + empty assistant placeholder
+      setMessages((prev) => [
+        ...prev,
+        { id: nextMsgId++, role: "user", content: text },
+        { id: nextMsgId++, role: "assistant", content: "" },
+      ]);
+
+      try {
+        // 1. Get context + references from Rust
+        const ctx = await buildChatContext(text);
+
+        // 2. Update the placeholder with references
+        setMessages((prev) => {
+          const last = prev[prev.length - 1];
+          if (last && last.role === "assistant") {
+            return [...prev.slice(0, -1), { ...last, references: ctx.references }];
+          }
+          return prev;
+        });
+
+        // 3. Route based on Claude Code availability
+        const claude = await claudeDetect();
+        const useClaude = claude.available && claude.mcp_registered;
+
+        if (useClaude) {
+          const prompt = `${SYSTEM_PROMPT}\n\nCurrent time: ${new Date().toISOString()}\n\n${ctx.context}\n\nUser question: ${text}`;
+          const response = await askClaude(sessionIdRef.current, prompt);
+          setMessages((prev) => {
+            const last = prev[prev.length - 1];
+            if (last && last.role === "assistant") {
+              return [...prev.slice(0, -1), { ...last, content: response }];
+            }
+            return prev;
+          });
+        } else {
+          // Ollama path — build message history from React state
+          const config = await getConfig();
+          const historyMessages: OllamaMessage[] = messages
+            .filter((m) => m.role === "user" || m.role === "assistant")
+            .slice(-config.chat.max_history_messages)
+            .map((m) => ({ role: m.role, content: m.content }));
+
+          const ollamaMessages: OllamaMessage[] = [
+            {
+              role: "system",
+              content: `${SYSTEM_PROMPT}\n\nCurrent time: ${new Date().toISOString()}\n\n${ctx.context}`,
+            },
+            ...historyMessages,
+            { role: "user", content: text },
+          ];
+
+          abortRef.current = new AbortController();
+
+          await ollamaChat({
+            baseUrl: config.chat.ollama_url,
+            model: config.chat.model,
+            temperature: config.chat.temperature,
+            messages: ollamaMessages,
+            signal: abortRef.current.signal,
+            onToken: (token) => {
+              setMessages((prev) => {
+                const last = prev[prev.length - 1];
+                if (last && last.role === "assistant") {
+                  return [...prev.slice(0, -1), { ...last, content: last.content + token }];
+                }
+                return prev;
+              });
+            },
+          });
+        }
+      } catch (e: unknown) {
+        if (e instanceof DOMException && e.name === "AbortError") {
+          // Cancelled — leave partial response intact
+        } else {
+          setError(e instanceof Error ? e.message : String(e));
+          // Remove the empty assistant placeholder
+          setMessages((prev) => {
+            const last = prev[prev.length - 1];
+            if (last && last.role === "assistant" && last.content === "") {
+              return prev.slice(0, -1);
+            }
+            return prev;
+          });
+        }
+      } finally {
+        setIsStreaming(false);
+        abortRef.current = null;
+      }
+    },
+    [isStreaming, messages],
+  );
+
+  const cancelStream = useCallback(() => {
+    if (!isStreaming) return;
+    abortRef.current?.abort();
+    askClaudeCancel(sessionIdRef.current).catch(() => {});
+    setIsStreaming(false);
+  }, [isStreaming]);
+
+  const newSession = useCallback(() => {
+    setMessages([]);
+    setError(null);
+    setIsStreaming(false);
+    abortRef.current?.abort();
+    sessionIdRef.current = crypto.randomUUID();
+  }, []);
+
+  // Clean up on unmount
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+    };
+  }, []);
+
+  return (
+    <AskContext.Provider value={{ messages, isStreaming, error, sendMessage, cancelStream, newSession }}>
+      {children}
+    </AskContext.Provider>
+  );
+}
+
+export function useAskChat() {
+  const ctx = useContext(AskContext);
+  if (!ctx) throw new Error("useAskChat must be used within AskProvider");
+  return ctx;
 }
 ```
 
-- [ ] **Step 4: Render tool use indicators in ChatMessage**
+- [ ] **Step 2: Verify**
 
-In `src/features/ask/ChatMessage.tsx`, after the assistant content area and before the references footer, render a row of tool badges if `toolUses` is non-empty:
+`bun run typecheck` (or equivalent) — expect 0 errors related to AskContext. There will be errors elsewhere referencing removed API functions (`ask`, `askCancel`, etc.) — those get fixed in Task 14.
 
-```tsx
-{message.toolUses && message.toolUses.length > 0 && (
-  <div className="mt-2 flex flex-wrap gap-1">
-    {message.toolUses.map((tool, i) => (
-      <span
-        key={i}
-        className="font-mono text-[10px] text-semantic/70 border border-semantic/20 px-1.5 py-0.5 uppercase tracking-wider"
-      >
-        {tool}
-      </span>
-    ))}
-  </div>
-)}
-```
-
-(If the existing `ChatMessage.tsx` has a different structure, place the badges in the closest equivalent location — below the text body, above any references.)
-
-- [ ] **Step 5: Manual end-to-end test**
-
-With Claude Code installed and MCP registered:
-1. Start the app: `bun run tauri dev`
-2. Ensure the daemon is running so screenshots exist: `cargo run -p rewindos-daemon`
-3. Open the Ask view, type: "What have I been doing in the last 30 minutes?"
-4. Expected: streaming text appears, tool badges (e.g. `get_recent_activity`) flash, final response cites real screenshot data.
-
-- [ ] **Step 6: Commit**
+- [ ] **Step 3: Commit**
 
 ```bash
-git add src/lib/api.ts src/context/AskContext.tsx src/features/ask/ChatMessage.tsx
-git commit -m "handle ask-stream events and render tool-use badges"
+git add src/context/AskContext.tsx
+git commit -m "rewrite AskContext to use client-side streaming"
 ```
 
 ---
 
-## Task 12: Indicator + settings UI for Claude Code
+## Task 14: Remove obsolete Tauri commands and update callers
+
+**Files:**
+- Modify: `src-tauri/src/lib.rs`
+- Modify: `src/lib/api.ts`
+- Modify: `src/features/ask/AskView.tsx`
+- Modify: `src/features/journal/hooks/useJournalEntry.ts`
+- Modify: `src/lib/query-keys.ts`
+
+- [ ] **Step 1: Remove `ask`, `ask_cancel`, `ask_new_session`, `ask_health` from Rust**
+
+In `src-tauri/src/lib.rs`:
+1. Delete the `ask` command function (from `#[tauri::command] async fn ask` through its closing `}`, roughly lines 685-1011).
+2. Delete `ask_new_session`, `ask_health`, `ask_cancel` (lines 649-683).
+3. Remove `ask,`, `ask_new_session,`, `ask_health,`, `ask_cancel,` from `invoke_handler`.
+4. Remove `chat_sessions: Arc<Mutex<HashMap<String, Vec<ChatMessage>>>>` and `ask_cancel_tokens: Arc<Mutex<HashMap<String, watch::Sender<bool>>>>` from `AppState` (and their initialization in `setup`).
+5. Remove unused imports: `ChatMessage`, `ChatRole`, `ChatStreamChunk`, `ContextAssembler`, `IntentCategory`, `IntentClassifier`, `QueryConfidence`, `ScreenshotReference`, `SYSTEM_PROMPT`, `watch`, `OllamaChatClient`, `StreamExt`, `uuid` (if only used by ask_new_session). Keep `ScreenshotReference` if `chat_context::ChatContext` references it transitively — check with `cargo check`.
+6. Delete the `AskResponse`, `AskTokenPayload`, `AskDonePayload`, `AskErrorPayload` structs if they exist in this file.
+
+Run `cargo check -p rewindos` — fix any cascading errors by removing remaining ask-related code.
+
+- [ ] **Step 2: Remove the frontend API functions**
+
+In `src/lib/api.ts`, remove:
+- `ask`
+- `askCancel`
+- `askHealth`
+- `askNewSession`
+- The `AskResponse` type and `ScreenshotRef` type if not used elsewhere (check — probably keep `ScreenshotRef` since `ChatContext` uses it).
+
+- [ ] **Step 3: Update AskView**
+
+In `src/features/ask/AskView.tsx`:
+1. Remove the `useQuery` for `askHealth` (lines ~23-28).
+2. Replace with a client-side Ollama health check + Claude detection combined:
+
+```tsx
+import { ollamaHealth } from "@/lib/ollama-chat";
+import { claudeDetect, getConfig } from "@/lib/api";
+
+// Inside AskView:
+const { data: config } = useQuery({
+  queryKey: queryKeys.config(),
+  queryFn: getConfig,
+});
+
+const { data: ollamaOnline = false } = useQuery({
+  queryKey: queryKeys.ollamaHealth(),
+  queryFn: () => (config ? ollamaHealth(config.chat.ollama_url) : false),
+  enabled: !!config,
+  refetchInterval: 60_000,
+  staleTime: 30_000,
+});
+
+const { data: claudeStatus } = useQuery({
+  queryKey: queryKeys.claudeStatus(),
+  queryFn: claudeDetect,
+  refetchInterval: 60_000,
+});
+
+const usingClaude = claudeStatus?.available && claudeStatus.mcp_registered;
+const chatReady = usingClaude || ollamaOnline;
+```
+
+3. Update the placeholder text and disabled logic to use `chatReady` / `usingClaude`:
+
+```tsx
+placeholder={
+  !chatReady
+    ? (usingClaude ? "claude unavailable" : "ollama is offline — start it to chat")
+    : isStreaming
+    ? "thinking..."
+    : "ask about your screen history"
+}
+disabled={isStreaming || !chatReady}
+```
+
+4. Replace the status dot to reflect chatReady + mode:
+
+```tsx
+<div
+  className={cn(
+    "w-1.5 h-1.5 rounded-full transition-colors",
+    chatReady ? "bg-signal-success" : "bg-signal-error",
+  )}
+  title={
+    usingClaude ? "Claude Code connected"
+    : ollamaOnline ? "Ollama connected"
+    : "No chat backend available"
+  }
+/>
+<span className="font-mono text-xs text-text-muted uppercase tracking-wider">ask</span>
+<span
+  className={cn(
+    "font-mono text-[10px] uppercase tracking-wider",
+    usingClaude ? "text-semantic" : "text-text-muted",
+  )}
+>
+  · {usingClaude ? "claude" : "local"}
+</span>
+```
+
+- [ ] **Step 4: Update journal hook**
+
+In `src/features/journal/hooks/useJournalEntry.ts`, lines 14 and 119-120 reference `askHealth`. Replace with `ollamaHealth`:
+
+```typescript
+import { getConfig } from "@/lib/api";
+import { ollamaHealth } from "@/lib/ollama-chat";
+
+// Inside the hook, replace the askHealth query:
+const { data: config } = useQuery({
+  queryKey: queryKeys.config(),
+  queryFn: getConfig,
+});
+
+const { data: /* same name */ } = useQuery({
+  queryKey: queryKeys.ollamaHealth(),
+  queryFn: () => (config ? ollamaHealth(config.chat.ollama_url) : false),
+  enabled: !!config,
+});
+```
+
+(If `getConfig` isn't already exposed in `src/lib/api.ts`, it should be — there's a `get_config` command used elsewhere. Verify via grep.)
+
+- [ ] **Step 5: Update query keys**
+
+In `src/lib/query-keys.ts`:
+- Remove `askHealth: () => ["ask-health"] as const,`
+- Add `ollamaHealth: () => ["ollama-health"] as const,`
+- Add `claudeStatus: () => ["claude-status"] as const,`
+
+Update the test file `src/lib/query-keys.test.ts` accordingly.
+
+- [ ] **Step 6: Verify**
+
+Run:
+```bash
+cargo check -p rewindos
+bun run typecheck
+bun run test:unit
+```
+Expected: All green.
+
+Start the app: `bun run tauri dev`
+- Open Ask view with Ollama running (no Claude Code): typing a question should stream tokens natively.
+- Stop Ollama — header dot goes red, input disabled.
+- Start Claude Code + register MCP: header shows "claude" badge, responses come through Claude.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add src-tauri/src/lib.rs src/lib/api.ts src/features/ask/AskView.tsx src/features/journal/hooks/useJournalEntry.ts src/lib/query-keys.ts src/lib/query-keys.test.ts
+git commit -m "remove obsolete ask/ask_cancel/ask_health commands, update callers"
+```
+
+---
+
+## Task 15: ClaudeCodeSection in Settings
 
 **Files:**
 - Create: `src/features/settings/tabs/AITab/ClaudeCodeSection.tsx`
 - Modify: `src/features/settings/tabs/AITab.tsx`
-- Modify: `src/features/ask/AskView.tsx`
-- Modify: `src/lib/query-keys.ts`
 
-- [ ] **Step 1: Add a query key**
-
-In `src/lib/query-keys.ts`, in the `queryKeys` object:
-
-```typescript
-claudeStatus: () => ["claude-status"] as const,
-```
-
-- [ ] **Step 2: Create the ClaudeCodeSection component**
+- [ ] **Step 1: Create the component**
 
 Create `src/features/settings/tabs/AITab/ClaudeCodeSection.tsx`:
 
@@ -1603,115 +1975,69 @@ export function ClaudeCodeSection() {
 }
 ```
 
-- [ ] **Step 3: Render it in AITab**
+- [ ] **Step 2: Render in AITab**
 
 In `src/features/settings/tabs/AITab.tsx`, import and render at the top:
 
 ```tsx
 import { ClaudeCodeSection } from "./AITab/ClaudeCodeSection";
-// ...
+
 export function AITab({ config, update }: TabProps) {
   return (
     <>
       <ClaudeCodeSection />
       <SectionTitle>Chat / Ask</SectionTitle>
-      {/* ... existing content ... */}
+      {/* ... existing fields ... */}
 ```
 
-- [ ] **Step 4: Add the indicator to AskView**
+- [ ] **Step 3: Manual test**
 
-In `src/features/ask/AskView.tsx`, next to the existing Ollama online dot (around line 88), add a second indicator:
+Open Settings → AI tab:
+- If Claude Code not installed: "not installed" shown.
+- If installed but MCP not registered: "Connect to Claude Code" button appears; clicking it flips status to "connected".
+- If already connected: descriptive text explains behavior.
 
-```tsx
-import { claudeDetect } from "@/lib/api";
-
-// Inside AskView component, alongside askHealth:
-const { data: claudeStatus } = useQuery({
-  queryKey: queryKeys.claudeStatus(),
-  queryFn: claudeDetect,
-  refetchInterval: 60_000,
-  staleTime: 30_000,
-});
-
-const usingClaude = claudeStatus?.available && claudeStatus.mcp_registered;
-```
-
-And in the header bar JSX, replace:
-
-```tsx
-<span className="font-mono text-xs text-text-muted uppercase tracking-wider">
-  ask
-</span>
-```
-
-with:
-
-```tsx
-<span className="font-mono text-xs text-text-muted uppercase tracking-wider">
-  ask
-</span>
-<span
-  className={`font-mono text-[10px] uppercase tracking-wider ${
-    usingClaude ? "text-semantic" : "text-text-muted"
-  }`}
-  title={usingClaude ? "Using Claude Code (agentic)" : "Using local Ollama"}
->
-  · {usingClaude ? "claude" : "local"}
-</span>
-```
-
-- [ ] **Step 5: Manual test**
-
-1. Start the app.
-2. Open Settings → AI tab — verify Claude Code section renders correctly whether installed or not.
-3. If installed but not registered, click "Connect to Claude Code" — verify status flips to "connected".
-4. Open Ask view — verify the header badge shows "claude" or "local" based on state.
-
-- [ ] **Step 6: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
-git add src/features/settings/tabs/AITab src/features/settings/tabs/AITab.tsx src/features/ask/AskView.tsx src/lib/query-keys.ts
-git commit -m "add Claude Code settings section and Ask view indicator"
+git add src/features/settings/tabs/AITab/ClaudeCodeSection.tsx src/features/settings/tabs/AITab.tsx
+git commit -m "add Claude Code settings section"
 ```
 
 ---
 
-## Task 13: End-to-end verification
+## Task 16: End-to-end verification
 
-**Files:**
-- None — manual verification
+**Files:** None — manual verification only.
 
-- [ ] **Step 1: Full happy-path test**
+- [ ] **Step 1: Full Claude happy path**
 
-Prerequisites:
-- `cargo build --workspace` succeeds
-- `bun run tauri dev` starts the app
-- Daemon is running: `cargo run -p rewindos-daemon`
-- Claude Code is installed: `which claude` returns a path
-- Some screenshots exist with OCR text
+Prereqs: daemon running, Claude Code installed, MCP registered.
 
-Flow:
-1. Open Settings → AI tab
-2. Click "Connect to Claude Code" — status flips to "connected"
-3. Open Ask view — header shows "claude"
-4. Type: "What was I working on in the last hour?"
-5. Observe: streaming tokens arrive, tool-use badges flash (`get_recent_activity` or similar), response cites real timestamps and app names from the database
+1. Start app: `bun run tauri dev`
+2. Open Ask view — header shows `· claude`.
+3. Type: "what was I looking at in the last 30 minutes?"
+4. Observe: brief "thinking..." pause, then full response arrives with real data and `[REF:N]` links to screenshots.
+5. Click a reference — it opens the screenshot detail view.
 
-- [ ] **Step 2: Fallback path test**
+- [ ] **Step 2: Ollama fallback path**
 
-1. Rename `claude` temporarily: `sudo mv $(which claude) /tmp/claude.bak` (or remove it from PATH for your shell session)
-2. Restart the app
-3. Ask view header should show "local"
-4. Same question goes through Ollama — slower, less accurate, but functional
-5. Restore: `sudo mv /tmp/claude.bak $(which claude)` or reset PATH
+1. Remove `claude` from PATH (or uninstall): Ask view header shows `· local`.
+2. Ensure Ollama is running with `qwen2.5:3b` pulled.
+3. Ask the same question.
+4. Observe: tokens stream in natively via `fetch` (typewriter effect), final message includes references.
 
-- [ ] **Step 3: Cancellation test**
+- [ ] **Step 3: Cancellation**
 
-1. In claude mode, ask a long-running question
-2. Click "stop" while Claude is mid-response
-3. Expected: child process is killed, UI stops streaming, partial response remains visible
+- In Claude mode: ask a long question, click "stop" mid-response. The child process should be killed (verify with `ps aux | grep claude` — no lingering process).
+- In Ollama mode: same. Verify token stream stops immediately (AbortController fires).
 
-- [ ] **Step 4: No commit** — verification only.
+- [ ] **Step 4: Error handling**
+
+- Stop Ollama while in local mode: header dot flips red, input disabled, no crash.
+- Stop the daemon: `build_chat_context` should fail gracefully — error shows in the Ask view error bar.
+
+- [ ] **Step 5: No commit** — verification checkpoint only.
 
 ---
 
@@ -1719,21 +2045,20 @@ Flow:
 
 **Spec coverage:**
 - ✅ MCP server with 5 tools → Tasks 2-6
-- ✅ Stdio transport, `--mcp` CLI flag → Task 6
-- ✅ Separate process with read-only DB → Task 6 (WAL concurrent readers noted in module docs)
-- ✅ Tool wrappers over existing `Database` methods → Tasks 2-5
+- ✅ `--mcp` subcommand, stdio transport → Tasks 1, 6
+- ✅ Separate process with read-only DB → Task 6
+- ✅ Thin wrappers over existing `Database` methods → Tasks 2-5
 - ✅ One-click MCP registration → Task 9
-- ✅ Manual MCP registration path → Documented in Task 7
+- ✅ Manual MCP registration documented → Task 7
 - ✅ Claude Code detection → Task 8
-- ✅ Subprocess spawn with `stream-json` → Task 10
-- ✅ Unified `ask-stream` event → Tasks 10-11
-- ✅ Tool-use badges in UI → Task 11
-- ✅ "claude" vs "local" indicator → Task 12
-- ✅ Local Ollama path preserved as fallback → Task 10 (branch on `use_claude`)
-- ✅ Cancellation via kill_on_drop + watch channel → Task 10
+- ✅ Claude Code chat path → Task 11
+- ✅ Ollama local path preserved → Tasks 12-13
+- ✅ "claude" vs "local" indicator → Task 14 (in AskView)
+- ✅ Cancellation for both paths → Tasks 11 (SIGTERM) + 13 (AbortController)
+- ✅ Streaming cleanup (remove event protocol) → Task 14
 
-**Placeholder scan:** No TBDs or "TODO later" comments in the plan. The `rmcp` API is noted as version-dependent with a fallback instruction (check `cargo doc`) — this is a genuine external-API unknown, not a placeholder.
+**Placeholder scan:** The `rmcp` API note in Task 6 is a real external-version unknown with a fallback instruction, not a placeholder. All other steps have complete code. No TBDs.
 
-**Type consistency:** `SearchScreenshotsInput`, `GetTimelineInput`, `GetAppUsageInput`, `GetScreenshotDetailInput`, `GetRecentActivityInput` defined in Task 2-5, used in Task 6. `AskStreamChunk`, `ClaudeCodeStatus` defined in Tasks 8/10, used in Tasks 10-12 consistently.
+**Type consistency:** `SearchScreenshotsInput`, `GetTimelineInput`, `GetAppUsageInput`, `GetScreenshotDetailInput`, `GetRecentActivityInput` defined in Tasks 2-5, used in Task 6. `ClaudeCodeStatus` defined in Task 8, used in Tasks 9, 14, 15. `ChatContext` defined in Task 10, used in Task 13. `OllamaMessage` / `OllamaChatOptions` defined in Task 12, used in Task 13.
 
-**Scope:** 13 tasks, each a single focused commit. First 7 build and verify the MCP server. Tasks 8-12 wire the Tauri integration. Task 13 is final verification. Total surface area is appropriate for one implementation session.
+**Scope:** 16 tasks. Tasks 1-7 build and verify the MCP server end-to-end. Tasks 8-11 add Tauri commands for Claude Code + context. Tasks 12-13 build the client-side chat. Tasks 14-15 remove the old architecture and add UI. Task 16 is verification. Each task is a single focused commit.
