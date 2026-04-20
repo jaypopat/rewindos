@@ -28,6 +28,7 @@ src-tauri/gen/schemas
 .vscode/*
 !.vscode/extensions.json
 .idea
+.zed/
 *.suo
 *.ntvs*
 *.njsproj
