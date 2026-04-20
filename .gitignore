@@ -43,5 +43,8 @@ Thumbs.db
 .agents/
 .claude/skills/
 
+# Git worktrees (isolated feature branches)
+.worktrees/
+
 # Personal / non-project files
 interview-answers.txt
