@@ -24,7 +24,7 @@ export function OCRTab({ config, update }: TabProps) {
         />
       </Field>
       <Field label="Engine">
-        <Select value={config.ocr.engine} onValueChange={(v) => update("ocr", "engine", v)}>
+        <Select value={config.ocr.engine} onValueChange={(v) => update("ocr", "engine", v as AppConfig["ocr"]["engine"])}>
           <SelectTrigger>
             <SelectValue />
           </SelectTrigger>
@@ -43,12 +43,22 @@ export function OCRTab({ config, update }: TabProps) {
         </Field>
       )}
       {config.ocr.engine === "paddleocr" && (
-        <Field label="Model Directory">
-          <TextInput
-            value={config.ocr.model_dir}
-            onChange={(v) => update("ocr", "model_dir", v)}
-          />
-        </Field>
+        <>
+          <Field label="Python Binary">
+            <TextInput
+              value={config.ocr.python_bin}
+              onChange={(v) => update("ocr", "python_bin", v)}
+            />
+          </Field>
+          <Field label="Idle Timeout (seconds)">
+            <NumberInput
+              value={config.ocr.idle_timeout_secs}
+              min={10}
+              max={600}
+              onChange={(v) => update("ocr", "idle_timeout_secs", v)}
+            />
+          </Field>
+        </>
       )}
       <Field label="Max Workers">
         <NumberInput

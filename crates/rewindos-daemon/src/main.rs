@@ -4,7 +4,7 @@ mod pipeline;
 mod service;
 mod window_info;
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -14,6 +14,8 @@ use rewindos_core::db::Database;
 use rewindos_core::embedding::OllamaClient;
 use rewindos_core::hasher;
 use rewindos_core::ocr;
+use rewindos_core::paddle_ocr;
+use rewindos_core::schema::OcrStatus;
 use tracing::{info, warn};
 
 #[derive(Parser)]
@@ -35,6 +37,12 @@ enum Command {
     Status,
     /// Backfill embeddings for existing screenshots
     Backfill {
+        /// Number of screenshots to process per batch
+        #[arg(long, default_value = "50")]
+        batch_size: usize,
+    },
+    /// Re-run OCR on all screenshots using PaddleOCR (replacing Tesseract results)
+    BackfillOcr {
         /// Number of screenshots to process per batch
         #[arg(long, default_value = "50")]
         batch_size: usize,
@@ -66,6 +74,7 @@ async fn main() -> anyhow::Result<()> {
         Command::Resume => dbus_client_call("Resume").await,
         Command::Status => dbus_client_status().await,
         Command::Backfill { batch_size } => run_backfill(batch_size).await,
+        Command::BackfillOcr { batch_size } => run_backfill_ocr(batch_size).await,
         Command::Recompress {
             quality,
             max_width,
@@ -161,6 +170,156 @@ async fn run_backfill(batch_size: usize) -> anyhow::Result<()> {
     }
 
     println!("\nBackfill complete. Processed {total_processed} screenshots.");
+    Ok(())
+}
+
+async fn run_backfill_ocr(batch_size: usize) -> anyhow::Result<()> {
+    init_logging();
+
+    let config = AppConfig::load()?;
+    let db_path = config.db_path()?;
+    let db = Arc::new(Mutex::new(Database::open(&db_path)?));
+
+    // Find the PaddleOCR worker script
+    let script_path = paddle_ocr::find_worker_script()
+        .ok_or_else(|| anyhow::anyhow!(
+            "paddleocr_worker.py not found. Expected in ~/.rewindos/, /usr/lib/rewindos/, or scripts/"
+        ))?;
+
+    // Check that PaddleOCR is importable
+    if !paddle_ocr::is_paddleocr_available(&config.ocr.python_bin).await {
+        anyhow::bail!(
+            "PaddleOCR not available. Install with: pip install paddleocr paddlepaddle"
+        );
+    }
+
+    let max_workers = (config.ocr.max_workers as usize).max(1);
+    println!(
+        "PaddleOCR available, worker script: {} (workers: {max_workers})",
+        script_path.display()
+    );
+
+    // Spawn N sidecar workers for true parallelism (each is its own Python process)
+    let sidecars: Vec<Arc<paddle_ocr::PaddleOcrSidecar>> = (0..max_workers)
+        .map(|_| {
+            Arc::new(paddle_ocr::PaddleOcrSidecar::new(
+                &config.ocr.python_bin,
+                &script_path,
+                &config.ocr.tesseract_lang,
+                config.ocr.idle_timeout_secs,
+            ))
+        })
+        .collect();
+
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(max_workers));
+    let total_processed = Arc::new(AtomicU64::new(0));
+    let total_errors = Arc::new(AtomicU64::new(0));
+    let consecutive_errors = Arc::new(AtomicU64::new(0));
+    let abort_flag = Arc::new(AtomicBool::new(false));
+    let worker_idx = Arc::new(AtomicU64::new(0));
+
+    'outer: loop {
+        if abort_flag.load(Ordering::Relaxed) {
+            break;
+        }
+
+        let pending = db.lock().unwrap().get_screenshots_for_ocr_backfill(batch_size)?;
+        if pending.is_empty() {
+            break;
+        }
+
+        let batch_total = pending.len();
+        let mut handles = Vec::with_capacity(batch_total);
+
+        for (i, (screenshot_id, file_path)) in pending.into_iter().enumerate() {
+            if abort_flag.load(Ordering::Relaxed) {
+                break 'outer;
+            }
+
+            let permit = semaphore.clone().acquire_owned().await.unwrap();
+            let idx = worker_idx.fetch_add(1, Ordering::Relaxed) as usize % max_workers;
+            let sidecar = sidecars[idx].clone();
+            let db = db.clone();
+            let total_processed = total_processed.clone();
+            let total_errors = total_errors.clone();
+            let consecutive_errors = consecutive_errors.clone();
+            let abort_flag = abort_flag.clone();
+
+            let handle = tokio::spawn(async move {
+                let _permit = permit;
+                let count = total_processed.fetch_add(1, Ordering::Relaxed) + 1;
+                eprint!(
+                    "\r[{count}] OCR screenshot #{screenshot_id} ({}/{batch_total})...    ",
+                    i + 1,
+                );
+
+                // Clear old OCR data (Tesseract results, embeddings)
+                {
+                    let db = db.lock().unwrap();
+                    if let Err(e) = db.clear_ocr_data(screenshot_id) {
+                        eprintln!("\nFailed to clear OCR data for #{screenshot_id}: {e}");
+                        total_errors.fetch_add(1, Ordering::Relaxed);
+                        return;
+                    }
+                }
+
+                // Re-run OCR with PaddleOCR
+                match sidecar.run_ocr(std::path::Path::new(&file_path)).await {
+                    Ok(output) => {
+                        consecutive_errors.store(0, Ordering::Relaxed);
+                        let db = db.lock().unwrap();
+                        if let Err(e) = db.insert_ocr_text(screenshot_id, &output.full_text, output.word_count) {
+                            eprintln!("\nFailed to insert OCR text for #{screenshot_id}: {e}");
+                            total_errors.fetch_add(1, Ordering::Relaxed);
+                            db.update_ocr_status(screenshot_id, OcrStatus::Failed).ok();
+                            return;
+                        }
+                        if !output.bounding_boxes.is_empty() {
+                            if let Err(e) = db.insert_bounding_boxes(screenshot_id, &output.bounding_boxes) {
+                                eprintln!("\nFailed to insert bounding boxes for #{screenshot_id}: {e}");
+                            }
+                        }
+                        db.update_ocr_status(screenshot_id, OcrStatus::Done).ok();
+                    }
+                    Err(e) => {
+                        eprintln!("\nPaddleOCR failed for #{screenshot_id}: {e}");
+                        total_errors.fetch_add(1, Ordering::Relaxed);
+                        let errs = consecutive_errors.fetch_add(1, Ordering::Relaxed) + 1;
+                        db.lock().unwrap().update_ocr_status(screenshot_id, OcrStatus::Failed).ok();
+                        if errs >= 3 {
+                            eprintln!("3 consecutive failures — aborting. Fix the PaddleOCR worker and retry.");
+                            abort_flag.store(true, Ordering::Relaxed);
+                        }
+                    }
+                }
+            });
+
+            handles.push(handle);
+        }
+
+        // Wait for all tasks in this batch to complete
+        for h in handles {
+            let _ = h.await;
+        }
+    }
+
+    // Shutdown all sidecars
+    for sidecar in &sidecars {
+        sidecar.shutdown().await;
+    }
+
+    let total_processed = total_processed.load(Ordering::Relaxed);
+    let total_errors = total_errors.load(Ordering::Relaxed);
+
+    println!(
+        "\nOCR backfill complete. Processed: {total_processed}, Errors: {total_errors}."
+    );
+    if total_processed > total_errors {
+        println!(
+            "Run `rewindos-daemon backfill` to regenerate embeddings from the improved OCR text."
+        );
+    }
+
     Ok(())
 }
 

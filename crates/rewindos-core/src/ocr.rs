@@ -7,7 +7,7 @@ use tokio::process::Command;
 use tracing::{debug, warn};
 
 use crate::error::{CoreError, Result};
-use crate::paddle_ocr::PaddleOcrEngine;
+use crate::paddle_ocr::PaddleOcrSidecar;
 use crate::schema::NewBoundingBox;
 
 /// Result of running OCR on a single screenshot.
@@ -38,19 +38,15 @@ pub async fn run_ocr(
     engine: &OcrEngine,
     image_path: &Path,
     lang: &str,
-    paddle_engine: Option<&Arc<PaddleOcrEngine>>,
+    paddle_sidecar: Option<&Arc<PaddleOcrSidecar>>,
 ) -> Result<OcrOutput> {
     match engine {
         OcrEngine::Tesseract => run_tesseract(image_path, lang).await,
         OcrEngine::PaddleOcr => {
-            let paddle = paddle_engine.ok_or_else(|| {
-                CoreError::Ocr("PaddleOCR engine not initialised".to_string())
+            let sidecar = paddle_sidecar.ok_or_else(|| {
+                CoreError::Ocr("PaddleOCR sidecar not available".to_string())
             })?;
-            let paddle = Arc::clone(paddle);
-            let path = image_path.to_path_buf();
-            tokio::task::spawn_blocking(move || paddle.run_on_file(&path))
-                .await
-                .map_err(|e| CoreError::Ocr(format!("PaddleOCR task panicked: {e}")))?
+            sidecar.run_ocr(image_path).await
         }
     }
 }

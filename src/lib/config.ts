@@ -16,10 +16,12 @@ export interface AppConfig {
   };
   ocr: {
     enabled: boolean;
-    engine: string;
+    engine: "tesseract" | "paddleocr";
     tesseract_lang: string;
     max_workers: number;
     model_dir: string;
+    python_bin: string;
+    idle_timeout_secs: number;
   };
   ui: {
     global_hotkey: string;
