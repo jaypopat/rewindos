@@ -30,6 +30,7 @@ interface NavState {
   selectedScreenshotId: number | null;
   screenshotIds: number[];
   rewindTimeRange: { start: number; end: number } | null;
+  selectedCollectionId: number | null;
 }
 
 type NavAction =
@@ -38,7 +39,8 @@ type NavAction =
   | { type: "GO_BACK" }
   | { type: "CHANGE_VIEW"; view: View }
   | { type: "REWIND_TO_RANGE"; start: number; end: number }
-  | { type: "CLEAR_REWIND_RANGE" };
+  | { type: "CLEAR_REWIND_RANGE" }
+  | { type: "SELECT_COLLECTION"; id: number | null };
 
 function navReducer(state: NavState, action: NavAction): NavState {
   switch (action.type) {
@@ -49,11 +51,13 @@ function navReducer(state: NavState, action: NavAction): NavState {
     case "GO_BACK":
       return { ...state, subView: "list", selectedScreenshotId: null, screenshotIds: [] };
     case "CHANGE_VIEW":
-      return { ...state, view: action.view, subView: "list", selectedScreenshotId: null, rewindTimeRange: null };
+      return { ...state, view: action.view, subView: "list", selectedScreenshotId: null, rewindTimeRange: null, selectedCollectionId: null };
     case "REWIND_TO_RANGE":
-      return { ...state, rewindTimeRange: { start: action.start, end: action.end }, view: "rewind", subView: "list", selectedScreenshotId: null };
+      return { ...state, rewindTimeRange: { start: action.start, end: action.end }, view: "rewind", subView: "list", selectedScreenshotId: null, selectedCollectionId: null };
     case "CLEAR_REWIND_RANGE":
       return { ...state, rewindTimeRange: null };
+    case "SELECT_COLLECTION":
+      return { ...state, selectedCollectionId: action.id };
   }
 }
 
@@ -63,6 +67,7 @@ const initialNavState: NavState = {
   selectedScreenshotId: null,
   screenshotIds: [],
   rewindTimeRange: null,
+  selectedCollectionId: null,
 };
 
 function App() {
@@ -116,14 +121,26 @@ function App() {
     dispatch({ type: "REWIND_TO_RANGE", start, end });
   }, []);
 
+  const handleSelectCollection = useCallback((id: number | null) => {
+    dispatch({ type: "SELECT_COLLECTION", id });
+  }, []);
+
+  const handleEscape = useCallback(() => {
+    if (subView === "detail") {
+      dispatch({ type: "GO_BACK" });
+      setTimeout(() => searchInputRef.current?.focus(), 100);
+    } else if (view === "saved" && nav.selectedCollectionId !== null) {
+      dispatch({ type: "SELECT_COLLECTION", id: null });
+    }
+  }, [subView, view, nav.selectedCollectionId]);
+
   // Global keyboard shortcuts
   useGlobalKeyboard({
     onSearch: useCallback(() => {
       handleViewChange("search");
       setTimeout(() => searchInputRef.current?.focus(), 50);
     }, [handleViewChange]),
-    onEscape: handleBack,
-    isDetailView: subView === "detail",
+    onEscape: handleEscape,
   });
 
   // Listen for global hotkey (Ctrl+Shift+Space)
@@ -220,7 +237,12 @@ function App() {
 
         {view === "saved" && subView === "list" && (
           <ViewSuspense>
-            <SavedView onSelectScreenshot={handleSelectResult} onRewindToRange={handleRewindToRange} />
+            <SavedView
+              onSelectScreenshot={handleSelectResult}
+              onRewindToRange={handleRewindToRange}
+              selectedCollectionId={nav.selectedCollectionId}
+              onSelectCollection={handleSelectCollection}
+            />
           </ViewSuspense>
         )}
 

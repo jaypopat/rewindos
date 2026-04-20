@@ -15,6 +15,11 @@ export function TopTasksList({ tasks, totalScreenTime }: TopTasksListProps) {
         Top Tasks
       </h2>
       <div className="border border-border/50 divide-y divide-border/30 flex-1">
+        {tasks.length === 0 && (
+          <div className="flex items-center justify-center h-full py-8">
+            <p className="text-xs text-text-muted">Not enough data yet</p>
+          </div>
+        )}
         {tasks.map((task) => {
           const pct = totalScreenTime > 0 ? (task.totalSeconds / totalScreenTime) * 100 : 0;
           return (

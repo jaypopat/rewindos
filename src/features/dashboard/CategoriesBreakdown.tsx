@@ -7,6 +7,19 @@ interface CategoriesBreakdownProps {
 }
 
 export function CategoriesBreakdown({ entries, totalMins }: CategoriesBreakdownProps) {
+  if (entries.length === 0 || totalMins === 0) {
+    return (
+      <section className="border border-border/50 px-4 py-3 flex flex-col">
+        <h2 className="font-mono text-[10px] text-text-muted uppercase tracking-[0.2em] mb-2">
+          Categories
+        </h2>
+        <div className="flex-1 flex items-center justify-center">
+          <p className="text-xs text-text-muted">Not enough data yet</p>
+        </div>
+      </section>
+    );
+  }
+
   return (
     <section className="border border-border/50 px-4 py-3 flex flex-col gap-4">
       <div>

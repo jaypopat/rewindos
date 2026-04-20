@@ -23,11 +23,12 @@ type SavedTab = "favorites" | "moments";
 interface SavedViewProps {
   onSelectScreenshot?: (id: number, siblingIds?: number[]) => void;
   onRewindToRange?: (start: number, end: number) => void;
+  selectedCollectionId: number | null;
+  onSelectCollection: (id: number | null) => void;
 }
 
-export function SavedView({ onSelectScreenshot, onRewindToRange }: SavedViewProps) {
+export function SavedView({ onSelectScreenshot, onRewindToRange, selectedCollectionId, onSelectCollection }: SavedViewProps) {
   const [tab, setTab] = useState<SavedTab>("favorites");
-  const [selectedCollectionId, setSelectedCollectionId] = useState<number | null>(null);
   const [showNewMoment, setShowNewMoment] = useState(false);
   const [renamingId, setRenamingId] = useState<number | null>(null);
   const [renameValue, setRenameValue] = useState("");
@@ -81,7 +82,7 @@ export function SavedView({ onSelectScreenshot, onRewindToRange }: SavedViewProp
     return (
       <CollectionDetailView
         collectionId={selectedCollectionId}
-        onBack={() => setSelectedCollectionId(null)}
+        onBack={() => onSelectCollection(null)}
         onSelectScreenshot={onSelectScreenshot}
         onRewindToRange={onRewindToRange}
       />
@@ -192,7 +193,7 @@ export function SavedView({ onSelectScreenshot, onRewindToRange }: SavedViewProp
                   className="flex items-center gap-3 px-4 py-3 bg-surface-raised border border-border/30 hover:border-accent/30 rounded-lg transition-all group"
                 >
                   <button
-                    onClick={() => renamingId !== col.id && setSelectedCollectionId(col.id)}
+                    onClick={() => renamingId !== col.id && onSelectCollection(col.id)}
                     className="flex-1 min-w-0 flex items-center gap-3 text-left"
                   >
                     <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-accent/10 shrink-0">
