@@ -16,10 +16,15 @@ if [ -z "$DAEMON_BIN" ]; then
     exit 0
 fi
 
-# Copy daemon binary to a stable location
+# Copy daemon binary and PaddleOCR worker script to a stable location
 mkdir -p "$INSTALL_DIR"
 cp "$DAEMON_BIN" "$INSTALL_DIR/"
 chmod +x "$INSTALL_DIR/rewindos-daemon"
+
+WORKER_SCRIPT=$(find /usr/share/rewindos /usr/lib/RewindOS /usr/lib/rewindos /usr/share/RewindOS -name "paddleocr_worker.py" -type f 2>/dev/null | head -1)
+if [ -n "$WORKER_SCRIPT" ]; then
+    cp "$WORKER_SCRIPT" "$INSTALL_DIR/"
+fi
 
 # Install systemd user service with correct binary path
 mkdir -p "$SYSTEMD_DIR"

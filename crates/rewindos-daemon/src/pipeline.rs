@@ -7,7 +7,7 @@ use rewindos_core::db::Database;
 use rewindos_core::embedding::OllamaClient;
 use rewindos_core::hasher::{self, PerceptualHasher};
 use rewindos_core::ocr::{self, OcrEngine};
-use rewindos_core::paddle_ocr::PaddleOcrEngine;
+use rewindos_core::paddle_ocr::{self, PaddleOcrSidecar};
 use rewindos_core::schema::{EmbedRequest, NewScreenshot, OcrStatus, ProcessedFrame, RawFrame};
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
@@ -363,22 +363,21 @@ async fn run_ocr_stage(
     let semaphore = Arc::new(tokio::sync::Semaphore::new(max_workers));
     let engine = OcrEngine::from_config(&config.ocr.engine);
 
-    // Load PaddleOCR engine if configured
-    let paddle_engine: Option<Arc<PaddleOcrEngine>> = if engine == OcrEngine::PaddleOcr {
-        let model_dir = rewindos_core::config::resolve_tilde_pub(&config.ocr.model_dir);
-        match model_dir {
-            Ok(dir) => match PaddleOcrEngine::load(&dir) {
-                Ok(e) => {
-                    info!("PaddleOCR engine loaded from {}", dir.display());
-                    Some(Arc::new(e))
-                }
-                Err(e) => {
-                    warn!(error = %e, "failed to load PaddleOCR, falling back to Tesseract");
-                    None
-                }
-            },
-            Err(e) => {
-                warn!(error = %e, "invalid model_dir path, falling back to Tesseract");
+    // Create PaddleOCR sidecar handle if configured (lazy — no process spawned yet)
+    let paddle_sidecar: Option<Arc<PaddleOcrSidecar>> = if engine == OcrEngine::PaddleOcr {
+        match paddle_ocr::find_worker_script() {
+            Some(script_path) => {
+                let sidecar = PaddleOcrSidecar::new(
+                    &config.ocr.python_bin,
+                    &script_path,
+                    &config.ocr.tesseract_lang,
+                    config.ocr.idle_timeout_secs,
+                );
+                info!(script = %script_path.display(), "PaddleOCR sidecar configured (lazy spawn)");
+                Some(Arc::new(sidecar))
+            }
+            None => {
+                warn!("paddleocr_worker.py not found, falling back to Tesseract");
                 None
             }
         }
@@ -386,12 +385,24 @@ async fn run_ocr_stage(
         None
     };
 
-    // Fall back to Tesseract if PaddleOCR was requested but failed to load
-    let effective_engine = if engine == OcrEngine::PaddleOcr && paddle_engine.is_none() {
+    // Fall back to Tesseract if PaddleOCR was requested but sidecar unavailable
+    let effective_engine = if engine == OcrEngine::PaddleOcr && paddle_sidecar.is_none() {
         OcrEngine::Tesseract
     } else {
         engine
     };
+
+    // Spawn idle reaper for the PaddleOCR sidecar
+    if let Some(ref sidecar) = paddle_sidecar {
+        let sidecar = Arc::clone(sidecar);
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(10));
+            loop {
+                interval.tick().await;
+                sidecar.kill_if_idle().await;
+            }
+        });
+    }
 
     info!(enabled = ocr_enabled, max_workers, engine = ?effective_engine, "OCR stage started");
 
@@ -414,7 +425,7 @@ async fn run_ocr_stage(
         let ocr_tx = ocr_tx.clone();
         let metrics = metrics.clone();
         let effective_engine = effective_engine.clone();
-        let paddle_engine = paddle_engine.clone();
+        let paddle_sidecar = paddle_sidecar.clone();
 
         tokio::spawn(async move {
             let _permit = permit;
@@ -437,7 +448,7 @@ async fn run_ocr_stage(
                 &effective_engine,
                 &frame.file_path,
                 &lang,
-                paddle_engine.as_ref(),
+                paddle_sidecar.as_ref(),
             )
             .await;
 

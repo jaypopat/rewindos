@@ -461,6 +461,53 @@ impl Database {
         Ok(())
     }
 
+    /// Delete all OCR data for a screenshot (text, FTS5 entry, bounding boxes)
+    /// and reset both ocr_status and embedding_status to 'pending'.
+    /// Used by backfill-ocr to clear old Tesseract results before re-processing.
+    pub fn clear_ocr_data(&self, screenshot_id: i64) -> Result<()> {
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute(
+            "DELETE FROM ocr_fts WHERE screenshot_id = ?1",
+            params![screenshot_id],
+        )?;
+        tx.execute(
+            "DELETE FROM ocr_text_content WHERE screenshot_id = ?1",
+            params![screenshot_id],
+        )?;
+        tx.execute(
+            "DELETE FROM ocr_bounding_boxes WHERE screenshot_id = ?1",
+            params![screenshot_id],
+        )?;
+        tx.execute(
+            "DELETE FROM ocr_embeddings WHERE screenshot_id = ?1",
+            params![screenshot_id],
+        )?;
+        tx.execute(
+            "UPDATE screenshots SET ocr_status = 'pending', embedding_status = 'pending' WHERE id = ?1",
+            params![screenshot_id],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Get screenshots that need OCR re-processing (already processed by Tesseract).
+    /// Returns (screenshot_id, file_path) for screenshots with ocr_status 'done' or 'failed'.
+    pub fn get_screenshots_for_ocr_backfill(&self, limit: usize) -> Result<Vec<(i64, String)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, file_path FROM screenshots
+             WHERE ocr_status IN ('done', 'failed')
+             ORDER BY id LIMIT ?1",
+        )?;
+        let rows = stmt.query_map(params![limit as i64], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })?;
+        let mut results = Vec::new();
+        for row in rows {
+            results.push(row?);
+        }
+        Ok(results)
+    }
+
     /// Get a screenshot by id.
     pub fn get_screenshot(&self, id: i64) -> Result<Option<Screenshot>> {
         let mut stmt = self.conn.prepare(

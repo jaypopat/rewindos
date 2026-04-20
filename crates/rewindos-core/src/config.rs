@@ -51,8 +51,12 @@ pub struct OcrConfig {
     pub engine: String,
     pub tesseract_lang: String,
     pub max_workers: u32,
-    /// Directory for PaddleOCR ONNX models (default: ~/.rewindos/models/paddleocr)
+    /// Directory for PaddleOCR ONNX models (legacy, unused by sidecar)
     pub model_dir: String,
+    /// Python binary to use for PaddleOCR sidecar (default: "python3")
+    pub python_bin: String,
+    /// Kill PaddleOCR worker after this many seconds of inactivity (default: 60)
+    pub idle_timeout_secs: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -184,6 +188,8 @@ impl Default for OcrConfig {
             tesseract_lang: "eng".to_string(),
             max_workers: 2,
             model_dir: "~/.rewindos/models/paddleocr".to_string(),
+            python_bin: "python3".to_string(),
+            idle_timeout_secs: 60,
         }
     }
 }
