@@ -186,12 +186,10 @@ export function DashboardView({ onSelectScreenshot }: DashboardViewProps) {
       )}
 
       {/* Two-column: Top Tasks + Hourly Activity */}
-      {(topTasks.length > 0 || (todayActivity && todayActivity.total_screenshots > 0)) && (
+      {todayActivity && todayActivity.total_screenshots > 0 && (
         <div className="grow grid grid-cols-1 lg:grid-cols-2 gap-4 auto-rows-fr">
           {/* Top Tasks */}
-          {topTasks.length > 0 && (
-            <TopTasksList tasks={topTasks} totalScreenTime={totalScreenTime} />
-          )}
+          <TopTasksList tasks={topTasks} totalScreenTime={totalScreenTime} />
 
           {/* Hourly Activity */}
           {todayActivity && todayActivity.total_screenshots > 0 && (
@@ -210,12 +208,10 @@ export function DashboardView({ onSelectScreenshot }: DashboardViewProps) {
       )}
 
       {/* Two-column: Categories + App Usage */}
-      {(categoryEntries.length > 0 || todayActivity) && (
+      {todayActivity && (
         <div className="grow grid grid-cols-1 lg:grid-cols-2 gap-4 auto-rows-fr">
           {/* Categories */}
-          {categoryEntries.length > 0 && totalCategoryMins > 0 && (
-            <CategoriesBreakdown entries={categoryEntries} totalMins={totalCategoryMins} />
-          )}
+          <CategoriesBreakdown entries={categoryEntries} totalMins={totalCategoryMins} />
 
           {/* App Usage Donut */}
           {todayActivity && todayActivity.app_usage.length > 0 && (

@@ -14,11 +14,9 @@ function isInputFocused(): boolean {
 export function useGlobalKeyboard({
   onSearch,
   onEscape,
-  isDetailView,
 }: {
   onSearch: () => void;
-  onEscape: () => void;
-  isDetailView: boolean;
+  onEscape?: () => void;
 }) {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -26,11 +24,11 @@ export function useGlobalKeyboard({
         e.preventDefault();
         onSearch();
       }
-      if (e.key === "Escape" && isDetailView) {
+      if (e.key === "Escape" && onEscape) {
         onEscape();
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [onSearch, onEscape, isDetailView]);
+  }, [onSearch, onEscape]);
 }
