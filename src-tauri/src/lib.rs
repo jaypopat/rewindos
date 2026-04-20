@@ -1646,7 +1646,9 @@ pub fn run() {
                 }
             }
 
-            let _tray = TrayIconBuilder::new()
+            let toggle_item_clone = toggle_item.clone();
+
+            let _tray = TrayIconBuilder::with_id("main-tray")
                 .icon(tray_icon)
                 .tooltip("RewindOS - Capturing")
                 .menu(&tray_menu)
@@ -1655,6 +1657,7 @@ pub fn run() {
                         "toggle" => {
                             // Toggle pause/resume via D-Bus
                             let app = app.clone();
+                            let toggle_item = toggle_item_clone.clone();
                             tauri::async_runtime::spawn(async move {
                                 let state = app.state::<AppState>();
                                 // Check current status
@@ -1684,7 +1687,7 @@ pub fn run() {
                                                     .unwrap_or(true);
                                                 let method =
                                                     if is_capturing { "Pause" } else { "Resume" };
-                                                let _ = state
+                                                let result = state
                                                     .dbus
                                                     .call_method(
                                                         Some("com.rewindos.Daemon"),
@@ -1694,6 +1697,19 @@ pub fn run() {
                                                         &(),
                                                     )
                                                     .await;
+                                                if result.is_ok() {
+                                                    if is_capturing {
+                                                        let _ = toggle_item.set_text("Resume Capture");
+                                                        if let Some(tray) = app.tray_by_id("main-tray") {
+                                                            let _ = tray.set_tooltip(Some("RewindOS - Paused"));
+                                                        }
+                                                    } else {
+                                                        let _ = toggle_item.set_text("Pause Capture");
+                                                        if let Some(tray) = app.tray_by_id("main-tray") {
+                                                            let _ = tray.set_tooltip(Some("RewindOS - Capturing"));
+                                                        }
+                                                    }
+                                                }
                                             }
                                         }
                                     }
@@ -1718,6 +1734,39 @@ pub fn run() {
                 })
                 .build(app)
                 .expect("failed to build tray icon");
+
+            // Probe daemon state at startup to set correct tray text
+            let app_handle = app.handle().clone();
+            let startup_toggle = toggle_item.clone();
+            tauri::async_runtime::spawn(async move {
+                let state = app_handle.state::<AppState>();
+                let reply = state
+                    .dbus
+                    .call_method(
+                        Some("com.rewindos.Daemon"),
+                        "/com/rewindos/Daemon",
+                        Some("com.rewindos.Daemon"),
+                        "GetStatus",
+                        &(),
+                    )
+                    .await;
+                if let Ok(reply) = reply {
+                    if let Ok(status_json) = reply.body().deserialize::<String>() {
+                        if let Ok(status) =
+                            serde_json::from_str::<serde_json::Value>(&status_json)
+                        {
+                            let is_capturing =
+                                status["is_capturing"].as_bool().unwrap_or(true);
+                            if !is_capturing {
+                                let _ = startup_toggle.set_text("Resume Capture");
+                                if let Some(tray) = app_handle.tray_by_id("main-tray") {
+                                    let _ = tray.set_tooltip(Some("RewindOS - Paused"));
+                                }
+                            }
+                        }
+                    }
+                }
+            });
 
             Ok(())
         })
