@@ -1,5 +1,6 @@
 mod capture;
 mod detect;
+mod mcp_server;
 mod pipeline;
 mod service;
 mod window_info;
@@ -88,7 +89,18 @@ async fn main() -> anyhow::Result<()> {
 }
 
 async fn run_mcp_server() -> anyhow::Result<()> {
-    anyhow::bail!("MCP server not yet implemented")
+    // stdio MCP protocol owns stdout — route all tracing to stderr so log lines
+    // don't poison the JSON-RPC framing. Do NOT call init_logging() here: it
+    // configures writers that may hit stdout or files in ways that assume a
+    // normal daemon run.
+    tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
+        .with_ansi(false)
+        .try_init()
+        .ok();
+
+    let config = AppConfig::load()?;
+    mcp_server::run(config).await
 }
 
 async fn dbus_client_call(method: &str) -> anyhow::Result<()> {
