@@ -4,6 +4,7 @@ pub mod db;
 pub mod embedding;
 pub mod error;
 pub mod hasher;
+pub mod mcp;
 pub mod ocr;
 pub mod paddle_ocr;
 pub mod schema;
