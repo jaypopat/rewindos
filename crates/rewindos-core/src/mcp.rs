@@ -118,6 +118,68 @@ pub fn get_app_usage(
         .collect())
 }
 
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct GetScreenshotDetailInput {
+    /// Screenshot row id.
+    pub screenshot_id: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+pub struct ScreenshotDetail {
+    pub id: i64,
+    pub timestamp: i64,
+    pub app_name: Option<String>,
+    pub window_title: Option<String>,
+    pub full_ocr_text: String,
+    pub file_path: String,
+}
+
+pub fn get_screenshot_detail(
+    db: &Database,
+    input: GetScreenshotDetailInput,
+) -> crate::error::Result<Option<ScreenshotDetail>> {
+    let Some(ss) = db.get_screenshot(input.screenshot_id)? else {
+        return Ok(None);
+    };
+    let ocr = db.get_ocr_text(input.screenshot_id)?.unwrap_or_default();
+    Ok(Some(ScreenshotDetail {
+        id: ss.id,
+        timestamp: ss.timestamp,
+        app_name: ss.app_name,
+        window_title: ss.window_title,
+        full_ocr_text: ocr,
+        file_path: ss.file_path,
+    }))
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct GetRecentActivityInput {
+    /// Window length in minutes from now, default 30.
+    #[serde(default = "default_recent_minutes")]
+    pub minutes: i64,
+}
+
+fn default_recent_minutes() -> i64 {
+    30
+}
+
+pub fn get_recent_activity(
+    db: &Database,
+    input: GetRecentActivityInput,
+    now: i64,
+) -> crate::error::Result<Vec<TimelineEntry>> {
+    let start = now - input.minutes * 60;
+    get_timeline(
+        db,
+        GetTimelineInput {
+            start_time: start,
+            end_time: now,
+            app_filter: None,
+            limit: 100,
+        },
+    )
+}
+
 pub fn search_screenshots(
     db: &Database,
     input: SearchScreenshotsInput,
@@ -199,6 +261,43 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].id, id);
         assert!(results[0].ocr_snippet.contains("rust"));
+    }
+
+    #[test]
+    fn screenshot_detail_returns_full_ocr() {
+        let db = Database::open_in_memory().unwrap();
+        let id = seed_screenshot(
+            &db,
+            "firefox",
+            "title",
+            "the full OCR body that will be returned",
+            1_700_000_000,
+        );
+        let detail = get_screenshot_detail(&db, GetScreenshotDetailInput { screenshot_id: id })
+            .unwrap()
+            .unwrap();
+        assert_eq!(detail.id, id);
+        assert_eq!(detail.full_ocr_text, "the full OCR body that will be returned");
+    }
+
+    #[test]
+    fn screenshot_detail_returns_none_for_missing() {
+        let db = Database::open_in_memory().unwrap();
+        let detail =
+            get_screenshot_detail(&db, GetScreenshotDetailInput { screenshot_id: 9999 }).unwrap();
+        assert!(detail.is_none());
+    }
+
+    #[test]
+    fn recent_activity_filters_by_time() {
+        let db = Database::open_in_memory().unwrap();
+        let now = 1_700_000_000;
+        // OCR text must be >10 chars to surface via get_ocr_sessions_with_ids
+        seed_screenshot(&db, "firefox", "A", "old window text", now - 3600);
+        seed_screenshot(&db, "code", "B", "new window text", now - 300);
+        let entries = get_recent_activity(&db, GetRecentActivityInput { minutes: 30 }, now).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert!(entries[0].ocr_snippet.contains("new"));
     }
 
     #[test]
