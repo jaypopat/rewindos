@@ -37,6 +37,55 @@ pub struct ScreenshotSummary {
     pub ocr_snippet: String,
 }
 
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct GetTimelineInput {
+    /// Start of window, unix seconds, inclusive.
+    pub start_time: i64,
+    /// End of window, unix seconds, inclusive.
+    pub end_time: i64,
+    /// Restrict to one app name (exact match).
+    pub app_filter: Option<String>,
+    #[serde(default = "default_timeline_limit")]
+    pub limit: i64,
+}
+
+fn default_timeline_limit() -> i64 {
+    100
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+pub struct TimelineEntry {
+    pub id: i64,
+    pub timestamp: i64,
+    pub app_name: Option<String>,
+    pub window_title: Option<String>,
+    pub ocr_snippet: String,
+}
+
+pub fn get_timeline(
+    db: &Database,
+    input: GetTimelineInput,
+) -> crate::error::Result<Vec<TimelineEntry>> {
+    let sessions =
+        db.get_ocr_sessions_with_ids(input.start_time, input.end_time, input.limit)?;
+    Ok(sessions
+        .into_iter()
+        .filter(|(_, app, _, _, _, _)| match &input.app_filter {
+            Some(f) => app.as_deref() == Some(f.as_str()),
+            None => true,
+        })
+        .map(
+            |(id, app_name, window_title, timestamp, _file_path, ocr_text)| TimelineEntry {
+                id,
+                timestamp,
+                app_name,
+                window_title,
+                ocr_snippet: truncate_chars(&ocr_text, 300),
+            },
+        )
+        .collect())
+}
+
 pub fn search_screenshots(
     db: &Database,
     input: SearchScreenshotsInput,
@@ -118,6 +167,51 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].id, id);
         assert!(results[0].ocr_snippet.contains("rust"));
+    }
+
+    #[test]
+    fn timeline_returns_ordered_entries() {
+        let db = Database::open_in_memory().unwrap();
+        // OCR text must be >10 chars to pass get_ocr_sessions_with_ids's filter
+        seed_screenshot(&db, "firefox", "A", "early window text", 1_700_000_000);
+        seed_screenshot(&db, "code", "B", "middle window text", 1_700_000_500);
+        seed_screenshot(&db, "slack", "C", "late window text", 1_700_001_000);
+
+        let entries = get_timeline(
+            &db,
+            GetTimelineInput {
+                start_time: 1_700_000_000,
+                end_time: 1_700_001_500,
+                app_filter: None,
+                limit: 10,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(entries.len(), 3);
+        assert!(entries[0].timestamp <= entries[1].timestamp);
+        assert!(entries[1].timestamp <= entries[2].timestamp);
+    }
+
+    #[test]
+    fn timeline_filters_by_app() {
+        let db = Database::open_in_memory().unwrap();
+        seed_screenshot(&db, "firefox", "A", "firefox window text", 1_700_000_000);
+        seed_screenshot(&db, "code", "B", "code window text", 1_700_000_500);
+
+        let entries = get_timeline(
+            &db,
+            GetTimelineInput {
+                start_time: 0,
+                end_time: 2_000_000_000,
+                app_filter: Some("code".to_string()),
+                limit: 10,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].app_name.as_deref(), Some("code"));
     }
 
     #[test]
