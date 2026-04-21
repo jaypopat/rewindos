@@ -62,6 +62,8 @@ enum Command {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Run as an MCP server over stdio (invoked by Claude Code).
+    Mcp,
 }
 
 #[tokio::main]
@@ -81,7 +83,12 @@ async fn main() -> anyhow::Result<()> {
             thumb_width,
             dry_run,
         } => run_recompress(quality, max_width, thumb_width, dry_run).await,
+        Command::Mcp => run_mcp_server().await,
     }
+}
+
+async fn run_mcp_server() -> anyhow::Result<()> {
+    anyhow::bail!("MCP server not yet implemented")
 }
 
 async fn dbus_client_call(method: &str) -> anyhow::Result<()> {
