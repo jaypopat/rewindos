@@ -6,7 +6,7 @@
 
 **Architecture:** The `rewindos-daemon` binary gains an `--mcp` mode that starts a stdio MCP server. Claude Code spawns it on demand. For the UI chat, responsibilities are split: **Rust** handles DB queries (`build_chat_context`) and Claude Code subprocess spawning (`ask_claude`, blocking); **the client** handles Ollama HTTP streaming directly via `fetch` + `ReadableStream` + `AbortController`, and React state holds session history. No Tauri events for chat — the old `ask-token`/`ask-done`/`ask-error` plumbing is removed.
 
-**Tech Stack:** Rust (`rmcp` crate for MCP server, `tokio::process::Command` for Claude spawn), `rusqlite` (existing), React 19 + native `fetch` streaming (frontend), Tauri v2 (`invoke` only, no event plumbing for chat).
+**Tech Stack:** Rust (`rmcp` 1.5 with the attribute-macro tool pattern — `#[tool_router]` / `#[tool]` / `#[tool_handler]`, JSON schemas derived via `schemars`; `tokio::process::Command` for Claude spawn), `rusqlite` (existing), React 19 + native `fetch` streaming (frontend), Tauri v2 (`invoke` only, no event plumbing for chat).
 
 ---
 
@@ -63,8 +63,8 @@ Tauri commands are for things that **need** native access: DB queries, subproces
 
 | Path | Change |
 |---|---|
-| `crates/rewindos-core/Cargo.toml` | Add `rmcp` dependency. |
-| `crates/rewindos-daemon/Cargo.toml` | Add `rmcp` dependency. |
+| `crates/rewindos-core/Cargo.toml` | Add `schemars` (for `JsonSchema` derives on MCP input structs). |
+| `crates/rewindos-daemon/Cargo.toml` | Add `rmcp` (server + macros + stdio + schemars features). |
 | `crates/rewindos-daemon/src/main.rs` | Add `Mcp` subcommand. |
 | `src-tauri/src/lib.rs` | Register new commands, **remove** the old `ask`/`ask_cancel`/`ask_new_session`/`ask_health` commands and their state (`chat_sessions`, `ask_cancel_tokens`). |
 | `src-tauri/Cargo.toml` | Add `which = "7"`. |
@@ -89,22 +89,24 @@ Tauri commands are for things that **need** native access: DB queries, subproces
 - Modify: `crates/rewindos-daemon/Cargo.toml`
 - Modify: `crates/rewindos-daemon/src/main.rs`
 
-- [ ] **Step 1: Add `rmcp` to both crate manifests**
+- [ ] **Step 1: Add `rmcp` + `schemars` to the manifests**
+
+`rmcp` 1.5 is the modern crate. Features: `server` (ServerHandler + tool router), `macros` (`#[tool]` / `#[tool_router]` / `#[tool_handler]`), `transport-io` (server-side stdio), `schemars` (auto-derive JSON schemas). `schemars` goes directly on `rewindos-core` so the input structs (Tasks 2–5) can derive `JsonSchema` without dragging the full rmcp dep into core.
 
 In `crates/rewindos-core/Cargo.toml`, add to `[dependencies]`:
 ```toml
-rmcp = { version = "0.2", features = ["server", "transport-io"] }
+schemars = "0.8"
 ```
 
 In `crates/rewindos-daemon/Cargo.toml`, add to `[dependencies]`:
 ```toml
-rmcp = { version = "0.2", features = ["server", "transport-io"] }
+rmcp = { version = "1.5", features = ["server", "macros", "transport-io", "schemars"] }
 ```
 
-- [ ] **Step 2: Verify the crate resolves**
+- [ ] **Step 2: Verify the crates resolve**
 
 Run: `cargo check -p rewindos-core -p rewindos-daemon`
-Expected: Compiles. If `rmcp` 0.2 doesn't exist, run `cargo search rmcp` and use the latest published version; feature names may differ — check `cargo doc -p rmcp --open` for the stdio server transport feature.
+Expected: Compiles. If `schemars` 0.8 conflicts with the version rmcp pulls in, align on whatever rmcp uses (check `cargo tree -p rewindos-daemon -i schemars`).
 
 - [ ] **Step 3: Add `Mcp` subcommand to the daemon CLI**
 
@@ -153,7 +155,7 @@ Expected: Prints "MCP server not yet implemented" and exits non-zero.
 
 ```bash
 git add crates/rewindos-core/Cargo.toml crates/rewindos-daemon/Cargo.toml crates/rewindos-daemon/src/main.rs Cargo.lock
-git commit -m "scaffold MCP subcommand and add rmcp dependency"
+git commit -m "scaffold MCP subcommand and add rmcp + schemars deps"
 ```
 
 ---
@@ -175,13 +177,18 @@ Create `crates/rewindos-core/src/mcp.rs`:
 ```rust
 use crate::db::Database;
 use crate::schema::SearchFilters;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct SearchScreenshotsInput {
+    /// Search query (free text, matched against OCR content).
     pub query: String,
+    /// Unix timestamp (seconds) — start of the time window, inclusive.
     pub start_time: Option<i64>,
+    /// Unix timestamp (seconds) — end of the time window, inclusive.
     pub end_time: Option<i64>,
+    /// Restrict to screenshots from this app name (exact match).
     pub app_filter: Option<String>,
     #[serde(default = "default_limit")]
     pub limit: i64,
@@ -314,10 +321,13 @@ git commit -m "add search_screenshots MCP tool"
 Append to `crates/rewindos-core/src/mcp.rs`:
 
 ```rust
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct GetTimelineInput {
+    /// Start of window, unix seconds, inclusive.
     pub start_time: i64,
+    /// End of window, unix seconds, inclusive.
     pub end_time: i64,
+    /// Restrict to one app name (exact match).
     pub app_filter: Option<String>,
     #[serde(default = "default_timeline_limit")]
     pub limit: i64,
@@ -411,9 +421,11 @@ git commit -m "add get_timeline MCP tool"
 Append to `crates/rewindos-core/src/mcp.rs`:
 
 ```rust
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct GetAppUsageInput {
+    /// Start of window, unix seconds, inclusive.
     pub start_time: i64,
+    /// End of window, unix seconds, inclusive.
     pub end_time: i64,
 }
 
@@ -486,8 +498,9 @@ git commit -m "add get_app_usage MCP tool"
 Append to `crates/rewindos-core/src/mcp.rs`:
 
 ```rust
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct GetScreenshotDetailInput {
+    /// Screenshot row id.
     pub screenshot_id: i64,
 }
 
@@ -519,8 +532,9 @@ pub fn get_screenshot_detail(
     }))
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct GetRecentActivityInput {
+    /// Window length in minutes from now, default 30.
     #[serde(default = "default_recent_minutes")]
     pub minutes: i64,
 }
@@ -592,7 +606,7 @@ git commit -m "add get_screenshot_detail and get_recent_activity MCP tools"
 - Create: `crates/rewindos-daemon/src/mcp_server.rs`
 - Modify: `crates/rewindos-daemon/src/main.rs`
 
-**Note:** The exact `rmcp` API depends on the version resolved in Task 1. The contract to preserve: stdio transport, 5 tools registered, each accepting JSON matching `rewindos_core::mcp` input structs and returning JSON of the output structs.
+Uses rmcp 1.5's attribute-macro pattern: `#[tool_router]` collects `#[tool]` methods into a `ToolRouter<Self>`, `#[tool_handler]` wires the router into `ServerHandler`. Arg structs use `Parameters<T>` wrapper. stdout is protocol-only — tracing goes to stderr.
 
 - [ ] **Step 1: Add the module**
 
@@ -615,150 +629,98 @@ use rewindos_core::mcp::{
     GetAppUsageInput, GetRecentActivityInput, GetScreenshotDetailInput, GetTimelineInput,
     SearchScreenshotsInput,
 };
-
-// rmcp imports — adapt to the resolved version. These match rmcp 0.2.x.
 use rmcp::{
-    model::{CallToolResult, Content, Tool},
-    service::{RequestContext, RoleServer, Server, ServerHandler},
-    transport::stdio::stdio,
-    Error as McpError,
+    handler::server::{router::tool::ToolRouter, wrapper::Parameters},
+    model::{CallToolResult, Content, ErrorData as McpError},
+    tool, tool_handler, tool_router,
+    transport::stdio,
+    ServerHandler, ServiceExt,
 };
-use serde_json::Value;
 
 #[derive(Clone)]
 pub struct RewindosMcpServer {
     db: Arc<Database>,
     capture_interval_seconds: u32,
+    tool_router: ToolRouter<Self>,
 }
 
+#[tool_router]
 impl RewindosMcpServer {
     pub fn new(db: Database, capture_interval_seconds: u32) -> Self {
-        Self { db: Arc::new(db), capture_interval_seconds }
-    }
-
-    fn tool_definitions() -> Vec<Tool> {
-        vec![
-            Tool::new(
-                "search_screenshots",
-                "Full-text search over OCR'd screenshot history. Optional time/app filters.",
-                serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "query": { "type": "string" },
-                        "start_time": { "type": ["integer", "null"] },
-                        "end_time": { "type": ["integer", "null"] },
-                        "app_filter": { "type": ["string", "null"] },
-                        "limit": { "type": "integer", "default": 20 }
-                    },
-                    "required": ["query"]
-                }),
-            ),
-            Tool::new(
-                "get_timeline",
-                "Chronological activity between start_time and end_time.",
-                serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "start_time": { "type": "integer" },
-                        "end_time": { "type": "integer" },
-                        "app_filter": { "type": ["string", "null"] },
-                        "limit": { "type": "integer", "default": 100 }
-                    },
-                    "required": ["start_time", "end_time"]
-                }),
-            ),
-            Tool::new(
-                "get_app_usage",
-                "App usage breakdown (minutes per app) over a time range.",
-                serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "start_time": { "type": "integer" },
-                        "end_time": { "type": "integer" }
-                    },
-                    "required": ["start_time", "end_time"]
-                }),
-            ),
-            Tool::new(
-                "get_screenshot_detail",
-                "Full OCR text and metadata for one screenshot.",
-                serde_json::json!({
-                    "type": "object",
-                    "properties": { "screenshot_id": { "type": "integer" } },
-                    "required": ["screenshot_id"]
-                }),
-            ),
-            Tool::new(
-                "get_recent_activity",
-                "Timeline for the last N minutes (default 30).",
-                serde_json::json!({
-                    "type": "object",
-                    "properties": { "minutes": { "type": "integer", "default": 30 } }
-                }),
-            ),
-        ]
-    }
-
-    fn dispatch_tool(&self, name: &str, args: Value) -> Result<Value, String> {
-        match name {
-            "search_screenshots" => {
-                let input: SearchScreenshotsInput = serde_json::from_value(args).map_err(|e| e.to_string())?;
-                let out = search_screenshots(&self.db, input).map_err(|e| e.to_string())?;
-                serde_json::to_value(out).map_err(|e| e.to_string())
-            }
-            "get_timeline" => {
-                let input: GetTimelineInput = serde_json::from_value(args).map_err(|e| e.to_string())?;
-                let out = get_timeline(&self.db, input).map_err(|e| e.to_string())?;
-                serde_json::to_value(out).map_err(|e| e.to_string())
-            }
-            "get_app_usage" => {
-                let input: GetAppUsageInput = serde_json::from_value(args).map_err(|e| e.to_string())?;
-                let out = get_app_usage(&self.db, input, self.capture_interval_seconds).map_err(|e| e.to_string())?;
-                serde_json::to_value(out).map_err(|e| e.to_string())
-            }
-            "get_screenshot_detail" => {
-                let input: GetScreenshotDetailInput = serde_json::from_value(args).map_err(|e| e.to_string())?;
-                let out = get_screenshot_detail(&self.db, input).map_err(|e| e.to_string())?;
-                serde_json::to_value(out).map_err(|e| e.to_string())
-            }
-            "get_recent_activity" => {
-                let input: GetRecentActivityInput = serde_json::from_value(args).map_err(|e| e.to_string())?;
-                let now = chrono::Local::now().timestamp();
-                let out = get_recent_activity(&self.db, input, now).map_err(|e| e.to_string())?;
-                serde_json::to_value(out).map_err(|e| e.to_string())
-            }
-            _ => Err(format!("unknown tool: {name}")),
+        Self {
+            db: Arc::new(db),
+            capture_interval_seconds,
+            tool_router: Self::tool_router(),
         }
     }
-}
 
-impl ServerHandler for RewindosMcpServer {
-    async fn list_tools(&self, _ctx: RequestContext<RoleServer>) -> Result<Vec<Tool>, McpError> {
-        Ok(Self::tool_definitions())
+    fn ok_json<T: serde::Serialize>(value: &T) -> Result<CallToolResult, McpError> {
+        let body = serde_json::to_string(value)
+            .map_err(|e| McpError::internal_error(format!("serialize: {e}"), None))?;
+        Ok(CallToolResult::success(vec![Content::text(body)]))
     }
 
-    async fn call_tool(
+    #[tool(description = "Full-text search over OCR'd screenshot history. Optional time/app filters.")]
+    async fn search_screenshots(
         &self,
-        name: String,
-        arguments: Option<Value>,
-        _ctx: RequestContext<RoleServer>,
+        Parameters(input): Parameters<SearchScreenshotsInput>,
     ) -> Result<CallToolResult, McpError> {
-        let args = arguments.unwrap_or(Value::Null);
-        match self.dispatch_tool(&name, args) {
-            Ok(result) => Ok(CallToolResult::success(vec![Content::text(
-                serde_json::to_string(&result).unwrap_or_default(),
-            )])),
-            Err(e) => Ok(CallToolResult::error(vec![Content::text(e)])),
-        }
+        let out = search_screenshots(&self.db, input)
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        Self::ok_json(&out)
+    }
+
+    #[tool(description = "Chronological activity between start_time and end_time.")]
+    async fn get_timeline(
+        &self,
+        Parameters(input): Parameters<GetTimelineInput>,
+    ) -> Result<CallToolResult, McpError> {
+        let out = get_timeline(&self.db, input)
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        Self::ok_json(&out)
+    }
+
+    #[tool(description = "App usage breakdown (minutes per app) over a time range.")]
+    async fn get_app_usage(
+        &self,
+        Parameters(input): Parameters<GetAppUsageInput>,
+    ) -> Result<CallToolResult, McpError> {
+        let out = get_app_usage(&self.db, input, self.capture_interval_seconds)
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        Self::ok_json(&out)
+    }
+
+    #[tool(description = "Full OCR text and metadata for one screenshot.")]
+    async fn get_screenshot_detail(
+        &self,
+        Parameters(input): Parameters<GetScreenshotDetailInput>,
+    ) -> Result<CallToolResult, McpError> {
+        let out = get_screenshot_detail(&self.db, input)
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        Self::ok_json(&out)
+    }
+
+    #[tool(description = "Timeline for the last N minutes (default 30).")]
+    async fn get_recent_activity(
+        &self,
+        Parameters(input): Parameters<GetRecentActivityInput>,
+    ) -> Result<CallToolResult, McpError> {
+        let now = chrono::Local::now().timestamp();
+        let out = get_recent_activity(&self.db, input, now)
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        Self::ok_json(&out)
     }
 }
+
+#[tool_handler]
+impl ServerHandler for RewindosMcpServer {}
 
 pub async fn run(config: AppConfig) -> anyhow::Result<()> {
     let db_path = config.db_path()?;
     let db = Database::open(&db_path)?;
     let server = RewindosMcpServer::new(db, config.capture.interval_seconds);
-    let (stdin, stdout) = stdio();
-    Server::new(server).serve(stdin, stdout).await?;
+    let service = server.serve(stdio()).await?;
+    service.waiting().await?;
     Ok(())
 }
 ```
@@ -769,7 +731,14 @@ In `crates/rewindos-daemon/src/main.rs`, replace `run_mcp_server`:
 
 ```rust
 async fn run_mcp_server() -> anyhow::Result<()> {
-    // Do NOT call init_logging() — it would corrupt the stdio MCP protocol.
+    // stdio MCP protocol owns stdout — route all tracing to stderr so log lines
+    // don't poison the JSON-RPC framing. Do NOT call init_logging() (which may
+    // write to stdout or files).
+    tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
+        .with_ansi(false)
+        .try_init()
+        .ok();
     let config = AppConfig::load()?;
     mcp_server::run(config).await
 }
@@ -778,14 +747,14 @@ async fn run_mcp_server() -> anyhow::Result<()> {
 - [ ] **Step 4: Verify compilation**
 
 Run: `cargo check -p rewindos-daemon`
-Expected: Compiles. If rmcp's API names don't match, adapt — the shape (struct implementing a server trait + tool dispatcher) is what matters.
+Expected: Compiles. If a macro name or import path has drifted in a later rmcp patch release, consult `https://github.com/modelcontextprotocol/rust-sdk/tree/main/examples/servers/src/` — `counter_stdio.rs` + `common/counter.rs` is the closest template. Shape to preserve: typed `Parameters<T>` tool args, `CallToolResult` / `ErrorData` returns, `service.serve(stdio()).await?` + `service.waiting().await?`.
 
 - [ ] **Step 5: Manual smoke test**
 
 ```bash
 echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"0"}}}' | cargo run -p rewindos-daemon -- mcp
 ```
-Expected: A JSON-RPC response on stdout with `serverInfo`.
+Expected: A JSON-RPC response on stdout with `serverInfo`. Any tracing output should appear on stderr, not stdout.
 
 - [ ] **Step 6: Commit**
 
