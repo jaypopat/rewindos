@@ -86,6 +86,38 @@ pub fn get_timeline(
         .collect())
 }
 
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct GetAppUsageInput {
+    /// Start of window, unix seconds, inclusive.
+    pub start_time: i64,
+    /// End of window, unix seconds, inclusive.
+    pub end_time: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+pub struct AppUsage {
+    pub app_name: String,
+    pub minutes: f64,
+    pub screenshot_count: i64,
+}
+
+pub fn get_app_usage(
+    db: &Database,
+    input: GetAppUsageInput,
+    capture_interval_seconds: u32,
+) -> crate::error::Result<Vec<AppUsage>> {
+    let stats = db.get_app_usage_stats(input.start_time, Some(input.end_time))?;
+    let seconds = capture_interval_seconds as f64;
+    Ok(stats
+        .into_iter()
+        .map(|s| AppUsage {
+            app_name: s.app_name,
+            minutes: s.screenshot_count as f64 * seconds / 60.0,
+            screenshot_count: s.screenshot_count,
+        })
+        .collect())
+}
+
 pub fn search_screenshots(
     db: &Database,
     input: SearchScreenshotsInput,
@@ -167,6 +199,28 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].id, id);
         assert!(results[0].ocr_snippet.contains("rust"));
+    }
+
+    #[test]
+    fn app_usage_aggregates_by_app() {
+        let db = Database::open_in_memory().unwrap();
+        seed_screenshot(&db, "firefox", "A", "window text a", 1_700_000_000);
+        seed_screenshot(&db, "firefox", "B", "window text b", 1_700_000_030);
+        seed_screenshot(&db, "code", "C", "window text c", 1_700_000_060);
+
+        let usage = get_app_usage(
+            &db,
+            GetAppUsageInput {
+                start_time: 0,
+                end_time: 2_000_000_000,
+            },
+            5,
+        )
+        .unwrap();
+
+        let firefox = usage.iter().find(|u| u.app_name == "firefox").unwrap();
+        assert_eq!(firefox.screenshot_count, 2);
+        assert!((firefox.minutes - (2.0 * 5.0 / 60.0)).abs() < 0.001);
     }
 
     #[test]
