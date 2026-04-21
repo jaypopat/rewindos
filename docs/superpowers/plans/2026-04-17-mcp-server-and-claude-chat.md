@@ -95,8 +95,9 @@ Tauri commands are for things that **need** native access: DB queries, subproces
 
 In `crates/rewindos-core/Cargo.toml`, add to `[dependencies]`:
 ```toml
-schemars = "0.8"
+schemars = "1"
 ```
+(rmcp 1.5 uses schemars 1; matching versions avoids a split-dep warning and keeps derive attributes compatible.)
 
 In `crates/rewindos-daemon/Cargo.toml`, add to `[dependencies]`:
 ```toml
