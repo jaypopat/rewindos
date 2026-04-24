@@ -113,7 +113,11 @@ export function AskProvider({ children }: { children: ReactNode }) {
         const claude = await claudeDetect();
         const useClaude = claude.available && claude.mcp_registered;
 
-        let chatId = activeChatId;
+        // Build attachment context FIRST — if daemon fails here, we haven't created a chat stub
+        // and the user won't see an orphan "New chat" row in the sidebar.
+        const expandedText = await buildAttachedContext(attachedIds, text);
+        const storedText = encodeAttachments(attachedIds, text);
+
         // effectiveModel: what this SEND should use. For existing chats, use the persisted chat.model.
         // For new chats, use the user's pick (pendingModel) or the backend default. Lifted above the
         // new-chat block so it's available later for the Ollama/Claude dispatch — reading activeChat
@@ -124,6 +128,7 @@ export function AskProvider({ children }: { children: ReactNode }) {
         const effectiveModel =
           activeChat?.model ?? pendingModel ?? backendDefault;
 
+        let chatId = activeChatId;
         if (chatId == null) {
           const title = text.slice(0, 60).trim() || "New chat";
           chatId = await createChat(title, useClaude ? "claude" : "ollama", null);
@@ -135,9 +140,6 @@ export function AskProvider({ children }: { children: ReactNode }) {
           qc.invalidateQueries({ queryKey: queryKeys.chats() });
           qc.invalidateQueries({ queryKey: ["chat", chatId] as const });
         }
-
-        const expandedText = await buildAttachedContext(attachedIds, text);
-        const storedText = encodeAttachments(attachedIds, text);
 
         if (useClaude) {
           if (attachedIds.length > 0) {

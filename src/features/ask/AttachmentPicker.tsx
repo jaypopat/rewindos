@@ -25,16 +25,15 @@ export function AttachmentPicker({ open, onClose, onAttach }: AttachmentPickerPr
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<Set<number>>(new Set());
 
-  const now = Math.floor(Date.now() / 1000);
-  const filters: SearchFilters = useMemo(
-    () => ({
+  const filters: SearchFilters = useMemo(() => {
+    const now = Math.floor(Date.now() / 1000);
+    return {
       start_time: now - 3 * DAY,
       end_time: now,
       limit: 60,
       offset: 0,
-    }),
-    [now],
-  );
+    };
+  }, []);
 
   const { data: searchResponse } = useQuery({
     queryKey: queryKeys.search(query, filters),
