@@ -8,6 +8,7 @@ import { ollamaHealth } from "@/lib/ollama-chat";
 import { useAskChat } from "@/context/AskContext";
 import { AskMessages } from "./AskMessages";
 import { AskEmptyState } from "./AskEmptyState";
+import { AskModelPicker } from "./AskModelPicker";
 import { ChatSidebar } from "./ChatSidebar";
 import {
   PromptInput,
@@ -70,13 +71,6 @@ export function AskView({ onSelectScreenshot: _onSelectScreenshot }: AskViewProp
     [submit],
   );
 
-  const backendLabel = usingClaude ? "claude" : "local";
-  const backendTitle = usingClaude
-    ? "Claude Code with MCP — full screen history tools"
-    : ollamaOnline
-      ? "Local Ollama — text-only context"
-      : "No chat backend available";
-
   return (
     <div className="flex-1 flex min-h-0">
       <ChatSidebar />
@@ -95,15 +89,7 @@ export function AskView({ onSelectScreenshot: _onSelectScreenshot }: AskViewProp
               ask
             </span>
             <span className="text-border">·</span>
-            <span
-              className={cn(
-                "font-mono text-[10px] uppercase tracking-wider",
-                usingClaude ? "text-semantic" : "text-text-muted",
-              )}
-              title={backendTitle}
-            >
-              {backendLabel}
-            </span>
+            <AskModelPicker />
           </div>
         </div>
 

@@ -17,7 +17,10 @@ import {
   createChat,
   getChatMessages,
   getConfig,
+  listChats,
+  setModel,
   type AskStreamEvent,
+  type Chat,
   type ChatMessageRow,
 } from "@/lib/api";
 import { ollamaChat, type OllamaMessage } from "@/lib/ollama-chat";
@@ -34,6 +37,7 @@ interface RootConfigShape {
 
 interface AskContextValue {
   activeChatId: number | null;
+  activeChat: Chat | null;
   messages: ChatMessageRow[];
   isStreaming: boolean;
   error: string | null;
@@ -41,6 +45,8 @@ interface AskContextValue {
   cancelStream: () => void;
   selectChat: (chatId: number | null) => void;
   startNewChat: () => void;
+  pendingModel: string | null;
+  setPendingModel: (model: string | null) => void;
 }
 
 const AskContext = createContext<AskContextValue | null>(null);
@@ -59,6 +65,28 @@ export function AskProvider({ children }: { children: ReactNode }) {
     queryFn: () => (activeChatId ? getChatMessages(activeChatId) : Promise.resolve([])),
     enabled: !!activeChatId,
   });
+
+  const { data: activeChat = null } = useQuery<Chat | null>({
+    queryKey: activeChatId
+      ? (["chat", activeChatId] as const)
+      : (["chat", "none"] as const),
+    queryFn: async () => {
+      if (!activeChatId) return null;
+      const chats = await listChats(200);
+      return chats.find((c) => c.id === activeChatId) ?? null;
+    },
+    enabled: !!activeChatId,
+  });
+
+  const { data: appConfig } = useQuery({
+    queryKey: queryKeys.config(),
+    queryFn: getConfig,
+  });
+
+  const [pendingModel, setPendingModelState] = useState<string | null>(null);
+  const setPendingModel = useCallback((m: string | null) => {
+    setPendingModelState(m);
+  }, []);
 
   const selectChat = useCallback((id: number | null) => {
     setActiveChatId(id);
@@ -87,7 +115,15 @@ export function AskProvider({ children }: { children: ReactNode }) {
           const title = text.slice(0, 60).trim() || "New chat";
           chatId = await createChat(title, useClaude ? "claude" : "ollama", null);
           setActiveChatId(chatId);
+          const chosenModel =
+            pendingModel ??
+            (useClaude ? "sonnet" : (appConfig as RootConfigShape | undefined)?.chat.model ?? "");
+          if (chosenModel) {
+            await setModel(chatId, chosenModel);
+          }
+          setPendingModelState(null);
           qc.invalidateQueries({ queryKey: queryKeys.chats() });
+          qc.invalidateQueries({ queryKey: ["chat", chatId] as const });
         }
 
         if (useClaude) {
@@ -123,7 +159,7 @@ export function AskProvider({ children }: { children: ReactNode }) {
           let accumulated = "";
           await ollamaChat({
             baseUrl: config.chat.ollama_url,
-            model: config.chat.model,
+            model: activeChat?.model ?? config.chat.model,
             temperature: config.chat.temperature,
             messages: ollamaMessages,
             signal: abortRef.current.signal,
@@ -170,7 +206,7 @@ export function AskProvider({ children }: { children: ReactNode }) {
         abortRef.current = null;
       }
     },
-    [activeChatId, messages, isStreaming, qc],
+    [activeChatId, activeChat, messages, isStreaming, pendingModel, appConfig, qc],
   );
 
   const cancelStream = useCallback(() => {
@@ -187,6 +223,7 @@ export function AskProvider({ children }: { children: ReactNode }) {
   const value = useMemo<AskContextValue>(
     () => ({
       activeChatId,
+      activeChat,
       messages,
       isStreaming,
       error,
@@ -194,9 +231,12 @@ export function AskProvider({ children }: { children: ReactNode }) {
       cancelStream,
       selectChat,
       startNewChat,
+      pendingModel,
+      setPendingModel,
     }),
     [
       activeChatId,
+      activeChat,
       messages,
       isStreaming,
       error,
@@ -204,6 +244,8 @@ export function AskProvider({ children }: { children: ReactNode }) {
       cancelStream,
       selectChat,
       startNewChat,
+      pendingModel,
+      setPendingModel,
     ],
   );
 
