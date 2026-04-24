@@ -390,3 +390,105 @@ pub struct OpenTodo {
     pub date: String,
     pub text: String,
 }
+
+// -- Chat --
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Chat {
+    pub id: i64,
+    pub title: String,
+    pub claude_session_id: Option<String>,
+    pub backend: ChatBackend,
+    pub created_at: i64,
+    pub last_activity_at: i64,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ChatBackend {
+    Claude,
+    Ollama,
+}
+
+impl ChatBackend {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ChatBackend::Claude => "claude",
+            ChatBackend::Ollama => "ollama",
+        }
+    }
+    pub fn parse_sql(s: &str) -> Option<Self> {
+        match s {
+            "claude" => Some(ChatBackend::Claude),
+            "ollama" => Some(ChatBackend::Ollama),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ChatRole {
+    User,
+    Assistant,
+}
+
+impl ChatRole {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ChatRole::User => "user",
+            ChatRole::Assistant => "assistant",
+        }
+    }
+    pub fn parse_sql(s: &str) -> Option<Self> {
+        match s {
+            "user" => Some(ChatRole::User),
+            "assistant" => Some(ChatRole::Assistant),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BlockKind {
+    Text,
+    ToolUse,
+    ToolResult,
+    Thinking,
+}
+
+impl BlockKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            BlockKind::Text => "text",
+            BlockKind::ToolUse => "tool_use",
+            BlockKind::ToolResult => "tool_result",
+            BlockKind::Thinking => "thinking",
+        }
+    }
+    pub fn parse_sql(s: &str) -> Option<Self> {
+        match s {
+            "text" => Some(BlockKind::Text),
+            "tool_use" => Some(BlockKind::ToolUse),
+            "tool_result" => Some(BlockKind::ToolResult),
+            "thinking" => Some(BlockKind::Thinking),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ChatMessageRow {
+    pub id: i64,
+    pub chat_id: i64,
+    pub role: ChatRole,
+    pub block_type: BlockKind,
+    /// Raw JSON body; shape depends on block_type.
+    /// text/thinking: { "text": String }
+    /// tool_use:      { "id": String, "name": String, "input": JSON }
+    /// tool_result:   { "tool_use_id": String, "content": String, "is_error"?: bool }
+    pub content_json: String,
+    pub is_partial: bool,
+    pub created_at: i64,
+}

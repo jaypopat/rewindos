@@ -1,4 +1,5 @@
 pub mod chat;
+pub mod chat_store;
 pub mod config;
 pub mod db;
 pub mod embedding;

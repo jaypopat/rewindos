@@ -1,3 +1,5 @@
+mod ask_stream;
+mod chat_commands;
 mod chat_context;
 mod claude_code;
 
@@ -641,51 +643,195 @@ async fn build_chat_context(
     chat_context::build(&state.db, state.embedding_client.as_ref(), &config, &query).await
 }
 
+const SYSTEM_PROMPT_FOR_CLAUDE: &str = r#"You are RewindOS, a local AI assistant with access to the user's screen capture history via MCP tools (search_screenshots, get_timeline, get_app_usage, get_screenshot_detail, get_recent_activity).
+
+Answer directly. No preamble. No outline scaffolding. No "insight" blocks. No headers unless the answer naturally has >3 sections.
+
+When referencing a screenshot you retrieved via a tool, include its id inline as [REF:ID]. Be specific about timestamps, app names, window titles.
+
+If the context has no relevant data, say "I don't have enough screen history for that time period." Do not fabricate."#;
+
 #[tauri::command]
 async fn ask_claude(
     state: State<'_, AppState>,
-    session_id: String,
+    chat_id: i64,
     prompt: String,
-) -> Result<String, String> {
-    let child = claude_code::ask_claude_spawn(&prompt).await?;
+    on_event: tauri::ipc::Channel<ask_stream::AskStreamEvent>,
+) -> Result<(), String> {
+    use rewindos_core::chat_store;
+    use rewindos_core::schema::{BlockKind, ChatRole};
+    use tokio::io::{AsyncBufReadExt, BufReader};
+
+    let existing_session_id = {
+        let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+        let chat = chat_store::get_chat(&db, chat_id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("chat {chat_id} not found"))?;
+        chat.claude_session_id.clone()
+    };
+
+    {
+        let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+        let body = serde_json::json!({ "text": prompt }).to_string();
+        chat_store::append_message(
+            &db,
+            chat_id,
+            ChatRole::User,
+            BlockKind::Text,
+            &body,
+            false,
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    let resume = existing_session_id.is_some();
+    let session_arg = existing_session_id
+        .clone()
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+
+    let mut child = claude_code::ask_claude_stream_spawn(
+        &prompt,
+        SYSTEM_PROMPT_FOR_CLAUDE,
+        Some(&session_arg),
+        resume,
+    )
+    .await?;
+
     let pid = child.id().ok_or("no pid for claude child")?;
+    {
+        let mut map = state.claude_pids.lock().await;
+        map.insert(chat_id.to_string(), pid);
+    }
+
+    let stdout = child.stdout.take().ok_or("no stdout from claude")?;
+    let mut lines = BufReader::new(stdout).lines();
+
+    let mut saw_session = existing_session_id.clone();
+
+    while let Some(line) = lines.next_line().await.map_err(|e| e.to_string())? {
+        if line.trim().is_empty() {
+            continue;
+        }
+        for ev in ask_stream::parse_line(&line) {
+            persist_event(&state, chat_id, &ev, &mut saw_session)?;
+            let _ = on_event.send(ev);
+        }
+    }
+
+    let status = child.wait().await.map_err(|e| e.to_string())?;
 
     {
         let mut map = state.claude_pids.lock().await;
-        map.insert(session_id.clone(), pid);
+        map.remove(&chat_id.to_string());
     }
 
-    let output_result = child.wait_with_output().await;
-
-    {
-        let mut map = state.claude_pids.lock().await;
-        map.remove(&session_id);
+    if !status.success() {
+        let _ = on_event.send(ask_stream::AskStreamEvent::Error {
+            message: format!("claude exited with {status}"),
+        });
     }
+    Ok(())
+}
 
-    let output = output_result.map_err(|e| format!("wait: {e}"))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-        return Err(format!("claude exited {}: {}", output.status, stderr));
+fn persist_event(
+    state: &tauri::State<'_, AppState>,
+    chat_id: i64,
+    ev: &ask_stream::AskStreamEvent,
+    saw_session: &mut Option<String>,
+) -> Result<(), String> {
+    use rewindos_core::chat_store;
+    use rewindos_core::schema::{BlockKind, ChatRole};
+    let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+    match ev {
+        ask_stream::AskStreamEvent::SessionStarted { session_id } => {
+            if saw_session.as_deref() != Some(session_id.as_str()) {
+                chat_store::set_claude_session_id(&db, chat_id, session_id)
+                    .map_err(|e| e.to_string())?;
+                *saw_session = Some(session_id.clone());
+            }
+        }
+        ask_stream::AskStreamEvent::Text { text } => {
+            let body = serde_json::json!({ "text": text }).to_string();
+            chat_store::append_message(
+                &db,
+                chat_id,
+                ChatRole::Assistant,
+                BlockKind::Text,
+                &body,
+                false,
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        ask_stream::AskStreamEvent::Thinking { text } => {
+            let body = serde_json::json!({ "text": text }).to_string();
+            chat_store::append_message(
+                &db,
+                chat_id,
+                ChatRole::Assistant,
+                BlockKind::Thinking,
+                &body,
+                false,
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        ask_stream::AskStreamEvent::ToolUse { id, name, input } => {
+            let body =
+                serde_json::json!({ "id": id, "name": name, "input": input }).to_string();
+            chat_store::append_message(
+                &db,
+                chat_id,
+                ChatRole::Assistant,
+                BlockKind::ToolUse,
+                &body,
+                false,
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        ask_stream::AskStreamEvent::ToolResult {
+            tool_use_id,
+            content,
+            is_error,
+        } => {
+            let body = serde_json::json!({
+                "tool_use_id": tool_use_id,
+                "content": content,
+                "is_error": is_error
+            })
+            .to_string();
+            chat_store::append_message(
+                &db,
+                chat_id,
+                ChatRole::User,
+                BlockKind::ToolResult,
+                &body,
+                false,
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        ask_stream::AskStreamEvent::Done { .. } | ask_stream::AskStreamEvent::Error { .. } => {
+            // Lifecycle events aren't persisted as messages.
+        }
     }
-
-    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    Ok(())
 }
 
 #[tauri::command]
 async fn ask_claude_cancel(
     state: State<'_, AppState>,
-    session_id: String,
+    chat_id: i64,
 ) -> Result<(), String> {
+    use rewindos_core::chat_store;
     let pid = {
         let map = state.claude_pids.lock().await;
-        map.get(&session_id).copied()
+        map.get(&chat_id.to_string()).copied()
     };
     if let Some(pid) = pid {
         use nix::sys::signal::{kill, Signal};
         use nix::unistd::Pid;
         let _ = kill(Pid::from_raw(pid as i32), Signal::SIGTERM);
     }
+    let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+    chat_store::mark_last_assistant_partial(&db, chat_id).map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -1508,6 +1654,14 @@ pub fn run() {
             delete_journal_template,
             generate_journal_summary,
             export_journal,
+            chat_commands::list_chats,
+            chat_commands::get_chat_messages,
+            chat_commands::create_chat,
+            chat_commands::rename_chat,
+            chat_commands::delete_chat,
+            chat_commands::search_chats,
+            chat_commands::append_chat_message,
+            chat_commands::export_chat_markdown,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

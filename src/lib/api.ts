@@ -1,4 +1,4 @@
-import { invoke, convertFileSrc } from "@tauri-apps/api/core";
+import { invoke, convertFileSrc, Channel } from "@tauri-apps/api/core";
 
 export interface SearchFilters {
   start_time?: number;
@@ -608,10 +608,90 @@ export async function buildChatContext(query: string): Promise<ChatContext> {
   return invoke("build_chat_context", { query });
 }
 
-export async function askClaude(sessionId: string, prompt: string): Promise<string> {
-  return invoke("ask_claude", { sessionId, prompt });
+export type AskStreamEvent =
+  | { type: "session_started"; session_id: string }
+  | { type: "text"; text: string }
+  | { type: "tool_use"; id: string; name: string; input: unknown }
+  | { type: "tool_result"; tool_use_id: string; content: string; is_error: boolean }
+  | { type: "thinking"; text: string }
+  | { type: "done"; total_cost_usd: number | null }
+  | { type: "error"; message: string };
+
+export async function askClaudeStream(
+  chatId: number,
+  prompt: string,
+  onEvent: (ev: AskStreamEvent) => void,
+): Promise<void> {
+  const channel = new Channel<AskStreamEvent>();
+  channel.onmessage = onEvent;
+  return invoke("ask_claude", { chatId, prompt, onEvent: channel });
 }
 
-export async function askClaudeCancel(sessionId: string): Promise<void> {
-  return invoke("ask_claude_cancel", { sessionId });
+export async function askClaudeCancel(chatId: number): Promise<void> {
+  return invoke("ask_claude_cancel", { chatId });
+}
+
+// -- Chat persistence --
+
+export type ChatBackend = "claude" | "ollama";
+export type ChatRole = "user" | "assistant";
+export type BlockKind = "text" | "tool_use" | "tool_result" | "thinking";
+
+export interface Chat {
+  id: number;
+  title: string;
+  claude_session_id: string | null;
+  backend: ChatBackend;
+  created_at: number;
+  last_activity_at: number;
+}
+
+export interface ChatMessageRow {
+  id: number;
+  chat_id: number;
+  role: ChatRole;
+  block_type: BlockKind;
+  content_json: string;
+  is_partial: boolean;
+  created_at: number;
+}
+
+export interface ChatSearchHit {
+  chat_id: number;
+  chat_title: string;
+  message_id: number;
+  snippet: string;
+  created_at: number;
+}
+
+export async function listChats(limit?: number): Promise<Chat[]> {
+  return invoke("list_chats", { limit });
+}
+
+export async function getChatMessages(chatId: number): Promise<ChatMessageRow[]> {
+  return invoke("get_chat_messages", { chatId });
+}
+
+export async function createChat(
+  title: string,
+  backend: ChatBackend,
+  claudeSessionId: string | null = null,
+): Promise<number> {
+  return invoke("create_chat", { title, backend, claudeSessionId });
+}
+
+export async function renameChat(chatId: number, title: string): Promise<void> {
+  return invoke("rename_chat", { chatId, title });
+}
+
+export async function deleteChat(chatId: number): Promise<void> {
+  return invoke("delete_chat", { chatId });
+}
+
+export async function searchChats(query: string, limit = 50): Promise<ChatSearchHit[]> {
+  return invoke("search_chats", { query, limit });
+}
+
+export async function exportChatMarkdown(chatId: number): Promise<string> {
+  return invoke("export_chat_markdown", { chatId });
 }

@@ -1,28 +1,32 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { useAskChat } from "@/context/AskContext";
-import { AskEmptyState } from "./AskEmptyState";
-import { ChatMessage } from "./ChatMessage";
+import { Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { queryKeys } from "@/lib/query-keys";
 import { claudeDetect, getConfig } from "@/lib/api";
 import { ollamaHealth } from "@/lib/ollama-chat";
-import { Plus, Square } from "lucide-react";
-
-interface ChatUrlConfig {
-  chat: { ollama_url: string };
-}
+import { useAskChat } from "@/context/AskContext";
+import { AskMessages } from "./AskMessages";
+import { ChatSidebar } from "./ChatSidebar";
+import {
+  PromptInput,
+  PromptInputTextarea,
+  PromptInputFooter,
+  PromptInputSubmit,
+} from "@/components/ai-elements/prompt-input";
+import { Suggestion, Suggestions } from "@/components/ai-elements/suggestion";
 
 interface AskViewProps {
   onSelectScreenshot: (id: number) => void;
 }
 
-export function AskView({ onSelectScreenshot }: AskViewProps) {
-  const { messages, isStreaming, error, sendMessage, cancelStream, newSession } = useAskChat();
+interface ChatUrlConfig {
+  chat: { ollama_url: string };
+}
+
+export function AskView({ onSelectScreenshot: _onSelectScreenshot }: AskViewProps) {
+  const { messages, isStreaming, error, sendMessage, cancelStream } = useAskChat();
   const [input, setInput] = useState("");
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const { data: config } = useQuery({
     queryKey: queryKeys.config(),
@@ -32,7 +36,9 @@ export function AskView({ onSelectScreenshot }: AskViewProps) {
   const { data: ollamaOnline = false } = useQuery({
     queryKey: queryKeys.ollamaHealth(),
     queryFn: () =>
-      config ? ollamaHealth((config as unknown as ChatUrlConfig).chat.ollama_url) : false,
+      config
+        ? ollamaHealth((config as unknown as ChatUrlConfig).chat.ollama_url)
+        : false,
     enabled: !!config,
     refetchInterval: 60_000,
     staleTime: 30_000,
@@ -47,191 +53,123 @@ export function AskView({ onSelectScreenshot }: AskViewProps) {
   const usingClaude = !!(claudeStatus?.available && claudeStatus.mcp_registered);
   const chatReady = usingClaude || ollamaOnline;
 
-  // Auto-scroll on new content
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollIntoView({ block: "end" });
-    }
-  }, [messages]);
-
-  // Focus input on mount
-  useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
-
-  // Auto-resize textarea
-  const resizeTextarea = useCallback(() => {
-    const el = inputRef.current;
-    if (!el) return;
-    el.style.height = "auto";
-    const maxH = 6 * 24; // ~6 lines
-    el.style.height = `${Math.min(el.scrollHeight, maxH)}px`;
-  }, []);
-
-  const handleSubmit = useCallback(
-    (text?: string) => {
-      const msg = (text ?? input).trim();
-      if (!msg || isStreaming) return;
-      sendMessage(msg);
+  const submit = useCallback(
+    (textOverride?: string) => {
+      const msg = (textOverride ?? input).trim();
+      if (!msg || isStreaming || !chatReady) return;
+      void sendMessage(msg);
       setInput("");
-      // Reset textarea height after submit
-      requestAnimationFrame(() => {
-        if (inputRef.current) {
-          inputRef.current.style.height = "auto";
-        }
-      });
     },
-    [input, isStreaming, sendMessage],
+    [input, isStreaming, chatReady, sendMessage],
   );
 
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        handleSubmit();
-      }
+  const onPromptSubmit = useCallback(
+    (msg: { text: string }) => {
+      submit(msg.text);
     },
-    [handleSubmit],
+    [submit],
   );
-
-  const handleNewSession = useCallback(() => {
-    newSession();
-    setInput("");
-    inputRef.current?.focus();
-  }, [newSession]);
 
   return (
-    <div className="flex-1 flex flex-col min-h-0">
-      {/* Header bar */}
-      <div className="flex items-center justify-between px-5 py-2 border-b border-border/50 shrink-0">
-        <div className="flex items-center gap-2">
-          <div
-            className={cn(
-              "w-1.5 h-1.5 rounded-full transition-colors",
-              chatReady ? "bg-signal-success" : "bg-signal-error",
-            )}
-            title={
-              usingClaude
-                ? "Claude Code connected"
-                : ollamaOnline
-                  ? "Ollama connected"
-                  : "No chat backend available"
-            }
-          />
-          <span className="font-mono text-xs text-text-muted uppercase tracking-wider">
-            ask
-          </span>
-          <span
-            className={cn(
-              "font-mono text-[10px] uppercase tracking-wider",
-              usingClaude ? "text-semantic" : "text-text-muted",
-            )}
-          >
-            · {usingClaude ? "claude" : "local"}
-          </span>
-          {messages.length > 0 && (
-            <span className="font-mono text-[10px] text-text-muted">
-              {Math.ceil(messages.length / 2)} exchange{Math.ceil(messages.length / 2) !== 1 ? "s" : ""}
-            </span>
-          )}
-        </div>
-
-        {messages.length > 0 && (
-          <button
-            onClick={handleNewSession}
-            className="flex items-center gap-1.5 px-2 py-1 font-mono text-[11px] text-text-muted hover:text-text-secondary border border-border/50 hover:border-border transition-all"
-          >
-            <Plus className="size-3" strokeWidth={2} />
-            new chat
-          </button>
-        )}
-      </div>
-
-      {/* Messages area */}
-      {messages.length === 0 ? (
-        <AskEmptyState onSuggest={(q) => handleSubmit(q)} />
-      ) : (
-        <ScrollArea className="flex-1 min-h-0">
-          <div ref={scrollRef} className="px-5 py-4 max-w-2xl mx-auto">
-            {messages.map((msg, i) => (
-              <ChatMessage
-                key={msg.id}
-                message={msg}
-                isStreaming={isStreaming && i === messages.length - 1 && msg.role === "assistant"}
-                onScreenshotClick={onSelectScreenshot}
-              />
-            ))}
-          </div>
-        </ScrollArea>
-      )}
-
-      {/* Error display */}
-      {error && (
-        <div className="mx-5 mb-2 px-3 py-2 border border-signal-error/30 bg-signal-error/5">
+    <div className="flex-1 flex min-h-0">
+      <ChatSidebar />
+      <div className="flex-1 flex flex-col min-h-0">
+        <div className="flex items-center justify-between px-5 py-2 border-b border-border/50 shrink-0">
           <div className="flex items-center gap-2">
-            <span className="font-mono text-[10px] text-signal-error uppercase tracking-wider">err</span>
-            <span className="text-xs text-signal-error/80 truncate">{error}</span>
+            <div
+              className={cn(
+                "w-1.5 h-1.5 rounded-full transition-colors",
+                chatReady ? "bg-signal-success" : "bg-signal-error",
+              )}
+              title={
+                usingClaude
+                  ? "Claude Code connected"
+                  : ollamaOnline
+                    ? "Ollama connected"
+                    : "No chat backend available"
+              }
+            />
+            <span className="font-mono text-xs text-text-muted uppercase tracking-wider">
+              ask
+            </span>
+            <span
+              className={cn(
+                "font-mono text-[10px] uppercase tracking-wider",
+                usingClaude ? "text-semantic" : "text-text-muted",
+              )}
+            >
+              · {usingClaude ? "claude" : "local"}
+            </span>
           </div>
         </div>
-      )}
 
-      {/* Input bar */}
-      <div className="border-t border-border/50 px-5 py-3 shrink-0">
-        <div className="max-w-2xl mx-auto">
-          <div
-            className={cn(
-              "flex items-end gap-2 px-3 py-2.5 border transition-all",
-              !chatReady
-                ? "border-signal-error/30 bg-signal-error/5"
-                : isStreaming
-                  ? "border-semantic/30 bg-semantic/5"
-                  : "border-border/60 bg-surface-raised/30 focus-within:border-semantic/40 focus-within:bg-surface-raised/50",
-            )}
-          >
-            <span className="font-mono text-sm text-semantic/50 shrink-0 select-none pb-0.5">
-              {">_"}
+        {messages.length === 0 ? (
+          <div className="flex-1 flex items-center justify-center min-h-0 px-5">
+            <Suggestions>
+              <Suggestion
+                suggestion="what did I do in the last hour"
+                onClick={(s) => submit(s)}
+              />
+              <Suggestion
+                suggestion="last time I was in firefox"
+                onClick={(s) => submit(s)}
+              />
+              <Suggestion
+                suggestion="which apps did I use most today"
+                onClick={(s) => submit(s)}
+              />
+            </Suggestions>
+          </div>
+        ) : (
+          <AskMessages rows={messages} />
+        )}
+
+        {isStreaming && (
+          <div className="px-5 py-1 shrink-0 flex items-center gap-2 text-text-muted">
+            <Loader2 className="size-3 animate-spin" />
+            <span className="font-mono text-[10px] uppercase tracking-wider">
+              thinking
             </span>
-            <textarea
-              ref={inputRef}
-              rows={1}
-              value={input}
-              onChange={(e) => {
-                setInput(e.target.value);
-                resizeTextarea();
-              }}
-              onKeyDown={handleKeyDown}
-              placeholder={
-                !chatReady
-                  ? "ollama is offline — start it or connect Claude Code"
-                  : isStreaming
-                    ? "thinking..."
-                    : "ask about your screen history"
-              }
-              disabled={isStreaming || !chatReady}
-              className="flex-1 bg-transparent text-sm text-text-primary placeholder:text-text-muted/50 outline-none disabled:opacity-50 resize-none leading-6"
-            />
-            {isStreaming ? (
-              <button
-                onClick={() => cancelStream()}
-                className="shrink-0 px-2 py-1 font-mono text-[11px] uppercase tracking-wider text-signal-error hover:bg-signal-error/10 transition-all"
-              >
-                <Square className="size-3 inline-block mr-1 fill-current" strokeWidth={0} />
-                stop
-              </button>
-            ) : (
-              <button
-                onClick={() => handleSubmit()}
-                disabled={!input.trim() || !chatReady}
-                className={cn(
-                  "shrink-0 px-2 py-1 font-mono text-[11px] uppercase tracking-wider transition-all",
-                  input.trim() && chatReady
-                    ? "text-semantic hover:bg-semantic/10"
-                    : "text-text-muted/30 cursor-default",
-                )}
-              >
-                send
-              </button>
-            )}
+          </div>
+        )}
+
+        {error && (
+          <div className="mx-5 mb-2 px-3 py-2 border border-signal-error/30 bg-signal-error/5 shrink-0">
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-[10px] text-signal-error uppercase tracking-wider">
+                err
+              </span>
+              <span className="text-xs text-signal-error/80 truncate">
+                {error}
+              </span>
+            </div>
+          </div>
+        )}
+
+        <div className="border-t border-border/50 px-5 py-3 shrink-0">
+          <div className="max-w-2xl mx-auto">
+            <PromptInput onSubmit={onPromptSubmit}>
+              <PromptInputTextarea
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                placeholder={
+                  !chatReady
+                    ? "connect claude or start ollama to chat"
+                    : isStreaming
+                      ? "thinking..."
+                      : "ask about your screen history"
+                }
+                disabled={isStreaming || !chatReady}
+              />
+              <PromptInputFooter>
+                <div />
+                <PromptInputSubmit
+                  disabled={!chatReady || (!isStreaming && !input.trim())}
+                  status={isStreaming ? "streaming" : "ready"}
+                  onStop={cancelStream}
+                />
+              </PromptInputFooter>
+            </PromptInput>
           </div>
         </div>
       </div>
