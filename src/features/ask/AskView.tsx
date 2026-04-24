@@ -1,239 +1,88 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { useState } from "react";
 import { useAskChat } from "@/context/AskContext";
-import { AskEmptyState } from "./AskEmptyState";
-import { ChatMessage } from "./ChatMessage";
-import { cn } from "@/lib/utils";
-import { queryKeys } from "@/lib/query-keys";
-import { claudeDetect, getConfig } from "@/lib/api";
-import { ollamaHealth } from "@/lib/ollama-chat";
-import { Plus, Square } from "lucide-react";
-
-interface ChatUrlConfig {
-  chat: { ollama_url: string };
-}
 
 interface AskViewProps {
   onSelectScreenshot: (id: number) => void;
 }
 
-export function AskView({ onSelectScreenshot }: AskViewProps) {
-  const { messages, isStreaming, error, sendMessage, cancelStream, newSession } = useAskChat();
+// NOTE: This is a transitional stub. Task 9 adds the ai-elements-based
+// AskMessages renderer and Task 10 replaces this view with a ChatSidebar +
+// full PromptInput shell. Until then, this placeholder exercises the new
+// AskContext API (DB-backed messages, chatId-keyed active chat) so the app
+// still mounts and you can smoke-test sendMessage end-to-end.
+export function AskView({ onSelectScreenshot: _onSelectScreenshot }: AskViewProps) {
+  const { activeChatId, messages, isStreaming, error, sendMessage, startNewChat } =
+    useAskChat();
   const [input, setInput] = useState("");
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  const { data: config } = useQuery({
-    queryKey: queryKeys.config(),
-    queryFn: getConfig,
-  });
-
-  const { data: ollamaOnline = false } = useQuery({
-    queryKey: queryKeys.ollamaHealth(),
-    queryFn: () =>
-      config ? ollamaHealth((config as unknown as ChatUrlConfig).chat.ollama_url) : false,
-    enabled: !!config,
-    refetchInterval: 60_000,
-    staleTime: 30_000,
-  });
-
-  const { data: claudeStatus } = useQuery({
-    queryKey: queryKeys.claudeStatus(),
-    queryFn: claudeDetect,
-    refetchInterval: 60_000,
-  });
-
-  const usingClaude = !!(claudeStatus?.available && claudeStatus.mcp_registered);
-  const chatReady = usingClaude || ollamaOnline;
-
-  // Auto-scroll on new content
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollIntoView({ block: "end" });
-    }
-  }, [messages]);
-
-  // Focus input on mount
-  useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
-
-  // Auto-resize textarea
-  const resizeTextarea = useCallback(() => {
-    const el = inputRef.current;
-    if (!el) return;
-    el.style.height = "auto";
-    const maxH = 6 * 24; // ~6 lines
-    el.style.height = `${Math.min(el.scrollHeight, maxH)}px`;
-  }, []);
-
-  const handleSubmit = useCallback(
-    (text?: string) => {
-      const msg = (text ?? input).trim();
-      if (!msg || isStreaming) return;
-      sendMessage(msg);
-      setInput("");
-      // Reset textarea height after submit
-      requestAnimationFrame(() => {
-        if (inputRef.current) {
-          inputRef.current.style.height = "auto";
-        }
-      });
-    },
-    [input, isStreaming, sendMessage],
-  );
-
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        handleSubmit();
-      }
-    },
-    [handleSubmit],
-  );
-
-  const handleNewSession = useCallback(() => {
-    newSession();
+  const submit = () => {
+    const text = input.trim();
+    if (!text || isStreaming) return;
     setInput("");
-    inputRef.current?.focus();
-  }, [newSession]);
+    void sendMessage(text);
+  };
 
   return (
-    <div className="flex-1 flex flex-col min-h-0">
-      {/* Header bar */}
-      <div className="flex items-center justify-between px-5 py-2 border-b border-border/50 shrink-0">
-        <div className="flex items-center gap-2">
-          <div
-            className={cn(
-              "w-1.5 h-1.5 rounded-full transition-colors",
-              chatReady ? "bg-signal-success" : "bg-signal-error",
-            )}
-            title={
-              usingClaude
-                ? "Claude Code connected"
-                : ollamaOnline
-                  ? "Ollama connected"
-                  : "No chat backend available"
-            }
-          />
-          <span className="font-mono text-xs text-text-muted uppercase tracking-wider">
-            ask
-          </span>
-          <span
-            className={cn(
-              "font-mono text-[10px] uppercase tracking-wider",
-              usingClaude ? "text-semantic" : "text-text-muted",
-            )}
-          >
-            · {usingClaude ? "claude" : "local"}
-          </span>
-          {messages.length > 0 && (
-            <span className="font-mono text-[10px] text-text-muted">
-              {Math.ceil(messages.length / 2)} exchange{Math.ceil(messages.length / 2) !== 1 ? "s" : ""}
-            </span>
-          )}
-        </div>
-
-        {messages.length > 0 && (
-          <button
-            onClick={handleNewSession}
-            className="flex items-center gap-1.5 px-2 py-1 font-mono text-[11px] text-text-muted hover:text-text-secondary border border-border/50 hover:border-border transition-all"
-          >
-            <Plus className="size-3" strokeWidth={2} />
-            new chat
-          </button>
-        )}
+    <div className="flex flex-col h-full p-4 gap-3 font-mono text-xs">
+      <div className="flex items-center gap-3">
+        <span className="text-text-muted uppercase tracking-wider">
+          ask — transitional stub
+        </span>
+        <button
+          type="button"
+          className="text-accent hover:underline"
+          onClick={startNewChat}
+        >
+          new chat
+        </button>
+        <span className="text-text-muted">
+          chat id: {activeChatId ?? "—"}
+        </span>
       </div>
 
-      {/* Messages area */}
-      {messages.length === 0 ? (
-        <AskEmptyState onSuggest={(q) => handleSubmit(q)} />
-      ) : (
-        <ScrollArea className="flex-1 min-h-0">
-          <div ref={scrollRef} className="px-5 py-4 max-w-2xl mx-auto">
-            {messages.map((msg, i) => (
-              <ChatMessage
-                key={msg.id}
-                message={msg}
-                isStreaming={isStreaming && i === messages.length - 1 && msg.role === "assistant"}
-                onScreenshotClick={onSelectScreenshot}
-              />
-            ))}
-          </div>
-        </ScrollArea>
-      )}
+      {error && <div className="text-red-400">{error}</div>}
 
-      {/* Error display */}
-      {error && (
-        <div className="mx-5 mb-2 px-3 py-2 border border-signal-error/30 bg-signal-error/5">
-          <div className="flex items-center gap-2">
-            <span className="font-mono text-[10px] text-signal-error uppercase tracking-wider">err</span>
-            <span className="text-xs text-signal-error/80 truncate">{error}</span>
+      <div className="flex-1 overflow-auto border border-border/30 p-3 space-y-2">
+        {messages.length === 0 && (
+          <div className="text-text-muted">
+            No messages. Send one to start a new chat.
           </div>
-        </div>
-      )}
+        )}
+        {messages.map((m) => (
+          <div key={m.id} className="border-l border-border/30 pl-2">
+            <div className="text-text-muted uppercase tracking-wider">
+              {m.role} · {m.block_type}
+              {m.is_partial ? " · partial" : ""}
+            </div>
+            <pre className="whitespace-pre-wrap text-text-primary">
+              {m.content_json}
+            </pre>
+          </div>
+        ))}
+      </div>
 
-      {/* Input bar */}
-      <div className="border-t border-border/50 px-5 py-3 shrink-0">
-        <div className="max-w-2xl mx-auto">
-          <div
-            className={cn(
-              "flex items-end gap-2 px-3 py-2.5 border transition-all",
-              !chatReady
-                ? "border-signal-error/30 bg-signal-error/5"
-                : isStreaming
-                  ? "border-semantic/30 bg-semantic/5"
-                  : "border-border/60 bg-surface-raised/30 focus-within:border-semantic/40 focus-within:bg-surface-raised/50",
-            )}
-          >
-            <span className="font-mono text-sm text-semantic/50 shrink-0 select-none pb-0.5">
-              {">_"}
-            </span>
-            <textarea
-              ref={inputRef}
-              rows={1}
-              value={input}
-              onChange={(e) => {
-                setInput(e.target.value);
-                resizeTextarea();
-              }}
-              onKeyDown={handleKeyDown}
-              placeholder={
-                !chatReady
-                  ? "ollama is offline — start it or connect Claude Code"
-                  : isStreaming
-                    ? "thinking..."
-                    : "ask about your screen history"
-              }
-              disabled={isStreaming || !chatReady}
-              className="flex-1 bg-transparent text-sm text-text-primary placeholder:text-text-muted/50 outline-none disabled:opacity-50 resize-none leading-6"
-            />
-            {isStreaming ? (
-              <button
-                onClick={() => cancelStream()}
-                className="shrink-0 px-2 py-1 font-mono text-[11px] uppercase tracking-wider text-signal-error hover:bg-signal-error/10 transition-all"
-              >
-                <Square className="size-3 inline-block mr-1 fill-current" strokeWidth={0} />
-                stop
-              </button>
-            ) : (
-              <button
-                onClick={() => handleSubmit()}
-                disabled={!input.trim() || !chatReady}
-                className={cn(
-                  "shrink-0 px-2 py-1 font-mono text-[11px] uppercase tracking-wider transition-all",
-                  input.trim() && chatReady
-                    ? "text-semantic hover:bg-semantic/10"
-                    : "text-text-muted/30 cursor-default",
-                )}
-              >
-                send
-              </button>
-            )}
-          </div>
-        </div>
+      <div className="flex gap-2">
+        <input
+          className="flex-1 bg-transparent border border-border/30 px-2 py-1 text-text-primary outline-none focus:border-accent"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              submit();
+            }
+          }}
+          placeholder={isStreaming ? "streaming…" : "ask something"}
+          disabled={isStreaming}
+        />
+        <button
+          type="button"
+          className="border border-border/30 px-3 text-text-primary hover:border-accent"
+          onClick={submit}
+          disabled={isStreaming || !input.trim()}
+        >
+          send
+        </button>
       </div>
     </div>
   );
