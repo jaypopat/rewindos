@@ -15,12 +15,8 @@ import {
 import { getConfig, ollamaListModels } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import { CLAUDE_MODELS, DEFAULT_CLAUDE_MODEL } from "@/lib/claude-models";
-import { useAskChat } from "@/context/AskContext";
+import { useAskChat, type RootConfigShape } from "@/context/AskContext";
 import { cn } from "@/lib/utils";
-
-interface ChatUrlConfig {
-  chat: { ollama_url: string; model: string };
-}
 
 export function AskModelPicker() {
   const { activeChat, pendingModel, setPendingModel } = useAskChat();
@@ -30,8 +26,8 @@ export function AskModelPicker() {
     queryKey: queryKeys.config(),
     queryFn: getConfig,
   });
-  const ollamaUrl = (config as unknown as ChatUrlConfig | undefined)?.chat.ollama_url ?? "";
-  const defaultOllama = (config as unknown as ChatUrlConfig | undefined)?.chat.model;
+  const ollamaUrl = (config as RootConfigShape | undefined)?.chat.ollama_url ?? "";
+  const defaultOllama = (config as RootConfigShape | undefined)?.chat.model;
 
   const { data: ollamaModels = [] } = useQuery({
     queryKey: queryKeys.ollamaModels(ollamaUrl),

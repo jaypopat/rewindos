@@ -26,7 +26,7 @@ import {
 import { ollamaChat, type OllamaMessage } from "@/lib/ollama-chat";
 import { queryKeys } from "@/lib/query-keys";
 
-interface RootConfigShape {
+export interface RootConfigShape {
   chat: {
     ollama_url: string;
     model: string;
@@ -111,15 +111,22 @@ export function AskProvider({ children }: { children: ReactNode }) {
         const useClaude = claude.available && claude.mcp_registered;
 
         let chatId = activeChatId;
+        // effectiveModel: what this SEND should use. For existing chats, use the persisted chat.model.
+        // For new chats, use the user's pick (pendingModel) or the backend default. Lifted above the
+        // new-chat block so it's available later for the Ollama/Claude dispatch — reading activeChat
+        // at call-time would be stale (useCallback closure captures the old value).
+        const backendDefault = useClaude
+          ? "sonnet"
+          : (appConfig as RootConfigShape | undefined)?.chat.model ?? "";
+        const effectiveModel =
+          activeChat?.model ?? pendingModel ?? backendDefault;
+
         if (chatId == null) {
           const title = text.slice(0, 60).trim() || "New chat";
           chatId = await createChat(title, useClaude ? "claude" : "ollama", null);
           setActiveChatId(chatId);
-          const chosenModel =
-            pendingModel ??
-            (useClaude ? "sonnet" : (appConfig as RootConfigShape | undefined)?.chat.model ?? "");
-          if (chosenModel) {
-            await setModel(chatId, chosenModel);
+          if (effectiveModel) {
+            await setModel(chatId, effectiveModel);
           }
           setPendingModelState(null);
           qc.invalidateQueries({ queryKey: queryKeys.chats() });
@@ -159,7 +166,7 @@ export function AskProvider({ children }: { children: ReactNode }) {
           let accumulated = "";
           await ollamaChat({
             baseUrl: config.chat.ollama_url,
-            model: activeChat?.model ?? config.chat.model,
+            model: effectiveModel || config.chat.model,
             temperature: config.chat.temperature,
             messages: ollamaMessages,
             signal: abortRef.current.signal,
