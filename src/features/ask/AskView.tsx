@@ -25,7 +25,7 @@ interface ChatUrlConfig {
   chat: { ollama_url: string };
 }
 
-export function AskView({ onSelectScreenshot: _onSelectScreenshot }: AskViewProps) {
+export function AskView({ onSelectScreenshot }: AskViewProps) {
   const { messages, isStreaming, error, sendMessage, cancelStream } = useAskChat();
   const [input, setInput] = useState("");
 
@@ -97,7 +97,7 @@ export function AskView({ onSelectScreenshot: _onSelectScreenshot }: AskViewProp
         {messages.length === 0 ? (
           <AskEmptyState onSuggest={submit} />
         ) : (
-          <AskMessages rows={messages} />
+          <AskMessages rows={messages} onSelectScreenshot={onSelectScreenshot} />
         )}
 
         {/* Streaming indicator */}

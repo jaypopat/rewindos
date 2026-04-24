@@ -72,6 +72,27 @@ export async function getScreenshot(id: number): Promise<ScreenshotDetail> {
   return invoke("get_screenshot", { id });
 }
 
+export interface Screenshot {
+  id: number;
+  timestamp: number;
+  timestamp_ms: number;
+  app_name: string | null;
+  window_title: string | null;
+  window_class: string | null;
+  file_path: string;
+  thumbnail_path: string | null;
+  width: number;
+  height: number;
+  file_size_bytes: number;
+  perceptual_hash: number[];
+  ocr_status: string;
+  created_at: string;
+}
+
+export async function getScreenshotsByIds(ids: number[]): Promise<Screenshot[]> {
+  return invoke("get_screenshots_by_ids", { ids });
+}
+
 export async function getDaemonStatus(): Promise<DaemonStatus> {
   return invoke("get_daemon_status");
 }

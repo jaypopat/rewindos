@@ -548,6 +548,49 @@ impl Database {
         }
     }
 
+    /// Bulk fetch by ids. Returns screenshots in the order they appear in `ids`,
+    /// skipping any missing. Used by the citations renderer to populate the
+    /// Sources card efficiently (one roundtrip instead of N).
+    pub fn get_screenshots_by_ids(&self, ids: &[i64]) -> Result<Vec<Screenshot>> {
+        if ids.is_empty() {
+            return Ok(vec![]);
+        }
+        let placeholders = std::iter::repeat("?")
+            .take(ids.len())
+            .collect::<Vec<_>>()
+            .join(",");
+        let sql = format!(
+            "SELECT id, timestamp, timestamp_ms, app_name, window_title, window_class,
+                    file_path, thumbnail_path, width, height, file_size_bytes,
+                    perceptual_hash, ocr_status, created_at
+             FROM screenshots WHERE id IN ({placeholders})",
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let params = rusqlite::params_from_iter(ids.iter());
+        let rows = stmt.query_map(params, |row| {
+            Ok(Screenshot {
+                id: row.get(0)?,
+                timestamp: row.get(1)?,
+                timestamp_ms: row.get(2)?,
+                app_name: row.get(3)?,
+                window_title: row.get(4)?,
+                window_class: row.get(5)?,
+                file_path: row.get(6)?,
+                thumbnail_path: row.get(7)?,
+                width: row.get(8)?,
+                height: row.get(9)?,
+                file_size_bytes: row.get(10)?,
+                perceptual_hash: row.get(11)?,
+                ocr_status: OcrStatus::parse(&row.get::<_, String>(12)?),
+                created_at: row.get(13)?,
+            })
+        })?;
+        let found: Vec<Screenshot> = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+        let mut by_id: std::collections::HashMap<i64, Screenshot> =
+            found.into_iter().map(|s| (s.id, s)).collect();
+        Ok(ids.iter().filter_map(|id| by_id.remove(id)).collect())
+    }
+
     /// Browse screenshots in a time range (newest first), without requiring a search query.
     pub fn browse_screenshots(
         &self,

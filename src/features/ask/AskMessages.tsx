@@ -20,9 +20,13 @@ import { toUIMessages } from "@/lib/chat-messages";
 import type { ChatMessageRow } from "@/lib/api";
 import type { ToolUIPart } from "ai";
 import { cn } from "@/lib/utils";
+import { parseTextWithRefs, collectRefs } from "@/lib/citations";
+import { CitationChip } from "./CitationChip";
+import { CitationSources } from "./CitationSources";
 
 interface AskMessagesProps {
   rows: ChatMessageRow[];
+  onSelectScreenshot?: (id: number) => void;
 }
 
 function RoleHeader({ role }: { role: "user" | "assistant" }) {
@@ -59,7 +63,7 @@ const ASSISTANT_PROSE =
   "[&_strong]:text-text-primary [&_strong]:font-semibold " +
   "[&_ul]:list-disc [&_ul]:list-inside [&_ol]:list-decimal [&_ol]:list-inside [&_li]:text-text-secondary";
 
-export function AskMessages({ rows }: AskMessagesProps) {
+export function AskMessages({ rows, onSelectScreenshot }: AskMessagesProps) {
   const messages = toUIMessages(rows);
 
   return (
@@ -94,9 +98,11 @@ export function AskMessages({ rows }: AskMessagesProps) {
                       );
                     }
                     return (
-                      <div key={key} className={ASSISTANT_PROSE}>
-                        <Streamdown>{text}</Streamdown>
-                      </div>
+                      <AssistantTextWithCitations
+                        key={key}
+                        text={text}
+                        onSelectScreenshot={onSelectScreenshot}
+                      />
                     );
                   }
 
@@ -145,5 +151,32 @@ export function AskMessages({ rows }: AskMessagesProps) {
       </ConversationContent>
       <ConversationScrollButton />
     </Conversation>
+  );
+}
+
+function AssistantTextWithCitations({
+  text,
+  onSelectScreenshot,
+}: {
+  text: string;
+  onSelectScreenshot?: (id: number) => void;
+}) {
+  const parts = parseTextWithRefs(text);
+  const refIds = collectRefs(parts);
+  return (
+    <>
+      <div className={ASSISTANT_PROSE}>
+        {parts.map((p, i) =>
+          p.type === "text" ? (
+            <Streamdown key={i}>{p.text}</Streamdown>
+          ) : (
+            <CitationChip key={i} id={p.id} onClick={onSelectScreenshot} />
+          ),
+        )}
+      </div>
+      {refIds.length > 0 && (
+        <CitationSources ids={refIds} onSelect={onSelectScreenshot} />
+      )}
+    </>
   );
 }

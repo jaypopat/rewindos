@@ -185,6 +185,16 @@ fn get_screenshot(state: State<'_, AppState>, id: i64) -> Result<ScreenshotDetai
     })
 }
 
+#[tauri::command]
+fn get_screenshots_by_ids(
+    state: State<'_, AppState>,
+    ids: Vec<i64>,
+) -> Result<Vec<rewindos_core::schema::Screenshot>, String> {
+    let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+    db.get_screenshots_by_ids(&ids)
+        .map_err(|e| format!("db error: {e}"))
+}
+
 #[derive(Debug, Clone, Serialize)]
 struct TimelineEntry {
     id: i64,
@@ -1611,6 +1621,7 @@ pub fn run() {
             pause_capture,
             resume_capture,
             get_screenshot,
+            get_screenshots_by_ids,
             get_app_names,
             get_activity,
             get_task_breakdown,
