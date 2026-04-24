@@ -1057,6 +1057,17 @@ impl Database {
         Ok(())
     }
 
+    /// Mark a screenshot's embedding as permanently failed so the backfill
+    /// loop stops retrying it. Transient errors (e.g. Ollama unreachable)
+    /// should NOT use this — leave those at 'pending' to retry later.
+    pub fn mark_embedding_failed(&self, screenshot_id: i64) -> Result<()> {
+        self.conn.execute(
+            "UPDATE screenshots SET embedding_status = 'failed' WHERE id = ?1",
+            params![screenshot_id],
+        )?;
+        Ok(())
+    }
+
     /// Get screenshots that have OCR text but no embedding yet.
     pub fn get_pending_embeddings(&self, limit: usize) -> Result<Vec<(i64, String)>> {
         let mut stmt = self.conn.prepare(
