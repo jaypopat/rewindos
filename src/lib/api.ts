@@ -615,3 +615,64 @@ export async function askClaude(sessionId: string, prompt: string): Promise<stri
 export async function askClaudeCancel(sessionId: string): Promise<void> {
   return invoke("ask_claude_cancel", { sessionId });
 }
+
+// -- Chat persistence --
+
+export type ChatBackend = "claude" | "ollama";
+export type ChatRole = "user" | "assistant";
+export type BlockKind = "text" | "tool_use" | "tool_result" | "thinking";
+
+export interface Chat {
+  id: number;
+  title: string;
+  claude_session_id: string | null;
+  backend: ChatBackend;
+  created_at: number;
+  last_activity_at: number;
+}
+
+export interface ChatMessageRow {
+  id: number;
+  chat_id: number;
+  role: ChatRole;
+  block_type: BlockKind;
+  content_json: string;
+  is_partial: boolean;
+  created_at: number;
+}
+
+export interface ChatSearchHit {
+  chat_id: number;
+  chat_title: string;
+  message_id: number;
+  snippet: string;
+  created_at: number;
+}
+
+export async function listChats(limit?: number): Promise<Chat[]> {
+  return invoke("list_chats", { limit });
+}
+
+export async function getChatMessages(chatId: number): Promise<ChatMessageRow[]> {
+  return invoke("get_chat_messages", { chatId });
+}
+
+export async function createChat(
+  title: string,
+  backend: ChatBackend,
+  claudeSessionId: string | null = null,
+): Promise<number> {
+  return invoke("create_chat", { title, backend, claudeSessionId });
+}
+
+export async function renameChat(chatId: number, title: string): Promise<void> {
+  return invoke("rename_chat", { chatId, title });
+}
+
+export async function deleteChat(chatId: number): Promise<void> {
+  return invoke("delete_chat", { chatId });
+}
+
+export async function searchChats(query: string, limit = 50): Promise<ChatSearchHit[]> {
+  return invoke("search_chats", { query, limit });
+}
