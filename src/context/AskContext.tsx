@@ -97,6 +97,13 @@ export function AskProvider({ children }: { children: ReactNode }) {
 
   const [followups, setFollowups] = useState<string[]>([]);
 
+  // Keep a fresh ref so the finally-block IIFE can check whether the user
+  // switched chats during follow-up generation without closure staleness.
+  const activeChatIdRef = useRef<number | null>(activeChatId);
+  useEffect(() => {
+    activeChatIdRef.current = activeChatId;
+  }, [activeChatId]);
+
   const selectChat = useCallback((id: number | null) => {
     setActiveChatId(id);
     setError(null);
@@ -243,7 +250,8 @@ export function AskProvider({ children }: { children: ReactNode }) {
 
         if (chatId != null) {
           void (async () => {
-            const rows = await getChatMessages(chatId!);
+            const chatIdSnapshot = chatId!;
+            const rows = await getChatMessages(chatIdSnapshot);
             const { lastUserText, lastAssistantText } = extractLastTurns(rows);
             if (!lastAssistantText) return;
             const backend = activeChat?.backend ?? (useClaude ? "claude" : "ollama");
@@ -254,7 +262,11 @@ export function AskProvider({ children }: { children: ReactNode }) {
               lastUserText,
               lastAssistantText,
             });
-            setFollowups(suggestions);
+            // Prevent cross-chat bleed: if the user switched chats during
+            // follow-up generation, drop these suggestions on the floor.
+            if (activeChatIdRef.current === chatIdSnapshot) {
+              setFollowups(suggestions);
+            }
           })();
         }
       }
@@ -297,9 +309,16 @@ export function AskProvider({ children }: { children: ReactNode }) {
     }
 
     // Delete the last user row AND everything after. sendMessage will
-    // re-persist the user message as part of its normal flow.
-    await deleteMessagesAfter(activeChatId, lastUserRow.id - 1);
-    qc.invalidateQueries({ queryKey: queryKeys.chatMessages(activeChatId) });
+    // re-persist the user message as part of its normal flow. Wrap in
+    // try/catch so a db/IPC failure surfaces in the error banner instead
+    // of silently propagating as an unhandled rejection.
+    try {
+      await deleteMessagesAfter(activeChatId, lastUserRow.id - 1);
+      qc.invalidateQueries({ queryKey: queryKeys.chatMessages(activeChatId) });
+    } catch (e) {
+      setError(`regenerate failed: ${e instanceof Error ? e.message : String(e)}`);
+      return;
+    }
     await sendMessage(userText, attachedIds);
   }, [activeChatId, qc, sendMessage]);
 

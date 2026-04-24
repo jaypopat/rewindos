@@ -162,15 +162,23 @@ pub fn delete_chat(db: &Database, chat_id: i64) -> Result<()> {
 /// history no longer matches our local view after truncation, so the next
 /// turn must start a fresh session with the reconstructed history.
 pub fn delete_messages_after(db: &Database, chat_id: i64, after_id: i64) -> Result<()> {
+    // Atomic: a process crash between the DELETE and the UPDATE would leave
+    // the chat with a stale `claude_session_id` whose history no longer
+    // matches the local rows — next `--resume` would feed Claude the old
+    // truncated turns. Bundle both in one transaction so either both
+    // succeed or neither do. `unchecked_transaction` matches the pattern
+    // used elsewhere in `db.rs` (operates on `&Connection`).
     let conn = db.conn();
-    conn.execute(
+    let tx = conn.unchecked_transaction()?;
+    tx.execute(
         "DELETE FROM chat_messages WHERE chat_id = ?1 AND id > ?2",
         rusqlite::params![chat_id, after_id],
     )?;
-    conn.execute(
+    tx.execute(
         "UPDATE chats SET claude_session_id = NULL WHERE id = ?1",
         rusqlite::params![chat_id],
     )?;
+    tx.commit()?;
     Ok(())
 }
 
