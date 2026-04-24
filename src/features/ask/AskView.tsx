@@ -1,88 +1,177 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { Loader2 } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { queryKeys } from "@/lib/query-keys";
+import { claudeDetect, getConfig } from "@/lib/api";
+import { ollamaHealth } from "@/lib/ollama-chat";
 import { useAskChat } from "@/context/AskContext";
+import { AskMessages } from "./AskMessages";
+import { ChatSidebar } from "./ChatSidebar";
+import {
+  PromptInput,
+  PromptInputTextarea,
+  PromptInputFooter,
+  PromptInputSubmit,
+} from "@/components/ai-elements/prompt-input";
+import { Suggestion, Suggestions } from "@/components/ai-elements/suggestion";
 
 interface AskViewProps {
   onSelectScreenshot: (id: number) => void;
 }
 
-// NOTE: This is a transitional stub. Task 9 adds the ai-elements-based
-// AskMessages renderer and Task 10 replaces this view with a ChatSidebar +
-// full PromptInput shell. Until then, this placeholder exercises the new
-// AskContext API (DB-backed messages, chatId-keyed active chat) so the app
-// still mounts and you can smoke-test sendMessage end-to-end.
+interface ChatUrlConfig {
+  chat: { ollama_url: string };
+}
+
 export function AskView({ onSelectScreenshot: _onSelectScreenshot }: AskViewProps) {
-  const { activeChatId, messages, isStreaming, error, sendMessage, startNewChat } =
-    useAskChat();
+  const { messages, isStreaming, error, sendMessage, cancelStream } = useAskChat();
   const [input, setInput] = useState("");
 
-  const submit = () => {
-    const text = input.trim();
-    if (!text || isStreaming) return;
-    setInput("");
-    void sendMessage(text);
-  };
+  const { data: config } = useQuery({
+    queryKey: queryKeys.config(),
+    queryFn: getConfig,
+  });
+
+  const { data: ollamaOnline = false } = useQuery({
+    queryKey: queryKeys.ollamaHealth(),
+    queryFn: () =>
+      config
+        ? ollamaHealth((config as unknown as ChatUrlConfig).chat.ollama_url)
+        : false,
+    enabled: !!config,
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+  });
+
+  const { data: claudeStatus } = useQuery({
+    queryKey: queryKeys.claudeStatus(),
+    queryFn: claudeDetect,
+    refetchInterval: 60_000,
+  });
+
+  const usingClaude = !!(claudeStatus?.available && claudeStatus.mcp_registered);
+  const chatReady = usingClaude || ollamaOnline;
+
+  const submit = useCallback(
+    (textOverride?: string) => {
+      const msg = (textOverride ?? input).trim();
+      if (!msg || isStreaming || !chatReady) return;
+      void sendMessage(msg);
+      setInput("");
+    },
+    [input, isStreaming, chatReady, sendMessage],
+  );
+
+  const onPromptSubmit = useCallback(
+    (msg: { text: string }) => {
+      submit(msg.text);
+    },
+    [submit],
+  );
 
   return (
-    <div className="flex flex-col h-full p-4 gap-3 font-mono text-xs">
-      <div className="flex items-center gap-3">
-        <span className="text-text-muted uppercase tracking-wider">
-          ask — transitional stub
-        </span>
-        <button
-          type="button"
-          className="text-accent hover:underline"
-          onClick={startNewChat}
-        >
-          new chat
-        </button>
-        <span className="text-text-muted">
-          chat id: {activeChatId ?? "—"}
-        </span>
-      </div>
+    <div className="flex-1 flex min-h-0">
+      <ChatSidebar />
+      <div className="flex-1 flex flex-col min-h-0">
+        <div className="flex items-center justify-between px-5 py-2 border-b border-border/50 shrink-0">
+          <div className="flex items-center gap-2">
+            <div
+              className={cn(
+                "w-1.5 h-1.5 rounded-full transition-colors",
+                chatReady ? "bg-signal-success" : "bg-signal-error",
+              )}
+              title={
+                usingClaude
+                  ? "Claude Code connected"
+                  : ollamaOnline
+                    ? "Ollama connected"
+                    : "No chat backend available"
+              }
+            />
+            <span className="font-mono text-xs text-text-muted uppercase tracking-wider">
+              ask
+            </span>
+            <span
+              className={cn(
+                "font-mono text-[10px] uppercase tracking-wider",
+                usingClaude ? "text-semantic" : "text-text-muted",
+              )}
+            >
+              · {usingClaude ? "claude" : "local"}
+            </span>
+          </div>
+        </div>
 
-      {error && <div className="text-red-400">{error}</div>}
+        {messages.length === 0 ? (
+          <div className="flex-1 flex items-center justify-center min-h-0 px-5">
+            <Suggestions>
+              <Suggestion
+                suggestion="what did I do in the last hour"
+                onClick={(s) => submit(s)}
+              />
+              <Suggestion
+                suggestion="last time I was in firefox"
+                onClick={(s) => submit(s)}
+              />
+              <Suggestion
+                suggestion="which apps did I use most today"
+                onClick={(s) => submit(s)}
+              />
+            </Suggestions>
+          </div>
+        ) : (
+          <AskMessages rows={messages} />
+        )}
 
-      <div className="flex-1 overflow-auto border border-border/30 p-3 space-y-2">
-        {messages.length === 0 && (
-          <div className="text-text-muted">
-            No messages. Send one to start a new chat.
+        {isStreaming && (
+          <div className="px-5 py-1 shrink-0 flex items-center gap-2 text-text-muted">
+            <Loader2 className="size-3 animate-spin" />
+            <span className="font-mono text-[10px] uppercase tracking-wider">
+              thinking
+            </span>
           </div>
         )}
-        {messages.map((m) => (
-          <div key={m.id} className="border-l border-border/30 pl-2">
-            <div className="text-text-muted uppercase tracking-wider">
-              {m.role} · {m.block_type}
-              {m.is_partial ? " · partial" : ""}
-            </div>
-            <pre className="whitespace-pre-wrap text-text-primary">
-              {m.content_json}
-            </pre>
-          </div>
-        ))}
-      </div>
 
-      <div className="flex gap-2">
-        <input
-          className="flex-1 bg-transparent border border-border/30 px-2 py-1 text-text-primary outline-none focus:border-accent"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              submit();
-            }
-          }}
-          placeholder={isStreaming ? "streaming…" : "ask something"}
-          disabled={isStreaming}
-        />
-        <button
-          type="button"
-          className="border border-border/30 px-3 text-text-primary hover:border-accent"
-          onClick={submit}
-          disabled={isStreaming || !input.trim()}
-        >
-          send
-        </button>
+        {error && (
+          <div className="mx-5 mb-2 px-3 py-2 border border-signal-error/30 bg-signal-error/5 shrink-0">
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-[10px] text-signal-error uppercase tracking-wider">
+                err
+              </span>
+              <span className="text-xs text-signal-error/80 truncate">
+                {error}
+              </span>
+            </div>
+          </div>
+        )}
+
+        <div className="border-t border-border/50 px-5 py-3 shrink-0">
+          <div className="max-w-2xl mx-auto">
+            <PromptInput onSubmit={onPromptSubmit}>
+              <PromptInputTextarea
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                placeholder={
+                  !chatReady
+                    ? "connect claude or start ollama to chat"
+                    : isStreaming
+                      ? "thinking..."
+                      : "ask about your screen history"
+                }
+                disabled={isStreaming || !chatReady}
+              />
+              <PromptInputFooter>
+                <div />
+                <PromptInputSubmit
+                  disabled={!chatReady || (!isStreaming && !input.trim())}
+                  status={isStreaming ? "streaming" : "ready"}
+                  onStop={cancelStream}
+                />
+              </PromptInputFooter>
+            </PromptInput>
+          </div>
+        </div>
       </div>
     </div>
   );
