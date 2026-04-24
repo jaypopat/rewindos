@@ -4,6 +4,7 @@ import { Field } from "../primitives/Field";
 import { TextInput } from "../primitives/TextInput";
 import { NumberInput } from "../primitives/NumberInput";
 import { Toggle } from "../primitives/Toggle";
+import { ClaudeCodeSection } from "./AITab/ClaudeCodeSection";
 
 interface TabProps {
   config: AppConfig;
@@ -15,6 +16,7 @@ interface TabProps {
 export function AITab({ config, update }: TabProps) {
   return (
     <>
+      <ClaudeCodeSection />
       <SectionTitle>Chat / Ask</SectionTitle>
       <Field label="Enabled">
         <Toggle
