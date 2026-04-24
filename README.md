@@ -23,7 +23,7 @@ Timer (5s) → Screen Capture → Hash & Dedupe → OCR → SQLite FTS5
 - **Timeline browsing** — scroll through screen history chronologically with hourly grouping
 - **Rewind playback** — timelapse player with scrubber, speed controls, and keyboard navigation
 - **Dashboard** — activity overview, app usage stats, daily/hourly charts, heatmap calendar
-- **AI chat** — ask questions about your screen history with intent detection and screenshot references (Ollama)
+- **AI chat** — ask questions about your screen history with inline citations, a Sources card, and click-through to cited screenshots. Backed by Claude Code (opus / sonnet / haiku) or local Ollama via a per-chat model picker. Pin screenshots as prompt context, copy or regenerate replies, and get follow-up suggestions (Ollama).
 - **Journaling** — rich text editor (Tiptap) with tags, templates, screenshot attachments, AI summaries, and export
 - **Bookmarks & collections** — save and organize screenshots into named collections
 - **Focus mode** — Pomodoro timer with productivity tracking and distraction detection
@@ -45,7 +45,10 @@ sudo apt install \
   libdbus-1-dev pkg-config build-essential
 ```
 
-Optional: [Ollama](https://ollama.com) for AI features (semantic search, chat, journal summaries).
+Optional:
+
+- [Ollama](https://ollama.com) for local AI features (semantic search, chat, journal summaries).
+- Claude Code CLI for higher-quality chat — once installed and registered with MCP, the Ask view's model picker exposes its tiers (opus / sonnet / haiku).
 
 ## Build & install
 
