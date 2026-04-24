@@ -128,6 +128,17 @@ pub fn rename_chat(db: &Database, chat_id: i64, title: &str) -> Result<()> {
     Ok(())
 }
 
+/// Set the Claude session id for a chat, but only if it is currently NULL.
+/// First-time assignment only — preserves the `WHERE claude_session_id IS NULL`
+/// semantics so a later wayward event can't clobber an established session.
+pub fn set_claude_session_id(db: &Database, chat_id: i64, session_id: &str) -> Result<()> {
+    db.conn().execute(
+        "UPDATE chats SET claude_session_id = ?1 WHERE id = ?2 AND claude_session_id IS NULL",
+        rusqlite::params![session_id, chat_id],
+    )?;
+    Ok(())
+}
+
 pub fn delete_chat(db: &Database, chat_id: i64) -> Result<()> {
     let conn = db.conn();
     conn.execute("DELETE FROM chats WHERE id = ?1", [chat_id])?;
@@ -246,6 +257,26 @@ mod tests {
         let id = create_chat(&db, "old", ChatBackend::Claude, Some("s")).unwrap();
         rename_chat(&db, id, "new").unwrap();
         assert_eq!(get_chat(&db, id).unwrap().unwrap().title, "new");
+    }
+
+    #[test]
+    fn set_claude_session_id_only_sets_when_null() {
+        let db = Database::open_in_memory().unwrap();
+        let id = create_chat(&db, "t", ChatBackend::Claude, None).unwrap();
+        assert_eq!(get_chat(&db, id).unwrap().unwrap().claude_session_id, None);
+
+        set_claude_session_id(&db, id, "sess_abc").unwrap();
+        assert_eq!(
+            get_chat(&db, id).unwrap().unwrap().claude_session_id.as_deref(),
+            Some("sess_abc"),
+        );
+
+        // Second call must NOT overwrite — preserves WHERE claude_session_id IS NULL semantics
+        set_claude_session_id(&db, id, "sess_xyz").unwrap();
+        assert_eq!(
+            get_chat(&db, id).unwrap().unwrap().claude_session_id.as_deref(),
+            Some("sess_abc"),
+        );
     }
 
     #[test]
