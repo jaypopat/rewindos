@@ -48,4 +48,5 @@ export const queryKeys = {
   chats: () => ["chats"] as const,
   chatMessages: (chatId: number) => ["chat-messages", chatId] as const,
   chatSearch: (query: string) => ["chat-search", query] as const,
+  ollamaModels: (baseUrl: string) => ["ollama-models", baseUrl] as const,
 };

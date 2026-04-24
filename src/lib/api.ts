@@ -644,6 +644,7 @@ export interface Chat {
   backend: ChatBackend;
   created_at: number;
   last_activity_at: number;
+  model: string | null;
 }
 
 export interface ChatMessageRow {
@@ -694,4 +695,37 @@ export async function searchChats(query: string, limit = 50): Promise<ChatSearch
 
 export async function exportChatMarkdown(chatId: number): Promise<string> {
   return invoke("export_chat_markdown", { chatId });
+}
+
+export async function setModel(chatId: number, model: string): Promise<void> {
+  return invoke("set_model", { chatId, model });
+}
+
+export interface OllamaModelInfo {
+  name: string;
+  parameter_size?: string;
+  family?: string;
+}
+
+/**
+ * Lists locally-pulled Ollama models suitable for chat (excludes embedding-only
+ * models like nomic-bert). Direct browser → Ollama HTTP call, no Tauri roundtrip.
+ */
+export async function ollamaListModels(baseUrl: string): Promise<OllamaModelInfo[]> {
+  const res = await fetch(`${baseUrl.replace(/\/$/, "")}/api/tags`);
+  if (!res.ok) throw new Error(`ollama tags: ${res.status}`);
+  const data = (await res.json()) as {
+    models: Array<{
+      name: string;
+      details?: { family?: string; parameter_size?: string };
+    }>;
+  };
+  const EMBEDDING_FAMILIES = new Set(["nomic-bert", "bert"]);
+  return data.models
+    .filter((m) => !EMBEDDING_FAMILIES.has(m.details?.family ?? ""))
+    .map((m) => ({
+      name: m.name,
+      parameter_size: m.details?.parameter_size,
+      family: m.details?.family,
+    }));
 }

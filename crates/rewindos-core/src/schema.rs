@@ -401,6 +401,7 @@ pub struct Chat {
     pub backend: ChatBackend,
     pub created_at: i64,
     pub last_activity_at: i64,
+    pub model: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

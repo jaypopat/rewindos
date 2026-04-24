@@ -1658,6 +1658,7 @@ pub fn run() {
             chat_commands::get_chat_messages,
             chat_commands::create_chat,
             chat_commands::rename_chat,
+            chat_commands::set_model,
             chat_commands::delete_chat,
             chat_commands::search_chats,
             chat_commands::append_chat_message,
