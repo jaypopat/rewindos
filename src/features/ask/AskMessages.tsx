@@ -80,7 +80,7 @@ const ASSISTANT_PROSE =
 
 export function AskMessages({ rows, onSelectScreenshot, onSelectSuggestion }: AskMessagesProps) {
   const messages = toUIMessages(rows);
-  const { followups, regenerate } = useAskChat();
+  const { followups, regenerate, isStreaming } = useAskChat();
 
   return (
     <Conversation className="flex-1 min-h-0">
@@ -176,6 +176,7 @@ export function AskMessages({ rows, onSelectScreenshot, onSelectSuggestion }: As
                       navigator.clipboard.writeText(stripMarker(allText));
                     }}
                     onRegenerate={() => void regenerate()}
+                    disabled={isStreaming}
                   />
                   <FollowupSuggestions
                     suggestions={followups}
