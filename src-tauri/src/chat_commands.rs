@@ -60,6 +60,16 @@ pub fn delete_chat(state: State<'_, AppState>, chat_id: i64) -> Result<(), Strin
 }
 
 #[tauri::command]
+pub fn delete_messages_after(
+    state: State<'_, AppState>,
+    chat_id: i64,
+    after_id: i64,
+) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+    chat_store::delete_messages_after(&db, chat_id, after_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub fn search_chats(
     state: State<'_, AppState>,
     query: String,
