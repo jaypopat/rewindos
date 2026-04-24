@@ -11,11 +11,12 @@ import {
   getActivity,
   getTaskBreakdown,
   getJournalTags,
-  askHealth,
+  getConfig,
   getCarryForwardTodos,
   type JournalEntry,
   type JournalDateInfo,
 } from "@/lib/api";
+import { ollamaHealth } from "@/lib/ollama-chat";
 import { queryKeys } from "@/lib/query-keys";
 import { useDebounce } from "@/hooks/useDebounce";
 import { dateToKey, dayStartEnd } from "@/lib/time-ranges";
@@ -115,9 +116,20 @@ export function useJournalEntry() {
     enabled: !!entry?.id,
   });
 
+  const { data: journalConfig } = useQuery({
+    queryKey: queryKeys.config(),
+    queryFn: getConfig,
+  });
+
   const { data: ollamaAvailable } = useQuery({
-    queryKey: queryKeys.askHealth(),
-    queryFn: askHealth,
+    queryKey: queryKeys.ollamaHealth(),
+    queryFn: () =>
+      journalConfig
+        ? ollamaHealth(
+            (journalConfig as unknown as { chat: { ollama_url: string } }).chat.ollama_url,
+          )
+        : false,
+    enabled: !!journalConfig,
     staleTime: 120_000,
   });
 

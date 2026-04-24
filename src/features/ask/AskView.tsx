@@ -6,8 +6,13 @@ import { AskEmptyState } from "./AskEmptyState";
 import { ChatMessage } from "./ChatMessage";
 import { cn } from "@/lib/utils";
 import { queryKeys } from "@/lib/query-keys";
-import { askHealth } from "@/lib/api";
+import { claudeDetect, getConfig } from "@/lib/api";
+import { ollamaHealth } from "@/lib/ollama-chat";
 import { Plus, Square } from "lucide-react";
+
+interface ChatUrlConfig {
+  chat: { ollama_url: string };
+}
 
 interface AskViewProps {
   onSelectScreenshot: (id: number) => void;
@@ -19,13 +24,28 @@ export function AskView({ onSelectScreenshot }: AskViewProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  // Ollama health check — poll every 60s
+  const { data: config } = useQuery({
+    queryKey: queryKeys.config(),
+    queryFn: getConfig,
+  });
+
   const { data: ollamaOnline = false } = useQuery({
-    queryKey: queryKeys.askHealth(),
-    queryFn: () => askHealth().catch(() => false),
+    queryKey: queryKeys.ollamaHealth(),
+    queryFn: () =>
+      config ? ollamaHealth((config as unknown as ChatUrlConfig).chat.ollama_url) : false,
+    enabled: !!config,
     refetchInterval: 60_000,
     staleTime: 30_000,
   });
+
+  const { data: claudeStatus } = useQuery({
+    queryKey: queryKeys.claudeStatus(),
+    queryFn: claudeDetect,
+    refetchInterval: 60_000,
+  });
+
+  const usingClaude = !!(claudeStatus?.available && claudeStatus.mcp_registered);
+  const chatReady = usingClaude || ollamaOnline;
 
   // Auto-scroll on new content
   useEffect(() => {
@@ -88,12 +108,26 @@ export function AskView({ onSelectScreenshot }: AskViewProps) {
           <div
             className={cn(
               "w-1.5 h-1.5 rounded-full transition-colors",
-              ollamaOnline ? "bg-signal-success" : "bg-signal-error",
+              chatReady ? "bg-signal-success" : "bg-signal-error",
             )}
-            title={ollamaOnline ? "Ollama connected" : "Ollama offline"}
+            title={
+              usingClaude
+                ? "Claude Code connected"
+                : ollamaOnline
+                  ? "Ollama connected"
+                  : "No chat backend available"
+            }
           />
           <span className="font-mono text-xs text-text-muted uppercase tracking-wider">
             ask
+          </span>
+          <span
+            className={cn(
+              "font-mono text-[10px] uppercase tracking-wider",
+              usingClaude ? "text-semantic" : "text-text-muted",
+            )}
+          >
+            · {usingClaude ? "claude" : "local"}
           </span>
           {messages.length > 0 && (
             <span className="font-mono text-[10px] text-text-muted">
@@ -147,7 +181,7 @@ export function AskView({ onSelectScreenshot }: AskViewProps) {
           <div
             className={cn(
               "flex items-end gap-2 px-3 py-2.5 border transition-all",
-              !ollamaOnline
+              !chatReady
                 ? "border-signal-error/30 bg-signal-error/5"
                 : isStreaming
                   ? "border-semantic/30 bg-semantic/5"
@@ -167,13 +201,13 @@ export function AskView({ onSelectScreenshot }: AskViewProps) {
               }}
               onKeyDown={handleKeyDown}
               placeholder={
-                !ollamaOnline
-                  ? "ollama is offline — start it to chat"
+                !chatReady
+                  ? "ollama is offline — start it or connect Claude Code"
                   : isStreaming
                     ? "thinking..."
                     : "ask about your screen history"
               }
-              disabled={isStreaming || !ollamaOnline}
+              disabled={isStreaming || !chatReady}
               className="flex-1 bg-transparent text-sm text-text-primary placeholder:text-text-muted/50 outline-none disabled:opacity-50 resize-none leading-6"
             />
             {isStreaming ? (
@@ -187,10 +221,10 @@ export function AskView({ onSelectScreenshot }: AskViewProps) {
             ) : (
               <button
                 onClick={() => handleSubmit()}
-                disabled={!input.trim() || !ollamaOnline}
+                disabled={!input.trim() || !chatReady}
                 className={cn(
                   "shrink-0 px-2 py-1 font-mono text-[11px] uppercase tracking-wider transition-all",
-                  input.trim() && ollamaOnline
+                  input.trim() && chatReady
                     ? "text-semantic hover:bg-semantic/10"
                     : "text-text-muted/30 cursor-default",
                 )}

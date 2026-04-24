@@ -34,7 +34,11 @@ describe("queryKeys", () => {
     expect(key).toEqual(["activity", 1000, 2000]);
   });
 
-  it("generates ask health key", () => {
-    expect(queryKeys.askHealth()).toEqual(["ask-health"]);
+  it("generates ollama health key", () => {
+    expect(queryKeys.ollamaHealth()).toEqual(["ollama-health"]);
+  });
+
+  it("generates claude status key", () => {
+    expect(queryKeys.claudeStatus()).toEqual(["claude-status"]);
   });
 });

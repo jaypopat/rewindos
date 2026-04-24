@@ -3,26 +3,20 @@ mod claude_code;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use tokio::sync::watch;
 
-use futures::StreamExt;
-use rewindos_core::chat::{
-    ChatMessage, ChatRole, ChatStreamChunk, ContextAssembler, IntentCategory, IntentClassifier,
-    OllamaChatClient, QueryConfidence, ScreenshotReference, SYSTEM_PROMPT,
-};
 use rewindos_core::config::AppConfig;
 use rewindos_core::db::Database;
 use rewindos_core::embedding::OllamaClient as EmbeddingClient;
 use rewindos_core::schema::{
     ActiveBlock, ActivityResponse, Bookmark, BoundingBox, CachedDailySummary, Collection,
     JournalDateInfo, JournalEntry, JournalScreenshot, JournalSearchResponse, JournalStreakInfo,
-    JournalSummary, JournalTag, JournalTemplate, NewCollection, OpenTodo, SearchFilters,
+    JournalSummary, JournalTag, JournalTemplate, NewCollection, OpenTodo,
     SearchResponse, TaskUsageStat, UpdateCollection, UpsertJournalEntry,
 };
 use serde::{Deserialize, Serialize};
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri::tray::TrayIconBuilder;
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{Emitter, Manager, State};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 use tracing::warn;
 
@@ -30,8 +24,6 @@ struct AppState {
     dbus: zbus::Connection,
     db: Mutex<Database>,
     config: Mutex<AppConfig>,
-    chat_sessions: Arc<Mutex<HashMap<String, Vec<ChatMessage>>>>,
-    ask_cancel_tokens: Arc<Mutex<HashMap<String, watch::Sender<bool>>>>,
     embedding_client: Option<EmbeddingClient>,
     claude_pids: Arc<tokio::sync::Mutex<HashMap<String, u32>>>,
 }
@@ -623,68 +615,7 @@ async fn get_daily_summary(
     })
 }
 
-// -- Ask / Chat commands --
-
-#[derive(Debug, Clone, Serialize)]
-struct AskResponse {
-    session_id: String,
-    references: Vec<ScreenshotReference>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct AskTokenPayload {
-    session_id: String,
-    token: String,
-    done: bool,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct AskDonePayload {
-    session_id: String,
-    full_response: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct AskErrorPayload {
-    session_id: String,
-    error: String,
-}
-
-#[tauri::command]
-fn ask_new_session(state: State<'_, AppState>) -> Result<String, String> {
-    let session_id = uuid::Uuid::new_v4().to_string();
-    let mut sessions = state
-        .chat_sessions
-        .lock()
-        .map_err(|e| format!("lock: {e}"))?;
-    sessions.insert(session_id.clone(), Vec::new());
-    Ok(session_id)
-}
-
-#[tauri::command]
-async fn ask_health(state: State<'_, AppState>) -> Result<bool, String> {
-    let chat_config = {
-        let cfg = state
-            .config
-            .lock()
-            .map_err(|e| format!("config lock: {e}"))?;
-        cfg.chat.clone()
-    };
-    let client = OllamaChatClient::new(&chat_config);
-    client.health_check().await.map_err(|e| format!("{e}"))
-}
-
-#[tauri::command]
-fn ask_cancel(state: State<'_, AppState>, session_id: String) -> Result<(), String> {
-    let tokens = state
-        .ask_cancel_tokens
-        .lock()
-        .map_err(|e| format!("lock: {e}"))?;
-    if let Some(tx) = tokens.get(&session_id) {
-        let _ = tx.send(true);
-    }
-    Ok(())
-}
+// -- Claude Code + chat context commands --
 
 #[tauri::command]
 fn claude_detect() -> claude_code::ClaudeCodeStatus {
@@ -756,331 +687,6 @@ async fn ask_claude_cancel(
         let _ = kill(Pid::from_raw(pid as i32), Signal::SIGTERM);
     }
     Ok(())
-}
-
-#[tauri::command]
-async fn ask(
-    state: State<'_, AppState>,
-    app: AppHandle,
-    session_id: String,
-    message: String,
-) -> Result<AskResponse, String> {
-    let config = state
-        .config
-        .lock()
-        .map_err(|e| format!("config lock: {e}"))?
-        .clone();
-    let chat_client = OllamaChatClient::new(&config.chat);
-
-    // 1. Classify intent — LLM-based, with regex fallback if Ollama fails
-    let intent = match chat_client.analyze_query(&message).await {
-        Ok(intent) => {
-            tracing::debug!("LLM classified query: {:?}", intent);
-            intent
-        }
-        Err(e) => {
-            tracing::warn!("LLM intent classification failed, falling back to regex: {e}");
-            IntentClassifier::classify(&message)
-        }
-    };
-
-    // 2. Retrieve context from DB with fallback strategy (hybrid search when available)
-    let max_context_tokens = config.chat.max_context_tokens;
-
-    let (context, references) = match intent.category {
-        IntentCategory::Recall | IntentCategory::General | IntentCategory::AppSpecific => {
-            let search_query = if intent.search_terms.is_empty() {
-                message.clone()
-            } else {
-                intent.search_terms.join(" ")
-            };
-
-            let filters = SearchFilters {
-                query: search_query.clone(),
-                start_time: intent.time_range.map(|(s, _)| s),
-                end_time: intent.time_range.map(|(_, e)| e),
-                app_name: intent.app_filter.clone(),
-                limit: 15,
-                offset: 0,
-            };
-
-            // Layer 1: Try hybrid search if embedding client is available
-            let mut search_response = None;
-            if let Some(ref embed_client) = state.embedding_client {
-                // Must NOT hold db lock across async embed() call
-                let embedding = embed_client.embed(&search_query).await.ok().flatten();
-                if let Some(ref emb) = embedding {
-                    let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
-                    search_response = db.hybrid_search(&filters, Some(emb)).ok();
-                }
-            }
-
-            let result_count = search_response
-                .as_ref()
-                .map(|r| r.results.len())
-                .unwrap_or(0);
-
-            // Layer 2: FTS5 exact if hybrid returned < 3 or unavailable
-            if result_count < 3 {
-                let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
-                if let Ok(fts_response) = db.search(&filters) {
-                    if fts_response.results.len() > result_count {
-                        search_response = Some(fts_response);
-                    }
-                }
-            }
-
-            let result_count = search_response
-                .as_ref()
-                .map(|r| r.results.len())
-                .unwrap_or(0);
-
-            // Layer 3: FTS5 OR query if confidence is Low OR < 3 results and > 1 term
-            if (intent.confidence == QueryConfidence::Low || result_count < 3)
-                && intent.search_terms.len() > 1
-            {
-                let or_query = intent.search_terms.join(" OR ");
-                let or_filters = SearchFilters {
-                    query: or_query,
-                    ..filters.clone()
-                };
-                let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
-                if let Ok(or_response) = db.search(&or_filters) {
-                    if or_response.results.len() > result_count {
-                        search_response = Some(or_response);
-                    }
-                }
-            }
-
-            let has_results = search_response
-                .as_ref()
-                .map(|r| !r.results.is_empty())
-                .unwrap_or(false);
-
-            if has_results {
-                let response = search_response.unwrap();
-                let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
-                let results: Vec<_> = response
-                    .results
-                    .iter()
-                    .map(|r| {
-                        let ocr = db.get_ocr_text(r.id).unwrap_or(None).unwrap_or_default();
-                        (
-                            r.id,
-                            r.timestamp,
-                            r.app_name.clone(),
-                            r.window_title.clone(),
-                            r.file_path.clone(),
-                            ocr,
-                        )
-                    })
-                    .collect();
-                ContextAssembler::from_search_results_budgeted(&results, max_context_tokens)
-            } else {
-                // Layer 4: Timeline fallback — recent sessions
-                let now = chrono::Local::now().timestamp();
-                let (start, end) = intent.time_range.unwrap_or((now - 86400, now));
-                let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
-                let sessions = db
-                    .get_ocr_sessions_with_ids(start, end, 80)
-                    .unwrap_or_default();
-                ContextAssembler::from_sessions_with_refs_budgeted(
-                    &sessions,
-                    max_context_tokens,
-                    20,
-                )
-            }
-        }
-        IntentCategory::TimeBased => {
-            let (start, end) = intent.time_range.unwrap_or_else(|| {
-                let now = chrono::Local::now().timestamp();
-                (now - 86400, now)
-            });
-
-            let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
-            match db.get_ocr_sessions_with_ids(start, end, 80) {
-                Ok(sessions) => ContextAssembler::from_sessions_with_refs_budgeted(
-                    &sessions,
-                    max_context_tokens,
-                    20,
-                ),
-                Err(_) => (
-                    "No activity data found for this time range.".to_string(),
-                    Vec::new(),
-                ),
-            }
-        }
-        IntentCategory::Productivity => {
-            let (start, end) = intent.time_range.unwrap_or_else(|| {
-                let now = chrono::Local::now().timestamp();
-                (now - 86400, now)
-            });
-
-            let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
-            let stats = db.get_app_usage_stats(start, Some(end)).unwrap_or_default();
-            let sessions = db
-                .get_ocr_sessions_with_ids(start, end, 80)
-                .unwrap_or_default();
-
-            let capture_secs = config.capture.interval_seconds as f64;
-            let stat_tuples: Vec<_> = stats
-                .iter()
-                .map(|s| {
-                    let minutes = s.screenshot_count as f64 * capture_secs / 60.0;
-                    (s.app_name.clone(), minutes, s.screenshot_count as usize)
-                })
-                .collect();
-
-            ContextAssembler::from_app_stats(&stat_tuples, &sessions, max_context_tokens)
-        }
-    };
-
-    // 3. Build messages array with timestamp injection
-    let now_str = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-    let system_message = ChatMessage {
-        role: ChatRole::System,
-        content: format!(
-            "{}\n\nCurrent time: {}\n\n{}",
-            SYSTEM_PROMPT, now_str, context
-        ),
-    };
-
-    let user_message = ChatMessage {
-        role: ChatRole::User,
-        content: message.clone(),
-    };
-
-    // Get history and add user message
-    let mut messages = vec![system_message];
-    {
-        let mut sessions = state
-            .chat_sessions
-            .lock()
-            .map_err(|e| format!("lock: {e}"))?;
-        let history = sessions.entry(session_id.clone()).or_default();
-        // Trim history to max
-        let max = config.chat.max_history_messages;
-        if history.len() > max {
-            *history = history[history.len() - max..].to_vec();
-        }
-        messages.extend(history.iter().cloned());
-        history.push(user_message.clone());
-    }
-    messages.push(user_message);
-
-    // 4. Spawn streaming task with cancel support
-    let session_id_clone = session_id.clone();
-    let chat_sessions = state.chat_sessions.clone();
-    let cancel_tokens = state.ask_cancel_tokens.clone();
-
-    // Create cancel channel
-    let (cancel_tx, mut cancel_rx) = watch::channel(false);
-    {
-        let mut tokens = cancel_tokens
-            .lock()
-            .map_err(|e| format!("lock: {e}"))?;
-        tokens.insert(session_id.clone(), cancel_tx);
-    }
-
-    tokio::spawn(async move {
-        let client = OllamaChatClient::new(&config.chat);
-        let mut stream = std::pin::pin!(client.chat_stream(messages));
-        let mut full_response = String::new();
-
-        loop {
-            tokio::select! {
-                chunk = stream.next() => {
-                    match chunk {
-                        Some(Ok(ChatStreamChunk { token, done })) => {
-                            full_response.push_str(&token);
-                            let _ = app.emit(
-                                "ask-token",
-                                AskTokenPayload {
-                                    session_id: session_id_clone.clone(),
-                                    token,
-                                    done,
-                                },
-                            );
-                            if done {
-                                break;
-                            }
-                        }
-                        Some(Err(e)) => {
-                            let _ = app.emit(
-                                "ask-error",
-                                AskErrorPayload {
-                                    session_id: session_id_clone.clone(),
-                                    error: e.to_string(),
-                                },
-                            );
-                            // Cleanup cancel token
-                            if let Ok(mut tokens) = cancel_tokens.lock() {
-                                tokens.remove(&session_id_clone);
-                            }
-                            return;
-                        }
-                        None => break,
-                    }
-                }
-                _ = cancel_rx.changed() => {
-                    if *cancel_rx.borrow() {
-                        // Cancelled — emit done with what we have
-                        let _ = app.emit(
-                            "ask-done",
-                            AskDonePayload {
-                                session_id: session_id_clone.clone(),
-                                full_response: full_response.clone(),
-                            },
-                        );
-                        // Store partial response
-                        if !full_response.is_empty() {
-                            if let Ok(mut sessions) = chat_sessions.lock() {
-                                if let Some(history) = sessions.get_mut(&session_id_clone) {
-                                    history.push(ChatMessage {
-                                        role: ChatRole::Assistant,
-                                        content: full_response,
-                                    });
-                                }
-                            }
-                        }
-                        if let Ok(mut tokens) = cancel_tokens.lock() {
-                            tokens.remove(&session_id_clone);
-                        }
-                        return;
-                    }
-                }
-            }
-        }
-
-        // Store assistant message in session
-        if let Ok(mut sessions) = chat_sessions.lock() {
-            if let Some(history) = sessions.get_mut(&session_id_clone) {
-                history.push(ChatMessage {
-                    role: ChatRole::Assistant,
-                    content: full_response.clone(),
-                });
-            }
-        }
-
-        // Cleanup cancel token
-        if let Ok(mut tokens) = cancel_tokens.lock() {
-            tokens.remove(&session_id_clone);
-        }
-
-        let _ = app.emit(
-            "ask-done",
-            AskDonePayload {
-                session_id: session_id_clone,
-                full_response,
-            },
-        );
-    });
-
-    // 5. Return immediately
-    Ok(AskResponse {
-        session_id,
-        references,
-    })
 }
 
 // -- Bookmark commands --
@@ -1669,8 +1275,6 @@ pub fn run() {
                 dbus,
                 db: Mutex::new(db),
                 config: Mutex::new(config),
-                chat_sessions: Arc::new(Mutex::new(HashMap::new())),
-                ask_cancel_tokens: Arc::new(Mutex::new(HashMap::new())),
                 embedding_client,
                 claude_pids: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             });
@@ -1866,10 +1470,6 @@ pub fn run() {
             get_active_blocks,
             browse_screenshots,
             get_daily_summary,
-            ask,
-            ask_new_session,
-            ask_health,
-            ask_cancel,
             claude_detect,
             claude_register_mcp,
             build_chat_context,
