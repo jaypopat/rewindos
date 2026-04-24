@@ -33,3 +33,46 @@ fn is_mcp_registered() -> bool {
         .and_then(|m| m.get("rewindos"))
         .is_some()
 }
+
+pub fn register_mcp() -> Result<(), String> {
+    let home = dirs::home_dir().ok_or_else(|| "no home dir".to_string())?;
+    let settings_dir = home.join(".claude");
+    std::fs::create_dir_all(&settings_dir).map_err(|e| format!("mkdir: {e}"))?;
+    let settings_path = settings_dir.join("settings.json");
+
+    let mut json: serde_json::Value = if settings_path.exists() {
+        let contents =
+            std::fs::read_to_string(&settings_path).map_err(|e| format!("read: {e}"))?;
+        if contents.trim().is_empty() {
+            serde_json::json!({})
+        } else {
+            serde_json::from_str(&contents).map_err(|e| format!("parse: {e}"))?
+        }
+    } else {
+        serde_json::json!({})
+    };
+
+    let daemon_path = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.join("rewindos-daemon")))
+        .filter(|p| p.exists())
+        .or_else(|| which::which("rewindos-daemon").ok())
+        .ok_or_else(|| "rewindos-daemon binary not found".to_string())?;
+
+    let entry = serde_json::json!({
+        "command": daemon_path.to_string_lossy(),
+        "args": ["mcp"]
+    });
+
+    json.as_object_mut()
+        .ok_or_else(|| "settings.json root must be an object".to_string())?
+        .entry("mcpServers")
+        .or_insert_with(|| serde_json::json!({}))
+        .as_object_mut()
+        .ok_or_else(|| "mcpServers must be an object".to_string())?
+        .insert("rewindos".to_string(), entry);
+
+    let pretty = serde_json::to_string_pretty(&json).map_err(|e| format!("serialize: {e}"))?;
+    std::fs::write(&settings_path, pretty).map_err(|e| format!("write: {e}"))?;
+    Ok(())
+}

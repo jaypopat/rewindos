@@ -616,3 +616,7 @@ export interface ClaudeCodeStatus {
 export async function claudeDetect(): Promise<ClaudeCodeStatus> {
   return invoke("claude_detect");
 }
+
+export async function claudeRegisterMcp(): Promise<ClaudeCodeStatus> {
+  return invoke("claude_register_mcp");
+}
