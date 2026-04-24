@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Extend the Ask view with model picker, inline citations + sources card, screenshot attachments, copy/regenerate buttons, and follow-up suggestion pills — the "Claude.ai-grade polish" layer on top of the streaming foundation we already shipped.
+**Goal:** Extend the Ask view with model picker, inline citations + sources card, screenshot attachments, copy/regenerate, follow-up suggestions, and voice input — the "Claude.ai-grade polish" layer on top of the streaming foundation we already shipped.
 
-**Architecture:** Additive only — no rewriting of streaming, persistence, or MCP paths. One schema addition (`chats.model`), several pure parse functions with unit tests, new React components composed into the existing `AskView` / `AskMessages` / prompt input shell. Citations/attachments/model selection all piggyback on the existing `content_json` text storage using deterministic markers.
+**Architecture:** Additive only — no rewriting of streaming, persistence, or MCP paths. One schema addition (`chats.model`). Heavy reuse of the **ai-elements** component registry: `ModelSelector` (Command-palette picker), `Attachments`/`Attachment*` (chip rendering), `SpeechInput` (Web Speech API wrapper), and the existing `Sources`/`Reasoning`/`Tool`. Custom components only where ai-elements doesn't fit our app-specific UX (history picker modal, citation chip, message actions).
 
-**Tech Stack:** Rust (rusqlite, refinery, tauri), TypeScript (React 19, TanStack Query), ai-elements components already installed (conversation, message, sources, dropdown-menu, dialog).
+**Tech Stack:** Rust (rusqlite, refinery, tauri), TypeScript (React 19, TanStack Query), ai-elements components (conversation, message, sources, reasoning, tool, prompt-input, suggestion already installed in prior work; model-selector, attachments, speech-input installed in this plan).
 
 ---
 
@@ -14,32 +14,33 @@
 
 **Before starting**, read:
 - `docs/superpowers/specs/2026-04-24-amazing-chat-phase-a-design.md` — design decisions
-- `docs/superpowers/plans/2026-04-24-streaming-chat-and-sessions.md` — prior plan (foundation). Sections on Tauri command registration, schema types, `chat_store` helpers, and AskContext structure are still accurate.
+- `docs/superpowers/plans/2026-04-24-streaming-chat-and-sessions.md` — prior plan (foundation)
 
 **Key invariants established by prior work:**
 - `AppState.db` is `std::sync::Mutex<Database>` (not `Arc<Mutex<Database>>`) — inline the lock, pass `&state` into helpers.
 - `Database::conn()` is `pub(crate)` — all SQL from `src-tauri` must go through `chat_store` helpers.
-- `ChatBackend::parse_sql` / `ChatRole::parse_sql` / `BlockKind::parse_sql` (NOT `from_str` — that was renamed in Task 1 of the prior plan).
+- `ChatBackend::parse_sql` / `ChatRole::parse_sql` / `BlockKind::parse_sql` (NOT `from_str`).
 - `append_message` INSERTs + UPDATEs `last_activity_at`. Triggers populate `chat_messages_fts`.
 - Tauri command names in `invoke_handler` use snake_case; TS passes camelCase which Tauri converts.
-- Verification before commit: `cargo check -p rewindos && bun x tsc --noEmit -p tsconfig.json`. Running `cargo build -p rewindos-daemon --release` once at the start of the session is required because Tauri's build.rs bundles the daemon as a sidecar resource.
-- Pre-existing tsc warnings in `src/components/ui/badge.tsx` and `src/components/ui/button.tsx` are acceptable baseline (fixed in a follow-up commit already); any NEW tsc errors block the task.
+- Verification before commit: `cargo check -p rewindos && bun x tsc --noEmit -p tsconfig.json`.
+- Pre-existing tsc warnings in `src/components/ui/badge.tsx` and `src/components/ui/button.tsx` are baseline (already fixed with ElementType annotation). Any NEW tsc errors block the task.
+- Registry components live at `src/components/ai-elements/<name>.tsx`. Install via the manual registry-download approach documented in the prior plan (the `npx ai-elements@latest add` CLI is TTY-interactive and unreliable for automation; download JSON from `https://elements.ai-sdk.dev/api/registry/<name>.json` and extract `files[0].content`).
 
-**Don't deviate silently.** If plan text contradicts reality (e.g. a function doesn't exist, a prop name changed), STOP and surface it before writing code. Silent deviations caused real rework in the prior plan.
+**Don't deviate silently.** If plan text contradicts reality (e.g. a function doesn't exist, a prop name changed), STOP and surface it before writing code.
 
 ---
 
-## Task 1: V008 migration + `chats.model` + `set_model` command + Claude model constants + Ollama tags query
+## Task 1: V008 migration + `chats.model` + `set_model` command + Claude model constants
 
 **Files:**
 - Create: `crates/rewindos-core/migrations/V008__chat_model.sql`
-- Modify: `crates/rewindos-core/src/schema.rs` (add `model` field to `Chat`)
-- Modify: `crates/rewindos-core/src/chat_store.rs` (update existing read queries; add `set_model`)
-- Modify: `src-tauri/src/chat_commands.rs` (add `set_model` Tauri command)
-- Modify: `src-tauri/src/lib.rs` (register command)
-- Modify: `src/lib/api.ts` (add `model` to `Chat` type; add `setModel`, `ollamaListModels`)
-- Modify: `src/lib/query-keys.ts` (add `ollamaModels`)
-- Create: `src/lib/claude-models.ts` (constant list of Claude tier display metadata)
+- Modify: `crates/rewindos-core/src/schema.rs`
+- Modify: `crates/rewindos-core/src/chat_store.rs`
+- Modify: `src-tauri/src/chat_commands.rs`
+- Modify: `src-tauri/src/lib.rs`
+- Modify: `src/lib/api.ts`
+- Modify: `src/lib/query-keys.ts`
+- Create: `src/lib/claude-models.ts`
 
 - [ ] **Step 1: Write V008 migration**
 
@@ -69,8 +70,6 @@ pub struct Chat {
 ```
 
 - [ ] **Step 3: Update `list_chats` and `get_chat` in `chat_store.rs`**
-
-In `crates/rewindos-core/src/chat_store.rs`, update the SELECT and row-mapping code in `list_chats` and `get_chat` to include the new column.
 
 Replace the existing `list_chats`:
 
@@ -124,9 +123,9 @@ pub fn get_chat(db: &Database, chat_id: i64) -> Result<Option<Chat>> {
 }
 ```
 
-- [ ] **Step 4: Add `set_claude_model` helper**
+- [ ] **Step 4: Add `set_chat_model` helper**
 
-Add to `crates/rewindos-core/src/chat_store.rs` near `set_claude_session_id`:
+Add to `chat_store.rs` near `set_claude_session_id`:
 
 ```rust
 /// Lock a chat's model. Only sets if currently NULL — a chat cannot
@@ -140,7 +139,7 @@ pub fn set_chat_model(db: &Database, chat_id: i64, model: &str) -> Result<()> {
 }
 ```
 
-- [ ] **Step 5: Add unit test for `set_chat_model`**
+- [ ] **Step 5: Add unit test**
 
 Add to the existing `#[cfg(test)] mod tests` block in `chat_store.rs`:
 
@@ -152,16 +151,13 @@ fn set_chat_model_only_sets_when_null() {
     assert_eq!(get_chat(&db, id).unwrap().unwrap().model, None);
 
     set_chat_model(&db, id, "sonnet").unwrap();
-    assert_eq!(
-        get_chat(&db, id).unwrap().unwrap().model.as_deref(),
-        Some("sonnet"),
-    );
+    assert_eq!(get_chat(&db, id).unwrap().unwrap().model.as_deref(), Some("sonnet"));
 
-    // Second call does not overwrite
     set_chat_model(&db, id, "opus").unwrap();
     assert_eq!(
         get_chat(&db, id).unwrap().unwrap().model.as_deref(),
         Some("sonnet"),
+        "second call must not overwrite",
     );
 }
 ```
@@ -189,7 +185,7 @@ pub fn set_model(
 
 - [ ] **Step 8: Register in `invoke_handler`**
 
-In `src-tauri/src/lib.rs`, find the `chat_commands::` entries in the `invoke_handler!` macro and add:
+In `src-tauri/src/lib.rs`, add to the `chat_commands::` block in `invoke_handler!`:
 
 ```rust
             chat_commands::set_model,
@@ -197,7 +193,7 @@ In `src-tauri/src/lib.rs`, find the `chat_commands::` entries in the `invoke_han
 
 - [ ] **Step 9: Extend TS `Chat` type + add `setModel` + `ollamaListModels`**
 
-In `src/lib/api.ts`, find the `Chat` interface and add `model`:
+In `src/lib/api.ts`, update the `Chat` interface:
 
 ```typescript
 export interface Chat {
@@ -211,7 +207,7 @@ export interface Chat {
 }
 ```
 
-Append below the existing chat functions (near `exportChatMarkdown`):
+Append near the existing chat exports:
 
 ```typescript
 export async function setModel(chatId: number, model: string): Promise<void> {
@@ -225,8 +221,8 @@ export interface OllamaModelInfo {
 }
 
 /**
- * List locally-pulled Ollama models suitable for chat (excludes embedding-only models).
- * Hits the Ollama HTTP API directly from the browser — no Tauri roundtrip needed.
+ * Lists locally-pulled Ollama models suitable for chat (excludes embedding-only
+ * models like nomic-bert). Direct browser → Ollama HTTP call, no Tauri roundtrip.
  */
 export async function ollamaListModels(baseUrl: string): Promise<OllamaModelInfo[]> {
   const res = await fetch(`${baseUrl.replace(/\/$/, "")}/api/tags`);
@@ -237,7 +233,6 @@ export async function ollamaListModels(baseUrl: string): Promise<OllamaModelInfo
       details?: { family?: string; parameter_size?: string };
     }>;
   };
-  // Filter out embedding-only families (nomic-bert, bert, etc.) — they can't chat.
   const EMBEDDING_FAMILIES = new Set(["nomic-bert", "bert"]);
   return data.models
     .filter((m) => !EMBEDDING_FAMILIES.has(m.details?.family ?? ""))
@@ -251,7 +246,7 @@ export async function ollamaListModels(baseUrl: string): Promise<OllamaModelInfo
 
 - [ ] **Step 10: Add query key**
 
-In `src/lib/query-keys.ts`, add inside the `queryKeys` object:
+In `src/lib/query-keys.ts`, add inside `queryKeys`:
 
 ```typescript
   ollamaModels: (baseUrl: string) => ["ollama-models", baseUrl] as const,
@@ -262,49 +257,27 @@ In `src/lib/query-keys.ts`, add inside the `queryKeys` object:
 Create `src/lib/claude-models.ts`:
 
 ```typescript
-/**
- * Claude Code CLI accepts `--model <alias|full-name>`. Aliases are stable
- * across minor releases; full names are pinned. We store aliases in
- * `chats.model` so existing chats keep working after model upgrades.
- */
 export interface ClaudeModel {
-  id: string; // alias passed to --model
-  label: string; // display name
+  id: string; // alias passed to claude CLI --model
+  label: string;
   description: string;
 }
 
 export const CLAUDE_MODELS: ClaudeModel[] = [
-  {
-    id: "opus",
-    label: "Claude Opus",
-    description: "most capable · slowest",
-  },
-  {
-    id: "sonnet",
-    label: "Claude Sonnet",
-    description: "balanced · default",
-  },
-  {
-    id: "haiku",
-    label: "Claude Haiku",
-    description: "fastest · cheapest",
-  },
+  { id: "opus",   label: "Claude Opus",   description: "most capable · slowest"  },
+  { id: "sonnet", label: "Claude Sonnet", description: "balanced · default"      },
+  { id: "haiku",  label: "Claude Haiku",  description: "fastest · cheapest"      },
 ];
 
 export const DEFAULT_CLAUDE_MODEL = "sonnet";
 ```
 
-- [ ] **Step 12: Run a migration on a disposable DB to confirm V008 applies cleanly**
-
-Run: `cargo test -p rewindos-core db::tests 2>&1 | tail -5`
-Expected: all existing DB tests still pass. V008 runs transparently.
-
-- [ ] **Step 13: Verify compile**
+- [ ] **Step 12: Verify compile**
 
 Run: `cargo check -p rewindos && bun x tsc --noEmit -p tsconfig.json`
 Expected: clean.
 
-- [ ] **Step 14: Commit**
+- [ ] **Step 13: Commit**
 
 ```bash
 git add crates/rewindos-core/migrations/V008__chat_model.sql \
@@ -312,27 +285,67 @@ git add crates/rewindos-core/migrations/V008__chat_model.sql \
         crates/rewindos-core/src/chat_store.rs \
         src-tauri/src/chat_commands.rs \
         src-tauri/src/lib.rs \
-        src/lib/api.ts \
-        src/lib/query-keys.ts \
-        src/lib/claude-models.ts
+        src/lib/api.ts src/lib/query-keys.ts src/lib/claude-models.ts
 git commit -m "add chats.model column + set_model command"
 ```
 
 ---
 
-## Task 2: ModelPicker component + header integration + Claude `--model` flag + Ollama `body.model`
+## Task 2: Install ai-elements registry components + `ModelSelector` integration + Claude `--model` flag + Ollama `body.model`
 
 **Files:**
-- Create: `src/features/ask/ModelPicker.tsx`
-- Modify: `src/features/ask/AskView.tsx` (add picker to header, thread `activeChatId` + `activeChatModel` + `activeChatBackend`)
-- Modify: `src/context/AskContext.tsx` (expose `activeChat`, thread model into sendMessage for Ollama)
-- Modify: `src-tauri/src/lib.rs` (pass `chat.model` into `ask_claude_stream_spawn`)
-- Modify: `src-tauri/src/claude_code.rs` (`ask_claude_stream_spawn` accepts `model: Option<&str>`)
-- Modify: `src/lib/ollama-chat.ts` (confirm `model` param flows; no change expected)
+- Create (via registry): `src/components/ai-elements/model-selector.tsx`
+- Create (via registry): `src/components/ai-elements/attachments.tsx`
+- Create (via registry): `src/components/ai-elements/speech-input.tsx`
+- Modify: `src-tauri/src/claude_code.rs` (`ask_claude_stream_spawn` accepts model)
+- Modify: `src-tauri/src/lib.rs` (pass `chat.model` through)
+- Modify: `src/context/AskContext.tsx` (expose `activeChat`, `pendingModel`, `setPendingModel`, thread model into sendMessage)
+- Create: `src/features/ask/AskModelPicker.tsx` (thin composition of `ModelSelector`)
+- Modify: `src/features/ask/AskView.tsx` (replace inline model label with the picker)
 
-- [ ] **Step 1: Add `model` param to `ask_claude_stream_spawn`**
+- [ ] **Step 1: Install the three registry components**
 
-In `src-tauri/src/claude_code.rs`, replace the signature and body:
+Run this Python script to download `model-selector.tsx`, `attachments.tsx`, and `speech-input.tsx`:
+
+```bash
+python3 <<'PY'
+import json, urllib.request, pathlib
+for name in ["model-selector", "attachments", "speech-input"]:
+    url = f"https://elements.ai-sdk.dev/api/registry/{name}.json"
+    d = json.loads(urllib.request.urlopen(url).read())
+    for f in d.get("files", []):
+        p = pathlib.Path(f["path"])
+        target = pathlib.Path("src/components/ai-elements") / p.name
+        target.write_text(f["content"])
+        print(f"wrote {target}")
+    print(f"  deps: {d.get('dependencies')}")
+    print(f"  registry-deps: {d.get('registryDependencies')}")
+PY
+```
+
+- [ ] **Step 2: Rewrite `@/registry/default/ui/` imports**
+
+The registry files use `@/registry/default/ui/` paths; our project maps `@/components/ui/`. Rewrite:
+
+```bash
+find src/components/ai-elements -name '*.tsx' -exec \
+  sed -i 's|@/registry/default/ui/|@/components/ui/|g' {} +
+find src/components/ai-elements -name '*.tsx' -exec \
+  sed -i 's|@/registry/new-york/ui/|@/components/ui/|g' {} +
+```
+
+All registry deps (`command`, `dialog`, `button`, `hover-card`, `spinner`) are already installed from prior work. Npm deps (`ai`, `lucide-react`) are already in package.json.
+
+- [ ] **Step 3: Confirm tsc**
+
+Run: `bun x tsc --noEmit -p tsconfig.json 2>&1 | grep "error TS" | grep -v "^src/components/ui/\(badge\|button\)\.tsx"`
+Expected: no output (zero new errors).
+
+If this fails with "Cannot find module" for any of the new files' imports, you may have missed a registry dep in the prior install. Grep the new files for their imports and install anything missing.
+
+- [ ] **Step 4: Add `model` parameter to `ask_claude_stream_spawn`**
+
+In `src-tauri/src/claude_code.rs`, update the signature and body:
 
 ```rust
 pub async fn ask_claude_stream_spawn(
@@ -374,11 +387,9 @@ pub async fn ask_claude_stream_spawn(
 }
 ```
 
-- [ ] **Step 2: Update `ask_claude` to pass `chat.model`**
+- [ ] **Step 5: Pass `chat.model` through `ask_claude`**
 
-In `src-tauri/src/lib.rs`, find the `ask_claude_stream_spawn` invocation inside the `ask_claude` Tauri command and update it. First, the chat lookup section already pulls `existing_session_id`; we also need `chat.model`. Extend the first destructure:
-
-Find this block in `ask_claude`:
+In `src-tauri/src/lib.rs`, find `ask_claude`'s chat-lookup block:
 
 ```rust
     let existing_session_id = {
@@ -402,7 +413,7 @@ Replace with:
     };
 ```
 
-Then find:
+Find the `ask_claude_stream_spawn` invocation:
 
 ```rust
     let mut child = claude_code::ask_claude_stream_spawn(
@@ -427,17 +438,27 @@ Replace with:
     .await?;
 ```
 
-- [ ] **Step 3: Verify Rust compiles**
+- [ ] **Step 6: Verify Rust compiles**
 
 Run: `cargo check -p rewindos`
 Expected: clean.
 
-- [ ] **Step 4: Expose `activeChat` from `AskContext`**
+- [ ] **Step 7: Extend `AskContext` with `activeChat`, `pendingModel`, `setPendingModel`**
 
-In `src/context/AskContext.tsx`, find the `useQuery` that loads messages. Add a second query for the active chat row (so the UI can read `chat.model` / `chat.backend`). Add near the existing messages query:
+In `src/context/AskContext.tsx`, add imports:
 
 ```typescript
-  const { data: activeChat = null } = useQuery({
+import { listChats, setModel, type Chat } from "@/lib/api";
+```
+
+(Adjust the existing `@/lib/api` import to include these.)
+
+Add `setModel` to imports. Add `Chat` type to imports.
+
+Inside `AskProvider`, after the existing `useQuery` for messages, add:
+
+```typescript
+  const { data: activeChat = null } = useQuery<Chat | null>({
     queryKey: activeChatId
       ? (["chat", activeChatId] as const)
       : (["chat", "none"] as const),
@@ -450,9 +471,16 @@ In `src/context/AskContext.tsx`, find the `useQuery` that loads messages. Add a 
   });
 ```
 
-Add `listChats` to the imports at the top of the file (alongside the existing ones from `@/lib/api`).
+Add near the other state:
 
-Extend the context interface and value. Find `AskContextValue`:
+```typescript
+  const [pendingModel, setPendingModelState] = useState<string | null>(null);
+  const setPendingModel = useCallback((m: string | null) => {
+    setPendingModelState(m);
+  }, []);
+```
+
+Extend `AskContextValue`:
 
 ```typescript
 interface AskContextValue {
@@ -465,45 +493,45 @@ interface AskContextValue {
   cancelStream: () => void;
   selectChat: (chatId: number | null) => void;
   startNewChat: () => void;
+  pendingModel: string | null;
+  setPendingModel: (model: string | null) => void;
 }
 ```
 
-Add `Chat` to the imports from `@/lib/api`.
-
-In the `value` `useMemo`, add `activeChat`:
+Read config at the top of `AskProvider` (needed for default Ollama model). Find the existing `const config` inside the Ollama branch of `sendMessage` and verify there's also a top-level `getConfig` query; if not, add:
 
 ```typescript
-  const value = useMemo<AskContextValue>(
-    () => ({
-      activeChatId,
-      activeChat,
-      messages,
-      isStreaming,
-      error,
-      sendMessage,
-      cancelStream,
-      selectChat,
-      startNewChat,
-    }),
-    [
-      activeChatId,
-      activeChat,
-      messages,
-      isStreaming,
-      error,
-      sendMessage,
-      cancelStream,
-      selectChat,
-      startNewChat,
-    ],
-  );
+  const { data: config } = useQuery({
+    queryKey: queryKeys.config(),
+    queryFn: getConfig,
+  });
 ```
 
-- [ ] **Step 5: Thread `chat.model` into Ollama send in `sendMessage`**
+(Add `getConfig` and `queryKeys.config` to imports if not present.)
 
-Still in `src/context/AskContext.tsx`, find the Ollama branch of `sendMessage`. Currently it reads the model from `config.chat.model`. Change it to prefer `activeChat.model` when present:
+In `sendMessage`, right after `chatId = await createChat(...)`, add the model lock:
 
-Find:
+```typescript
+        let chatId = activeChatId;
+        if (chatId == null) {
+          const title = text.slice(0, 60).trim() || "New chat";
+          chatId = await createChat(title, useClaude ? "claude" : "ollama", null);
+          setActiveChatId(chatId);
+          const chosenModel =
+            pendingModel ??
+            (useClaude ? "sonnet" : (config as ChatConfigShape | undefined)?.chat.model ?? "");
+          if (chosenModel) {
+            await setModel(chatId, chosenModel);
+          }
+          setPendingModelState(null);
+          qc.invalidateQueries({ queryKey: queryKeys.chats() });
+          qc.invalidateQueries({ queryKey: ["chat", chatId] as const });
+        }
+```
+
+(The `ChatConfigShape` type already exists in AskContext — reuse it.)
+
+In the Ollama branch of `sendMessage`, change:
 
 ```typescript
           await ollamaChat({
@@ -511,115 +539,57 @@ Find:
             model: config.chat.model,
 ```
 
-Replace with:
+to:
 
 ```typescript
           await ollamaChat({
-            baseUrl: config.chat.ollama_url,
-            model: activeChat?.model ?? config.chat.model,
+            baseUrl: cfg.chat.ollama_url,
+            model: activeChat?.model ?? cfg.chat.model,
 ```
 
-- [ ] **Step 6: Lock the model on first send**
+(Where `cfg` is the locally-named config shim inside the branch — rename the inner `config` variable to `cfg` or access via the outer one; whichever avoids shadowing confusion. Simplest: rename the outer top-level one to `appConfig` to avoid any shadow.)
 
-Still in `sendMessage`, right after the `createChat` call (where we invalidate chat list), add a `setModel` call so the freshly-created chat gets its model locked immediately. Find:
+Add `pendingModel`, `setPendingModel`, `activeChat` to the `value` memo and its deps array.
 
-```typescript
-        let chatId = activeChatId;
-        if (chatId == null) {
-          const title = text.slice(0, 60).trim() || "New chat";
-          chatId = await createChat(title, useClaude ? "claude" : "ollama", null);
-          setActiveChatId(chatId);
-          qc.invalidateQueries({ queryKey: queryKeys.chats() });
-        }
-```
+- [ ] **Step 8: Create `AskModelPicker` composition**
 
-Replace with:
-
-```typescript
-        let chatId = activeChatId;
-        if (chatId == null) {
-          const title = text.slice(0, 60).trim() || "New chat";
-          chatId = await createChat(title, useClaude ? "claude" : "ollama", null);
-          setActiveChatId(chatId);
-          // Lock the model the user chose (or the default if none)
-          const pendingModel =
-            pendingModelRef.current ??
-            (useClaude ? "sonnet" : config?.chat?.model ?? "");
-          if (pendingModel) {
-            await setModel(chatId, pendingModel);
-          }
-          qc.invalidateQueries({ queryKey: queryKeys.chats() });
-        }
-```
-
-Add `setModel` to the imports at the top of the file.
-
-Add near the other refs (inside the `AskProvider` component):
-
-```typescript
-  const pendingModelRef = useRef<string | null>(null);
-```
-
-Expose a setter on the context so the picker can call it. Extend `AskContextValue`:
-
-```typescript
-interface AskContextValue {
-  // ... existing fields ...
-  setPendingModel: (model: string | null) => void;
-}
-```
-
-Add the implementation inside `AskProvider`:
-
-```typescript
-  const setPendingModel = useCallback((model: string | null) => {
-    pendingModelRef.current = model;
-  }, []);
-```
-
-Add `setPendingModel` to both the value object and its deps array.
-
-Note: the `config` variable needs to come from somewhere — the existing code fetches it inside the Ollama branch. To make it available earlier for `pendingModel` default, move the `getConfig` call up or read it from an existing query. Simplest: add a top-level `const { data: config } = useQuery({ queryKey: queryKeys.config(), queryFn: getConfig });` at the top of `AskProvider` if it's not already present. (Check first — it may already exist; `AskView.tsx` also has a copy.)
-
-- [ ] **Step 7: Create `ModelPicker` component**
-
-Create `src/features/ask/ModelPicker.tsx`:
+Create `src/features/ask/AskModelPicker.tsx`:
 
 ```tsx
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDown, Check, Zap } from "lucide-react";
+import { ChevronDown, Lock, Zap } from "lucide-react";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { cn } from "@/lib/utils";
+  ModelSelector,
+  ModelSelectorContent,
+  ModelSelectorEmpty,
+  ModelSelectorGroup,
+  ModelSelectorInput,
+  ModelSelectorItem,
+  ModelSelectorList,
+  ModelSelectorSeparator,
+  ModelSelectorTrigger,
+} from "@/components/ai-elements/model-selector";
 import { getConfig, ollamaListModels } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import { CLAUDE_MODELS, DEFAULT_CLAUDE_MODEL } from "@/lib/claude-models";
 import { useAskChat } from "@/context/AskContext";
+import { cn } from "@/lib/utils";
 
 interface ChatUrlConfig {
   chat: { ollama_url: string; model: string };
 }
 
-/**
- * Header model picker. Shows current model or a lock badge once the chat
- * has sent its first message. Clicking opens a two-section dropdown
- * (Claude tiers + live Ollama models).
- */
-export function ModelPicker() {
-  const { activeChat, setPendingModel } = useAskChat();
+export function AskModelPicker() {
+  const { activeChat, pendingModel, setPendingModel } = useAskChat();
+  const [open, setOpen] = useState(false);
 
   const { data: config } = useQuery({
     queryKey: queryKeys.config(),
     queryFn: getConfig,
   });
   const ollamaUrl = (config as unknown as ChatUrlConfig | undefined)?.chat.ollama_url ?? "";
-  const defaultOllama = (config as unknown as ChatUrlConfig | undefined)?.chat.model ?? "";
+  const defaultOllama = (config as unknown as ChatUrlConfig | undefined)?.chat.model;
 
   const { data: ollamaModels = [] } = useQuery({
     queryKey: queryKeys.ollamaModels(ollamaUrl),
@@ -628,128 +598,104 @@ export function ModelPicker() {
     staleTime: 60_000,
   });
 
-  // If chat is locked, render a read-only badge instead of a button.
+  // Locked state: chat is active and has a model set
   if (activeChat?.model) {
-    const backend = activeChat.backend;
     return (
-      <div className="flex items-center gap-2 px-2 py-0.5 border border-border/40 bg-surface-raised/30">
-        <Zap className={cn("size-3", backend === "claude" ? "text-semantic" : "text-accent")} />
+      <div className="flex items-center gap-1.5 px-2 py-0.5 border border-border/40 bg-surface-raised/30">
+        <Zap className="size-3 text-semantic" />
         <span className="font-mono text-[10px] text-text-primary uppercase tracking-wider">
           {activeChat.model}
         </span>
-        <span className="font-mono text-[10px] text-text-muted uppercase tracking-wider">
-          · locked
-        </span>
+        <Lock className="size-2.5 text-text-muted" />
       </div>
     );
   }
 
-  // No active chat yet — show the pending model selector. Default to sonnet
-  // until the user picks something; the pending pick is applied when the
-  // first message is sent.
-  // We read the pending value from local component state so the dropdown
-  // gives immediate feedback before the chat exists.
-  // (After first send, activeChat.model takes over via the branch above.)
-  const selectedLabel = getCurrentSelection(activeChat?.model ?? undefined);
+  // Editable state: no active chat yet (or chat not yet sent)
+  const currentDisplay = pendingModel ?? defaultOllama ?? DEFAULT_CLAUDE_MODEL;
+
+  const pick = (id: string) => {
+    setPendingModel(id);
+    setOpen(false);
+  };
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger
-        className="flex items-center gap-1.5 px-2 py-0.5 border border-border/40 bg-surface-raised/30 hover:border-border/60 focus:outline-none font-mono text-[10px] uppercase tracking-wider text-text-primary"
-      >
-        <Zap className="size-3 text-semantic" />
-        {selectedLabel}
-        <ChevronDown className="size-3 text-text-muted" />
-      </DropdownMenuTrigger>
-
-      <DropdownMenuContent align="start" className="min-w-64">
-        <DropdownMenuLabel className="font-mono text-[10px] uppercase tracking-wider text-text-muted">
-          claude code
-        </DropdownMenuLabel>
-        {CLAUDE_MODELS.map((m) => (
-          <DropdownMenuItem
-            key={m.id}
-            onSelect={() => setPendingModel(m.id)}
-            className="flex items-center gap-2"
-          >
-            <CheckIcon visible={isCurrent(m.id)} />
-            <div className="flex-1">
-              <div className="text-sm text-text-primary">{m.label}</div>
-              <div className="font-mono text-[10px] text-text-muted">{m.description}</div>
-            </div>
-          </DropdownMenuItem>
-        ))}
-
-        <DropdownMenuSeparator />
-
-        <DropdownMenuLabel className="font-mono text-[10px] uppercase tracking-wider text-text-muted">
-          ollama (local)
-        </DropdownMenuLabel>
-        {ollamaModels.length === 0 ? (
-          <div className="px-2 py-1.5 font-mono text-[10px] text-text-muted/60 italic">
-            no models pulled
-          </div>
-        ) : (
-          ollamaModels.map((m) => (
-            <DropdownMenuItem
-              key={m.name}
-              onSelect={() => setPendingModel(m.name)}
-              className="flex items-center gap-2"
-            >
-              <CheckIcon visible={isCurrent(m.name)} />
-              <div className="flex-1">
-                <div className="text-sm text-text-primary">{m.name}</div>
-                {m.parameter_size && (
-                  <div className="font-mono text-[10px] text-text-muted">
-                    {m.parameter_size}
-                  </div>
+    <ModelSelector open={open} onOpenChange={setOpen}>
+      <ModelSelectorTrigger asChild>
+        <button
+          type="button"
+          className="flex items-center gap-1.5 px-2 py-0.5 border border-border/40 bg-surface-raised/30 hover:border-border/60 focus:outline-none font-mono text-[10px] uppercase tracking-wider text-text-primary"
+        >
+          <Zap className="size-3 text-semantic" />
+          {currentDisplay}
+          <ChevronDown className="size-3 text-text-muted" />
+        </button>
+      </ModelSelectorTrigger>
+      <ModelSelectorContent title="Choose a model">
+        <ModelSelectorInput placeholder="search models..." />
+        <ModelSelectorList>
+          <ModelSelectorEmpty>No matches.</ModelSelectorEmpty>
+          <ModelSelectorGroup heading="Claude Code">
+            {CLAUDE_MODELS.map((m) => (
+              <ModelSelectorItem
+                key={m.id}
+                value={m.id}
+                onSelect={() => pick(m.id)}
+                className={cn(
+                  "flex flex-col items-start gap-0.5",
+                  currentDisplay === m.id && "bg-semantic/10",
                 )}
+              >
+                <span className="text-sm text-text-primary">{m.label}</span>
+                <span className="font-mono text-[10px] text-text-muted">
+                  {m.description}
+                </span>
+              </ModelSelectorItem>
+            ))}
+          </ModelSelectorGroup>
+          <ModelSelectorSeparator />
+          <ModelSelectorGroup heading="Ollama (local)">
+            {ollamaModels.length === 0 ? (
+              <div className="px-2 py-1.5 font-mono text-[10px] text-text-muted/60 italic">
+                no models pulled — run `ollama pull &lt;name&gt;`
               </div>
-            </DropdownMenuItem>
-          ))
-        )}
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-
-  function isCurrent(id: string): boolean {
-    // Before first send: highlight sonnet by default so the picker shows a
-    // visible current selection. After a pick, this is updated by setPendingModel.
-    // Since we don't bubble the pending value back to this component, this is
-    // approximate — the user's click immediately closes the menu anyway.
-    const current = defaultOllama || DEFAULT_CLAUDE_MODEL;
-    return id === current;
-  }
-
-  function getCurrentSelection(locked?: string): string {
-    if (locked) return locked;
-    return DEFAULT_CLAUDE_MODEL;
-  }
-}
-
-function CheckIcon({ visible }: { visible: boolean }) {
-  return (
-    <Check
-      className={cn(
-        "size-3 shrink-0 text-semantic",
-        visible ? "opacity-100" : "opacity-0",
-      )}
-    />
+            ) : (
+              ollamaModels.map((m) => (
+                <ModelSelectorItem
+                  key={m.name}
+                  value={m.name}
+                  onSelect={() => pick(m.name)}
+                  className={cn(
+                    "flex flex-col items-start gap-0.5",
+                    currentDisplay === m.name && "bg-semantic/10",
+                  )}
+                >
+                  <span className="text-sm text-text-primary">{m.name}</span>
+                  {m.parameter_size && (
+                    <span className="font-mono text-[10px] text-text-muted">
+                      {m.parameter_size}
+                    </span>
+                  )}
+                </ModelSelectorItem>
+              ))
+            )}
+          </ModelSelectorGroup>
+        </ModelSelectorList>
+      </ModelSelectorContent>
+    </ModelSelector>
   );
 }
 ```
 
-*Note:* the `isCurrent` heuristic is approximate by design — the picker commits the user's choice via `setPendingModel`, so the exact "current selection" state is held in `AskContext` and isn't round-tripped to this component. The dropdown closes on pick, so the visual is fine.
+- [ ] **Step 9: Wire into `AskView` header**
 
-- [ ] **Step 8: Wire `ModelPicker` into `AskView` header**
-
-In `src/features/ask/AskView.tsx`, import the picker:
+In `src/features/ask/AskView.tsx`, import:
 
 ```typescript
-import { ModelPicker } from "./ModelPicker";
+import { AskModelPicker } from "./AskModelPicker";
 ```
 
-Find the header (the `<div className="flex items-center justify-between px-6 py-2.5 border-b..."` block near the top of the component return). Replace the model label span with `<ModelPicker />`. The header becomes:
+Find the header block and replace the backend-label span with the picker. The header becomes:
 
 ```tsx
         {/* Header */}
@@ -765,46 +711,48 @@ Find the header (the `<div className="flex items-center justify-between px-6 py-
               ask
             </span>
             <span className="text-border">·</span>
-            <ModelPicker />
+            <AskModelPicker />
           </div>
         </div>
 ```
 
-You can delete the `backendLabel` / `backendTitle` constants since they're no longer used.
+Remove the now-unused `backendLabel` and `backendTitle` constants.
 
-- [ ] **Step 9: Verify compile**
+- [ ] **Step 10: Verify compile**
 
 Run: `cargo check -p rewindos && bun x tsc --noEmit -p tsconfig.json`
 Expected: clean.
 
-- [ ] **Step 10: Commit**
+- [ ] **Step 11: Commit**
 
 ```bash
-git add src-tauri/src/claude_code.rs \
-        src-tauri/src/lib.rs \
+git add src/components/ai-elements/model-selector.tsx \
+        src/components/ai-elements/attachments.tsx \
+        src/components/ai-elements/speech-input.tsx \
+        src-tauri/src/claude_code.rs src-tauri/src/lib.rs \
         src/context/AskContext.tsx \
-        src/features/ask/ModelPicker.tsx \
+        src/features/ask/AskModelPicker.tsx \
         src/features/ask/AskView.tsx
-git commit -m "add model picker with claude tiers + live ollama list"
+git commit -m "install model-selector/attachments/speech-input + add model picker"
 ```
 
 ---
 
-## Task 3: Citations — parse `[REF:N]`, render inline chips + Sources card
+## Task 3: Citations — parse `[REF:N]`, render custom chips + Sources card
 
 **Files:**
-- Create: `src/lib/citations.ts` (`parseTextWithRefs`, `collectRefs`)
-- Create: `src/lib/citations.test.ts` (6 unit tests)
+- Create: `src/lib/citations.ts`
+- Create: `src/lib/citations.test.ts`
 - Create: `src/features/ask/CitationChip.tsx`
-- Create: `src/features/ask/CitationSources.tsx` (styled Sources wrapper for RewindOS)
-- Modify: `src/features/ask/AskMessages.tsx` (integrate parsers + components)
-- Modify: `src/features/ask/AskView.tsx` (pass `onSelectScreenshot` through to `AskMessages`)
-- Modify: `src-tauri/src/lib.rs` (add `get_screenshots_by_ids` Tauri command)
-- Modify: `crates/rewindos-core/src/db.rs` (add `get_screenshots_by_ids` helper — one SELECT ... WHERE id IN (?)... for efficiency)
-- Modify: `src/lib/api.ts` (add `getScreenshotsByIds` TS wrapper)
-- Modify: `src/lib/query-keys.ts` (add `screenshotsByIds`)
+- Create: `src/features/ask/CitationSources.tsx`
+- Modify: `src/features/ask/AskMessages.tsx`
+- Modify: `src/features/ask/AskView.tsx`
+- Modify: `src-tauri/src/lib.rs`
+- Modify: `crates/rewindos-core/src/db.rs`
+- Modify: `src/lib/api.ts`
+- Modify: `src/lib/query-keys.ts`
 
-- [ ] **Step 1: Write failing tests for `parseTextWithRefs` + `collectRefs`**
+- [ ] **Step 1: Write failing tests**
 
 Create `src/lib/citations.test.ts`:
 
@@ -872,7 +820,7 @@ describe("collectRefs", () => {
 });
 ```
 
-- [ ] **Step 2: Run the failing tests**
+- [ ] **Step 2: Run failing tests**
 
 Run: `bun run test src/lib/citations.test.ts`
 Expected: FAIL — module not found.
@@ -882,34 +830,18 @@ Expected: FAIL — module not found.
 Create `src/lib/citations.ts`:
 
 ```typescript
-/**
- * A parsed text segment: either plain text or a screenshot reference from
- * a `[REF:N]` marker emitted by the LLM per the system prompt.
- */
 export type TextPart =
   | { type: "text"; text: string }
   | { type: "ref"; id: number };
 
 const REF_RE = /\[REF:(\d+)\]/g;
 
-/**
- * Split an assistant text block into text + ref segments. Pure.
- *
- * Rules:
- *  - Empty input → empty array.
- *  - No refs → single text segment.
- *  - `[REF:42]` anywhere → becomes a ref part with the numeric id.
- *  - Malformed markers like `[REF:abc]` or `[REF:]` or lowercase `[ref:5]`
- *    are left as literal text — the regex only matches well-formed markers.
- */
 export function parseTextWithRefs(text: string): TextPart[] {
   if (text === "") return [];
-
   const out: TextPart[] = [];
   let cursor = 0;
   const re = new RegExp(REF_RE);
   let match: RegExpExecArray | null;
-
   while ((match = re.exec(text)) !== null) {
     if (match.index > cursor) {
       out.push({ type: "text", text: text.slice(cursor, match.index) });
@@ -917,17 +849,12 @@ export function parseTextWithRefs(text: string): TextPart[] {
     out.push({ type: "ref", id: Number(match[1]) });
     cursor = match.index + match[0].length;
   }
-
   if (cursor < text.length) {
     out.push({ type: "text", text: text.slice(cursor) });
   }
   return out;
 }
 
-/**
- * Collect unique ref ids from a parsed parts array, in order of first appearance.
- * Used to drive the Sources card at the bottom of an assistant message.
- */
 export function collectRefs(parts: TextPart[]): number[] {
   const seen = new Set<number>();
   const out: number[] = [];
@@ -941,14 +868,14 @@ export function collectRefs(parts: TextPart[]): number[] {
 }
 ```
 
-- [ ] **Step 4: Run the tests**
+- [ ] **Step 4: Run tests**
 
 Run: `bun run test src/lib/citations.test.ts`
-Expected: 8 tests pass (6 `parseTextWithRefs` + 2 `collectRefs`).
+Expected: 8 tests pass.
 
 - [ ] **Step 5: Add Rust `get_screenshots_by_ids` helper**
 
-In `crates/rewindos-core/src/db.rs`, find an existing screenshot helper (e.g. `get_screenshot`) and add nearby:
+In `crates/rewindos-core/src/db.rs`, near `get_screenshot`, add:
 
 ```rust
 /// Bulk fetch by ids. Returns screenshots in the order they appear in `ids`,
@@ -958,7 +885,6 @@ pub fn get_screenshots_by_ids(&self, ids: &[i64]) -> Result<Vec<Screenshot>> {
     if ids.is_empty() {
         return Ok(vec![]);
     }
-    // Build `?,?,?...` placeholder string.
     let placeholders = std::iter::repeat("?")
         .take(ids.len())
         .collect::<Vec<_>>()
@@ -988,18 +914,17 @@ pub fn get_screenshots_by_ids(&self, ids: &[i64]) -> Result<Vec<Screenshot>> {
         })
     })?;
     let found: Vec<Screenshot> = rows.collect::<rusqlite::Result<Vec<_>>>()?;
-    // Preserve input order.
     let mut by_id: std::collections::HashMap<i64, Screenshot> =
         found.into_iter().map(|s| (s.id, s)).collect();
     Ok(ids.iter().filter_map(|id| by_id.remove(id)).collect())
 }
 ```
 
-*Note:* the SELECT column list must match whatever shape `Screenshot` already has in `schema.rs`. If `get_screenshot` in `db.rs` uses a different column list (e.g. includes `ocr_status`), mirror that. Don't invent columns. Check `get_screenshot`'s implementation first.
+*Note:* the SELECT column list must match the `Screenshot` struct shape in `schema.rs`. If `get_screenshot` uses a different column order (e.g. includes `ocr_status`), mirror it exactly. **Do not invent columns.** Read `get_screenshot`'s implementation first if unsure.
 
-- [ ] **Step 6: Add `get_screenshots_by_ids` Tauri command**
+- [ ] **Step 6: Add Tauri command + register**
 
-In `src-tauri/src/lib.rs`, near the existing `get_screenshot` Tauri command:
+In `src-tauri/src/lib.rs`, near `get_screenshot`:
 
 ```rust
 #[tauri::command]
@@ -1012,7 +937,7 @@ fn get_screenshots_by_ids(
 }
 ```
 
-Register in the `invoke_handler!` macro alongside `get_screenshot`:
+Register in `invoke_handler!` alongside `get_screenshot`:
 
 ```rust
             get_screenshots_by_ids,
@@ -1020,7 +945,7 @@ Register in the `invoke_handler!` macro alongside `get_screenshot`:
 
 - [ ] **Step 7: Add TS wrapper + query key**
 
-In `src/lib/api.ts`, find the `getScreenshot` function and add nearby:
+In `src/lib/api.ts`, near `getScreenshot`:
 
 ```typescript
 export async function getScreenshotsByIds(ids: number[]): Promise<Screenshot[]> {
@@ -1028,15 +953,15 @@ export async function getScreenshotsByIds(ids: number[]): Promise<Screenshot[]> 
 }
 ```
 
-(The `Screenshot` type should already exist in api.ts. If it doesn't under that exact name, check what type `getScreenshot` returns and reuse that — do NOT invent a new type.)
+(Use whatever the existing `Screenshot` type name is — grep for what `getScreenshot` returns.)
 
-In `src/lib/query-keys.ts`, add:
+In `src/lib/query-keys.ts`:
 
 ```typescript
   screenshotsByIds: (ids: number[]) => ["screenshots-by-ids", ...ids] as const,
 ```
 
-- [ ] **Step 8: Create `CitationChip` component**
+- [ ] **Step 8: Create `CitationChip`**
 
 Create `src/features/ask/CitationChip.tsx`:
 
@@ -1070,15 +995,16 @@ export function CitationChip({ id, onClick }: CitationChipProps) {
 }
 ```
 
-- [ ] **Step 9: Create `CitationSources` wrapper**
+- [ ] **Step 9: Create `CitationSources`**
 
 Create `src/features/ask/CitationSources.tsx`:
 
 ```tsx
 import { useQuery } from "@tanstack/react-query";
-import { getScreenshotsByIds, getImageUrl } from "@/lib/api";
+import { getScreenshotsByIds } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
+import { convertFileSrc } from "@tauri-apps/api/core";
 
 interface CitationSourcesProps {
   ids: number[];
@@ -1116,7 +1042,7 @@ export function CitationSources({ ids, onSelect }: CitationSourcesProps) {
           >
             <div className="w-20 h-14 shrink-0 bg-surface-overlay overflow-hidden">
               <img
-                src={getImageUrl(s.thumbnail_path ?? s.file_path)}
+                src={convertFileSrc(s.thumbnail_path ?? s.file_path)}
                 alt=""
                 className="w-full h-full object-cover"
               />
@@ -1157,19 +1083,14 @@ function formatTimestamp(ts: number): string {
 }
 ```
 
-If `getImageUrl` doesn't exist in `src/lib/api.ts` under that name, check what function produces Tauri asset URLs (it's imported by other views — grep for `convertFileSrc` or `asset:` usage). Use whatever the existing pattern is.
-
 - [ ] **Step 10: Integrate into `AskMessages`**
 
-In `src/features/ask/AskMessages.tsx`, modify the text-rendering branch and add a Sources card at the end of each assistant message.
-
-At the top, import the new pieces:
+In `src/features/ask/AskMessages.tsx`, add imports:
 
 ```typescript
-import { parseTextWithRefs, collectRefs, type TextPart } from "@/lib/citations";
+import { parseTextWithRefs, collectRefs } from "@/lib/citations";
 import { CitationChip } from "./CitationChip";
 import { CitationSources } from "./CitationSources";
-import { Streamdown } from "streamdown";
 ```
 
 Extend `AskMessagesProps`:
@@ -1181,44 +1102,21 @@ interface AskMessagesProps {
 }
 ```
 
-Replace the text-block branch for assistant messages. Find:
+Destructure `onSelectScreenshot` from props.
+
+Replace the assistant-text branch. Find:
 
 ```tsx
-                  if (type === "text") {
-                    const text = (anyPart.text as string) ?? "";
-                    if (isUser) {
-                      return (
-                        <div
-                          key={key}
-                          className="text-sm text-text-primary whitespace-pre-wrap"
-                        >
-                          {text}
-                        </div>
-                      );
-                    }
                     return (
                       <div key={key} className={ASSISTANT_PROSE}>
                         <Streamdown>{text}</Streamdown>
                       </div>
                     );
-                  }
 ```
 
-Replace the assistant branch (keep the user branch as-is):
+Replace with:
 
 ```tsx
-                  if (type === "text") {
-                    const text = (anyPart.text as string) ?? "";
-                    if (isUser) {
-                      return (
-                        <div
-                          key={key}
-                          className="text-sm text-text-primary whitespace-pre-wrap"
-                        >
-                          {text}
-                        </div>
-                      );
-                    }
                     return (
                       <AssistantTextWithCitations
                         key={key}
@@ -1226,10 +1124,9 @@ Replace the assistant branch (keep the user branch as-is):
                         onSelectScreenshot={onSelectScreenshot}
                       />
                     );
-                  }
 ```
 
-Add `onSelectScreenshot` to the destructured props. Then below the component, add:
+At the bottom of the file (outside the main component), add:
 
 ```tsx
 function AssistantTextWithCitations({
@@ -1241,22 +1138,16 @@ function AssistantTextWithCitations({
 }) {
   const parts = parseTextWithRefs(text);
   const refIds = collectRefs(parts);
-
-  // Render text runs through Streamdown so markdown (lists, code, etc.) still
-  // works; inject chips inline by splitting the markdown string on refs.
-  // Simplest approach: render each text segment as its own Streamdown block,
-  // and chips between. This keeps each markdown segment self-contained.
   return (
     <>
       <div className={ASSISTANT_PROSE}>
-        {parts.map((p, i) => {
-          if (p.type === "text") {
-            return <Streamdown key={i}>{p.text}</Streamdown>;
-          }
-          return (
+        {parts.map((p, i) =>
+          p.type === "text" ? (
+            <Streamdown key={i}>{p.text}</Streamdown>
+          ) : (
             <CitationChip key={i} id={p.id} onClick={onSelectScreenshot} />
-          );
-        })}
+          ),
+        )}
       </div>
       {refIds.length > 0 && (
         <CitationSources ids={refIds} onSelect={onSelectScreenshot} />
@@ -1266,17 +1157,15 @@ function AssistantTextWithCitations({
 }
 ```
 
-- [ ] **Step 11: Thread `onSelectScreenshot` from `AskView` into `AskMessages`**
+- [ ] **Step 11: Thread `onSelectScreenshot` from `AskView`**
 
-In `src/features/ask/AskView.tsx`, find the `<AskMessages rows={messages} />` usage and change the underscore-prefixed unused prop to used + pass it through. Top of the component:
-
-Replace:
+In `src/features/ask/AskView.tsx`, change:
 
 ```typescript
 export function AskView({ onSelectScreenshot: _onSelectScreenshot }: AskViewProps) {
 ```
 
-With:
+to:
 
 ```typescript
 export function AskView({ onSelectScreenshot }: AskViewProps) {
@@ -1295,15 +1184,14 @@ Run:
 cargo check -p rewindos && bun x tsc --noEmit -p tsconfig.json
 bun run test
 ```
-Expected: all clean, 8 new citation tests pass (6 + 2), total test count goes from 46 to 54.
+Expected: clean, test count +8 (54 total).
 
 - [ ] **Step 13: Commit**
 
 ```bash
 git add src/lib/citations.ts src/lib/citations.test.ts \
         src/lib/api.ts src/lib/query-keys.ts \
-        crates/rewindos-core/src/db.rs \
-        src-tauri/src/lib.rs \
+        crates/rewindos-core/src/db.rs src-tauri/src/lib.rs \
         src/features/ask/CitationChip.tsx \
         src/features/ask/CitationSources.tsx \
         src/features/ask/AskMessages.tsx \
@@ -1313,18 +1201,19 @@ git commit -m "render [REF:N] as citation chips + sources card"
 
 ---
 
-## Task 4: Screenshot attachments — picker + marker + context expansion
+## Task 4: Screenshot attachments — custom picker modal + `Attachments` chip rendering
 
 **Files:**
-- Create: `src/lib/attachments.ts` (marker encode/decode pure functions)
-- Create: `src/lib/attachments.test.ts` (5 unit tests)
-- Create: `src/features/ask/AttachmentPicker.tsx` (modal dialog)
-- Create: `src/features/ask/AttachmentChip.tsx`
-- Modify: `src/features/ask/AskView.tsx` (add attached state + attach button + chip rendering)
-- Modify: `src/features/ask/AskMessages.tsx` (render attachment chips above user message text)
-- Modify: `src/context/AskContext.tsx` (`sendMessage` accepts optional attachments, expands context)
+- Create: `src/lib/attachments.ts`
+- Create: `src/lib/attachments.test.ts`
+- Create: `src/features/ask/AttachmentPicker.tsx`
+- Modify: `src/features/ask/AskView.tsx`
+- Modify: `src/features/ask/AskMessages.tsx`
+- Modify: `src/context/AskContext.tsx`
+- Modify: `src-tauri/src/lib.rs`
+- Modify: `src/lib/api.ts`
 
-- [ ] **Step 1: Write failing tests for attachment marker**
+- [ ] **Step 1: Write failing tests for the marker encode/decode**
 
 Create `src/lib/attachments.test.ts`:
 
@@ -1362,7 +1251,7 @@ describe("attachments marker", () => {
     });
   });
 
-  it("stripMarker + hasAttachments work on edge cases", () => {
+  it("stripMarker + hasAttachments edge cases", () => {
     expect(stripMarker("[ATTACH:1]\n\nhi")).toBe("hi");
     expect(stripMarker("no marker")).toBe("no marker");
     expect(hasAttachments("[ATTACH:1,2]\n\nhi")).toBe(true);
@@ -1381,20 +1270,6 @@ Expected: FAIL — module not found.
 Create `src/lib/attachments.ts`:
 
 ```typescript
-/**
- * User messages can carry pinned screenshot references via a marker at the
- * start of their content_json.text:
- *
- *   [ATTACH:42,43]\n\n<user text>
- *
- * Invariants:
- *  - If the marker is present, it's always at offset 0.
- *  - Marker regex: /^\[ATTACH:(\d+(?:,\d+)*)\]\n\n/
- *  - Absence of marker ⇒ no attachments.
- *
- * These helpers are pure and have no DB or network side effects.
- */
-
 const RE = /^\[ATTACH:(\d+(?:,\d+)*)\]\n\n/;
 
 export interface DecodedMessage {
@@ -1428,73 +1303,7 @@ export function hasAttachments(raw: string): boolean {
 Run: `bun run test src/lib/attachments.test.ts`
 Expected: 5 tests pass.
 
-- [ ] **Step 5: Create `AttachmentChip`**
-
-Create `src/features/ask/AttachmentChip.tsx`:
-
-```tsx
-import { useQuery } from "@tanstack/react-query";
-import { X } from "lucide-react";
-import { getScreenshotsByIds, getImageUrl } from "@/lib/api";
-import { queryKeys } from "@/lib/query-keys";
-import { cn } from "@/lib/utils";
-
-interface AttachmentChipProps {
-  id: number;
-  onRemove?: (id: number) => void;
-  onClick?: (id: number) => void;
-}
-
-export function AttachmentChip({ id, onRemove, onClick }: AttachmentChipProps) {
-  const { data: screenshots = [] } = useQuery({
-    queryKey: queryKeys.screenshotsByIds([id]),
-    queryFn: () => getScreenshotsByIds([id]),
-    staleTime: 60_000,
-  });
-  const shot = screenshots[0];
-
-  return (
-    <div
-      className={cn(
-        "group inline-flex items-center gap-1.5 p-0.5 pr-1.5",
-        "border border-accent/40 bg-accent/5",
-      )}
-    >
-      <button
-        type="button"
-        onClick={() => onClick?.(id)}
-        disabled={!onClick}
-        className="flex items-center gap-1.5"
-      >
-        {shot?.thumbnail_path || shot?.file_path ? (
-          <div className="w-8 h-6 shrink-0 bg-surface-overlay overflow-hidden">
-            <img
-              src={getImageUrl(shot.thumbnail_path ?? shot.file_path)}
-              alt=""
-              className="w-full h-full object-cover"
-            />
-          </div>
-        ) : (
-          <div className="w-8 h-6 shrink-0 bg-surface-overlay" />
-        )}
-        <span className="font-mono text-[10px] text-accent">#{id}</span>
-      </button>
-      {onRemove && (
-        <button
-          type="button"
-          onClick={() => onRemove(id)}
-          className="text-accent/60 hover:text-accent"
-          aria-label={`remove attachment ${id}`}
-        >
-          <X className="size-3" />
-        </button>
-      )}
-    </div>
-  );
-}
-```
-
-- [ ] **Step 6: Create `AttachmentPicker` modal**
+- [ ] **Step 5: Create `AttachmentPicker` modal**
 
 Create `src/features/ask/AttachmentPicker.tsx`:
 
@@ -1509,9 +1318,10 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { getImageUrl, search, type SearchFilters } from "@/lib/api";
+import { search, type SearchFilters } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
+import { convertFileSrc } from "@tauri-apps/api/core";
 
 interface AttachmentPickerProps {
   open: boolean;
@@ -1525,7 +1335,6 @@ export function AttachmentPicker({ open, onClose, onAttach }: AttachmentPickerPr
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<Set<number>>(new Set());
 
-  // Show recent screenshots by default; filter to search when query is present.
   const now = Math.floor(Date.now() / 1000);
   const filters: SearchFilters = useMemo(
     () => ({
@@ -1609,15 +1418,13 @@ export function AttachmentPicker({ open, onClose, onAttach }: AttachmentPickerPr
                 >
                   <div className="aspect-video w-full bg-surface-overlay overflow-hidden">
                     <img
-                      src={getImageUrl(r.thumbnail_path ?? r.file_path)}
+                      src={convertFileSrc(r.thumbnail_path ?? r.file_path)}
                       alt=""
                       className="w-full h-full object-cover"
                     />
                   </div>
                   <div className="p-1.5">
-                    <div className="font-mono text-[10px] text-semantic/70">
-                      #{r.id}
-                    </div>
+                    <div className="font-mono text-[10px] text-semantic/70">#{r.id}</div>
                     <div className="font-sans text-xs text-text-primary truncate">
                       {r.app_name ?? "unknown"}
                     </div>
@@ -1679,40 +1486,222 @@ function formatTs(ts: number): string {
 }
 ```
 
-*Note:* the `search` function and `SearchFilters` type should already exist in `src/lib/api.ts`. If `search` takes different params than `(query, filters)`, adapt to match.
+- [ ] **Step 6: Update `ask_claude` to accept split stored/sent prompts**
 
-- [ ] **Step 7: Wire attachments into `AskView`**
+The Rust `ask_claude` currently takes one `prompt` and stores it + sends it. With attachments the stored and sent versions differ. Add `stored_text: Option<String>`:
+
+In `src-tauri/src/lib.rs`, replace `ask_claude`'s signature:
+
+```rust
+#[tauri::command]
+async fn ask_claude(
+    state: State<'_, AppState>,
+    chat_id: i64,
+    prompt: String,
+    stored_text: Option<String>,
+    on_event: tauri::ipc::Channel<ask_stream::AskStreamEvent>,
+) -> Result<(), String> {
+```
+
+Find the persist block:
+
+```rust
+    {
+        let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+        let body = serde_json::json!({ "text": prompt }).to_string();
+```
+
+Replace with:
+
+```rust
+    {
+        let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+        let to_store = stored_text.as_deref().unwrap_or(&prompt);
+        let body = serde_json::json!({ "text": to_store }).to_string();
+```
+
+The rest uses `prompt` for the CLI call — correct.
+
+- [ ] **Step 7: Update `askClaudeStream` + add attachments variant**
+
+In `src/lib/api.ts`, keep the existing `askClaudeStream` unchanged (Tauri will pass the optional `storedText` as undefined, matching `Option<String>`). Add alongside it:
+
+```typescript
+export async function askClaudeStreamWithAttachments(
+  chatId: number,
+  storedText: string,
+  expandedText: string,
+  onEvent: (ev: AskStreamEvent) => void,
+): Promise<void> {
+  const channel = new Channel<AskStreamEvent>();
+  channel.onmessage = onEvent;
+  return invoke("ask_claude", {
+    chatId,
+    prompt: expandedText,
+    storedText,
+    onEvent: channel,
+  });
+}
+```
+
+- [ ] **Step 8: Thread attachments through `AskContext.sendMessage`**
+
+In `src/context/AskContext.tsx`, add imports:
+
+```typescript
+import {
+  askClaudeStreamWithAttachments,
+  getScreenshotsByIds,
+} from "@/lib/api";
+import { encodeAttachments } from "@/lib/attachments";
+```
+
+Update `AskContextValue`:
+
+```typescript
+  sendMessage: (text: string, attachedIds?: number[]) => Promise<void>;
+```
+
+Update `sendMessage`'s signature and internals. Find `const sendMessage = useCallback(\n    async (text: string) => {`. Replace with:
+
+```typescript
+  const sendMessage = useCallback(
+    async (text: string, attachedIds: number[] = []) => {
+```
+
+After the `createChat`/model-lock block (where chatId is established), add:
+
+```typescript
+        const expandedText = await buildAttachedContext(attachedIds, text);
+        const storedText = encodeAttachments(attachedIds, text);
+```
+
+Replace the Claude branch:
+
+```typescript
+        if (useClaude) {
+          await askClaudeStream(chatId, text, (ev) => {
+            handleEvent(ev, chatId!, qc, setError);
+          });
+        } else {
+```
+
+With:
+
+```typescript
+        if (useClaude) {
+          if (attachedIds.length > 0) {
+            await askClaudeStreamWithAttachments(
+              chatId,
+              storedText,
+              expandedText,
+              (ev) => handleEvent(ev, chatId!, qc, setError),
+            );
+          } else {
+            await askClaudeStream(chatId, text, (ev) =>
+              handleEvent(ev, chatId!, qc, setError),
+            );
+          }
+        } else {
+```
+
+In the Ollama branch, find `await persistUserMessage(chatId, text);` and replace with:
+
+```typescript
+          await persistUserMessage(chatId, storedText);
+```
+
+Also change the Ollama message construction. Find:
+
+```typescript
+            { role: "user", content: text },
+```
+
+Replace with:
+
+```typescript
+            { role: "user", content: expandedText },
+```
+
+At the bottom of the file (outside the component), add:
+
+```typescript
+async function buildAttachedContext(ids: number[], userText: string): Promise<string> {
+  if (ids.length === 0) return userText;
+  const shots = await getScreenshotsByIds(ids);
+  const lines = shots.map((s) => {
+    const ts = new Date(s.timestamp * 1000).toLocaleString(undefined, {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+    const app = s.app_name ?? "unknown";
+    const title = s.window_title ? ` — ${s.window_title}` : "";
+    return `- #${s.id} (${ts}, ${app}${title})`;
+  });
+  return [
+    "[Attached screenshots — the user pinned these as context]",
+    ...lines,
+    "[End attached screenshots]",
+    "",
+    userText,
+  ].join("\n");
+}
+```
+
+(We deliberately don't expand OCR text inline — that keeps send latency low. Claude can call `get_screenshot_detail` via MCP if it needs OCR content.)
+
+- [ ] **Step 9: Wire picker + chip rendering into `AskView` using ai-elements `Attachments`**
 
 In `src/features/ask/AskView.tsx`, add imports:
 
 ```typescript
 import { Paperclip } from "lucide-react";
 import { AttachmentPicker } from "./AttachmentPicker";
-import { AttachmentChip } from "./AttachmentChip";
+import {
+  Attachments,
+  Attachment,
+  AttachmentPreview,
+  AttachmentInfo,
+  AttachmentRemove,
+  type AttachmentData,
+} from "@/components/ai-elements/attachments";
+import { convertFileSrc } from "@tauri-apps/api/core";
+import { useQuery as useQuery2 } from "@tanstack/react-query";  // already imported; reuse
+import { getScreenshotsByIds } from "@/lib/api";
 ```
 
-Near the other state hooks in `AskView`:
+(Don't double-import; merge with existing.)
+
+Near the other state:
 
 ```typescript
 const [attachedIds, setAttachedIds] = useState<number[]>([]);
 const [pickerOpen, setPickerOpen] = useState(false);
+
+// Fetch details for the currently-selected attachments so Attachments can
+// render proper previews + metadata.
+const { data: attachedShots = [] } = useQuery({
+  queryKey: queryKeys.screenshotsByIds(attachedIds),
+  queryFn: () => getScreenshotsByIds(attachedIds),
+  enabled: attachedIds.length > 0,
+  staleTime: 60_000,
+});
+
+// Map screenshot rows to ai-elements AttachmentData shape.
+// We use the FileUIPart variant with a mediaType of "image/webp" since our
+// screenshots are webp. The id is the string form of our screenshot id.
+const attachmentData: AttachmentData[] = attachedShots.map((s) => ({
+  type: "file",
+  id: String(s.id),
+  url: convertFileSrc(s.thumbnail_path ?? s.file_path),
+  filename: `#${s.id} · ${s.app_name ?? "unknown"}`,
+  mediaType: "image/webp",
+})) as AttachmentData[];
 ```
 
-Update the `submit` callback to thread attachments through. Replace:
-
-```typescript
-  const submit = useCallback(
-    (textOverride?: string) => {
-      const msg = (textOverride ?? input).trim();
-      if (!msg || isStreaming || !chatReady) return;
-      void sendMessage(msg);
-      setInput("");
-    },
-    [input, isStreaming, chatReady, sendMessage],
-  );
-```
-
-With:
+Update `submit`:
 
 ```typescript
   const submit = useCallback(
@@ -1727,25 +1716,31 @@ With:
   );
 ```
 
-Above the `<PromptInput>` element, add a chip row:
+Above `<PromptInput>` add the attachment row:
 
 ```tsx
             {attachedIds.length > 0 && (
-              <div className="flex flex-wrap gap-1.5 mb-2">
-                {attachedIds.map((id) => (
-                  <AttachmentChip
-                    key={id}
-                    id={id}
-                    onRemove={(rid) =>
-                      setAttachedIds((prev) => prev.filter((x) => x !== rid))
-                    }
-                  />
-                ))}
+              <div className="mb-2">
+                <Attachments variant="inline">
+                  {attachmentData.map((data) => (
+                    <Attachment key={data.id} data={data}>
+                      <AttachmentPreview />
+                      <AttachmentInfo />
+                      <AttachmentRemove
+                        onClick={() =>
+                          setAttachedIds((prev) =>
+                            prev.filter((x) => String(x) !== data.id),
+                          )
+                        }
+                      />
+                    </Attachment>
+                  ))}
+                </Attachments>
               </div>
             )}
 ```
 
-In the `<PromptInputFooter>`, add the paperclip button before the keyboard hint:
+In `<PromptInputFooter>`, add the paperclip before the keyboard hint:
 
 ```tsx
               <PromptInputFooter className="px-3 pb-2 pt-1 rounded-none">
@@ -1772,228 +1767,47 @@ In the `<PromptInputFooter>`, add the paperclip button before the keyboard hint:
               </PromptInputFooter>
 ```
 
-At the end of the component, add the picker dialog:
+At the end of the component's return:
 
 ```tsx
       <AttachmentPicker
         open={pickerOpen}
         onClose={() => setPickerOpen(false)}
-        onAttach={(ids) => setAttachedIds((prev) => Array.from(new Set([...prev, ...ids])))}
+        onAttach={(ids) =>
+          setAttachedIds((prev) => Array.from(new Set([...prev, ...ids])))
+        }
       />
 ```
 
-- [ ] **Step 8: Update `AskContext.sendMessage` signature**
-
-In `src/context/AskContext.tsx`, add imports:
-
-```typescript
-import { encodeAttachments } from "@/lib/attachments";
-import { getScreenshotsByIds } from "@/lib/api";
-```
-
-Update `AskContextValue`:
-
-```typescript
-  sendMessage: (text: string, attachedIds?: number[]) => Promise<void>;
-```
-
-Replace `sendMessage` signature and body. Find `const sendMessage = useCallback(\n    async (text: string) => {` and update to `async (text: string, attachedIds: number[] = []) => {`.
-
-Within the function, replace the user-message persistence block. Find:
-
-```typescript
-        if (useClaude) {
-          await askClaudeStream(chatId, text, (ev) => {
-            handleEvent(ev, chatId!, qc, setError);
-          });
-        } else {
-```
-
-Replace with:
-
-```typescript
-        // Expand attachments into text context for the LLM; persist with
-        // the [ATTACH:...] marker so the UI can re-render chips.
-        const expandedText = await buildAttachedContext(attachedIds, text);
-        const storedText = encodeAttachments(attachedIds, text);
-
-        if (useClaude) {
-          // The user message is persisted by the Rust backend inside
-          // ask_claude — we don't append it here. Pass storedText via the
-          // prompt so the Rust side stores the marker-prefixed version, and
-          // pass expandedText as the actual prompt to Claude.
-          // Claude receives expandedText as the prompt; the message stored
-          // in chat_messages contains storedText.
-          await askClaudeStreamWithAttachments(
-            chatId,
-            storedText,
-            expandedText,
-            (ev) => handleEvent(ev, chatId!, qc, setError),
-          );
-        } else {
-```
-
-Add near the bottom of the file (outside the component):
-
-```typescript
-async function buildAttachedContext(ids: number[], userText: string): Promise<string> {
-  if (ids.length === 0) return userText;
-  const shots = await getScreenshotsByIds(ids);
-  const lines = shots.map((s) => {
-    const ts = new Date(s.timestamp * 1000).toLocaleString(undefined, {
-      month: "short",
-      day: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-    });
-    const app = s.app_name ?? "unknown";
-    const title = s.window_title ? ` — ${s.window_title}` : "";
-    // Pull OCR via get_screenshot (single) since the bulk returns Screenshot
-    // without ocr_text. This is infrequent (only on send with attachments)
-    // so N+1 is acceptable here.
-    return `- #${s.id} (${ts}, ${app}${title})`;
-  });
-  return [
-    "[Attached screenshots — the user has pinned these as context]",
-    ...lines,
-    "[End attached screenshots]",
-    "",
-    userText,
-  ].join("\n");
-}
-```
-
-*Note on expansion:* the design calls for including OCR text in the attached context. Fetching OCR per-attachment adds latency proportional to attachment count. For Phase A, keep expansion lightweight (id + timestamp + app + title) so send stays fast. If the model needs OCR content, it can call `get_screenshot_detail` via MCP — that's already available. A future enhancement could optionally inline OCR when attachment count is small (≤3).
-
-- [ ] **Step 9: Update `ask_claude` to accept split stored/sent prompts**
-
-This is where things get sharp. The Rust `ask_claude` currently takes one `prompt` and stores it + sends it. With attachments the stored and sent versions differ.
-
-**Cleanest fix**: add a new optional arg `stored_text: Option<String>`. When provided, persist that instead of `prompt`. When absent, persist `prompt` (backward compat for Ollama path that uses askClaudeStream).
-
-In `src-tauri/src/lib.rs`, find `ask_claude` and update:
-
-```rust
-#[tauri::command]
-async fn ask_claude(
-    state: State<'_, AppState>,
-    chat_id: i64,
-    prompt: String,
-    stored_text: Option<String>,
-    on_event: tauri::ipc::Channel<ask_stream::AskStreamEvent>,
-) -> Result<(), String> {
-    use rewindos_core::chat_store;
-    use rewindos_core::schema::{BlockKind, ChatRole};
-    use tokio::io::{AsyncBufReadExt, BufReader};
-
-    let (existing_session_id, chat_model) = {
-        let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
-        let chat = chat_store::get_chat(&db, chat_id)
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| format!("chat {chat_id} not found"))?;
-        (chat.claude_session_id.clone(), chat.model.clone())
-    };
-
-    // Persist the user's message — use stored_text if given (attachments case),
-    // else the raw prompt.
-    {
-        let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
-        let to_store = stored_text.as_deref().unwrap_or(&prompt);
-        let body = serde_json::json!({ "text": to_store }).to_string();
-        chat_store::append_message(
-            &db,
-            chat_id,
-            ChatRole::User,
-            BlockKind::Text,
-            &body,
-            false,
-        )
-        .map_err(|e| e.to_string())?;
-    }
-
-    // ... rest of function unchanged ...
-```
-
-The rest of the function stays the same — it uses `prompt` (the expanded version) for the Claude CLI invocation, which is what we want.
-
-- [ ] **Step 10: Add TS helper for the two-arg claude call**
-
-In `src/lib/api.ts`, add alongside `askClaudeStream`:
-
-```typescript
-export async function askClaudeStreamWithAttachments(
-  chatId: number,
-  storedText: string,
-  expandedText: string,
-  onEvent: (ev: AskStreamEvent) => void,
-): Promise<void> {
-  const channel = new Channel<AskStreamEvent>();
-  channel.onmessage = onEvent;
-  return invoke("ask_claude", {
-    chatId,
-    prompt: expandedText,
-    storedText,
-    onEvent: channel,
-  });
-}
-```
-
-Also extend `askClaudeStream` to forward `undefined` for `storedText` (so the Rust side falls back to persisting the prompt):
-
-```typescript
-export async function askClaudeStream(
-  chatId: number,
-  prompt: string,
-  onEvent: (ev: AskStreamEvent) => void,
-): Promise<void> {
-  const channel = new Channel<AskStreamEvent>();
-  channel.onmessage = onEvent;
-  return invoke("ask_claude", { chatId, prompt, onEvent: channel });
-}
-```
-
-(Tauri will pass `undefined` as an absent optional field, matching `stored_text: Option<String>`.)
-
-- [ ] **Step 11: Handle Ollama branch too**
-
-Back in `AskContext.tsx`'s Ollama branch, after computing `expandedText` and `storedText`, update the persistUserMessage call. Find:
-
-```typescript
-          await persistUserMessage(chatId, text);
-```
-
-Replace with:
-
-```typescript
-          await persistUserMessage(chatId, storedText);
-```
-
-Then in the Ollama message array construction, use `expandedText` for the user role content instead of `text`. Find:
-
-```typescript
-            { role: "user", content: text },
-```
-
-Replace with:
-
-```typescript
-            { role: "user", content: expandedText },
-```
-
-Also ensure the `text` symbol in the rest of the block doesn't get ambiguous — the `accumulated` setQueryData logic still keys off existing message shape; nothing else changes.
-
-- [ ] **Step 12: Render attachment chips in `AskMessages` for user messages**
+- [ ] **Step 10: Render attachment chips on persisted user messages**
 
 In `src/features/ask/AskMessages.tsx`, add imports:
 
 ```typescript
 import { decodeAttachments } from "@/lib/attachments";
-import { AttachmentChip } from "./AttachmentChip";
+import { useQuery } from "@tanstack/react-query";
+import { getScreenshotsByIds } from "@/lib/api";
+import { queryKeys } from "@/lib/query-keys";
+import {
+  Attachments,
+  Attachment,
+  AttachmentPreview,
+  AttachmentInfo,
+  type AttachmentData,
+} from "@/components/ai-elements/attachments";
+import { convertFileSrc } from "@tauri-apps/api/core";
 ```
 
-Extend `AskMessagesProps` (already done in Task 3 for `onSelectScreenshot`).
+Extend `AskMessagesProps` (if not already done in Task 3):
 
-Find the user text-block branch. Replace:
+```typescript
+interface AskMessagesProps {
+  rows: ChatMessageRow[];
+  onSelectScreenshot?: (id: number) => void;
+}
+```
+
+Replace the user-text branch. Find:
 
 ```tsx
                     if (isUser) {
@@ -2008,71 +1822,106 @@ Find the user text-block branch. Replace:
                     }
 ```
 
-With:
+Replace with:
 
 ```tsx
                     if (isUser) {
-                      const decoded = decodeAttachments(text);
                       return (
-                        <div key={key} className="space-y-2">
-                          {decoded.ids.length > 0 && (
-                            <div className="flex flex-wrap gap-1.5">
-                              {decoded.ids.map((id) => (
-                                <AttachmentChip
-                                  key={id}
-                                  id={id}
-                                  onClick={onSelectScreenshot}
-                                />
-                              ))}
-                            </div>
-                          )}
-                          {decoded.text && (
-                            <div className="text-sm text-text-primary whitespace-pre-wrap">
-                              {decoded.text}
-                            </div>
-                          )}
-                        </div>
+                        <UserTextWithAttachments
+                          key={key}
+                          text={text}
+                          onSelectScreenshot={onSelectScreenshot}
+                        />
                       );
                     }
 ```
 
-- [ ] **Step 13: Verify compile + tests**
+At the bottom of the file, add:
+
+```tsx
+function UserTextWithAttachments({
+  text,
+  onSelectScreenshot: _onSelectScreenshot,
+}: {
+  text: string;
+  onSelectScreenshot?: (id: number) => void;
+}) {
+  const decoded = decodeAttachments(text);
+  const { data: shots = [] } = useQuery({
+    queryKey: queryKeys.screenshotsByIds(decoded.ids),
+    queryFn: () => getScreenshotsByIds(decoded.ids),
+    enabled: decoded.ids.length > 0,
+    staleTime: 60_000,
+  });
+
+  const attachmentData: AttachmentData[] = shots.map((s) => ({
+    type: "file",
+    id: String(s.id),
+    url: convertFileSrc(s.thumbnail_path ?? s.file_path),
+    filename: `#${s.id} · ${s.app_name ?? "unknown"}`,
+    mediaType: "image/webp",
+  })) as AttachmentData[];
+
+  return (
+    <div className="space-y-2">
+      {decoded.ids.length > 0 && (
+        <Attachments variant="inline">
+          {attachmentData.map((data) => (
+            <Attachment key={data.id} data={data}>
+              <AttachmentPreview />
+              <AttachmentInfo />
+            </Attachment>
+          ))}
+        </Attachments>
+      )}
+      {decoded.text && (
+        <div className="text-sm text-text-primary whitespace-pre-wrap">
+          {decoded.text}
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+*Note:* `_onSelectScreenshot` is underscore-prefixed because ai-elements' `Attachment` doesn't expose an `onClick` on the preview. If clickthrough on user-side chips is desired, wrap `AttachmentPreview` in a button — deferred to a later polish pass.
+
+- [ ] **Step 11: Verify compile + tests**
 
 Run:
 ```
 cargo check -p rewindos && bun x tsc --noEmit -p tsconfig.json
 bun run test
 ```
-Expected: clean. Test count goes from 54 to 59 (+5 attachment tests).
+Expected: clean, test count +5 (59 total).
 
-- [ ] **Step 14: Commit**
+- [ ] **Step 12: Commit**
 
 ```bash
 git add src/lib/attachments.ts src/lib/attachments.test.ts \
-        src/lib/api.ts \
-        src-tauri/src/lib.rs \
-        src/features/ask/AttachmentChip.tsx \
+        src/lib/api.ts src-tauri/src/lib.rs \
         src/features/ask/AttachmentPicker.tsx \
         src/features/ask/AskView.tsx \
         src/features/ask/AskMessages.tsx \
         src/context/AskContext.tsx
-git commit -m "add screenshot attachment picker + context expansion"
+git commit -m "add screenshot attachment picker + Attachments chip rendering"
 ```
 
 ---
 
-## Task 5: Copy/regenerate buttons + follow-up suggestions
+## Task 5: Copy/regenerate + follow-up suggestions
 
 **Files:**
 - Create: `src/features/ask/MessageActions.tsx`
 - Create: `src/features/ask/FollowupSuggestions.tsx`
-- Create: `src/lib/followups.ts` (generation helper)
-- Modify: `crates/rewindos-core/src/chat_store.rs` (add `delete_messages_after`)
-- Modify: `src-tauri/src/chat_commands.rs` (Tauri wrapper)
-- Modify: `src-tauri/src/lib.rs` (register command)
-- Modify: `src/lib/api.ts` (TS wrapper)
-- Modify: `src/context/AskContext.tsx` (expose `regenerate`, `followups` state; trigger generation on stream complete)
-- Modify: `src/features/ask/AskMessages.tsx` (render actions + followups under last assistant)
+- Create: `src/lib/followups.ts`
+- Modify: `crates/rewindos-core/src/chat_store.rs`
+- Modify: `src-tauri/src/chat_commands.rs`
+- Modify: `src-tauri/src/lib.rs`
+- Modify: `src/lib/api.ts`
+- Modify: `src/context/AskContext.tsx`
+- Modify: `src/features/ask/AskMessages.tsx`
+- Modify: `src/features/ask/AskView.tsx`
 
 - [ ] **Step 1: Add `delete_messages_after` to `chat_store.rs`**
 
@@ -2097,7 +1946,7 @@ pub fn delete_messages_after(db: &Database, chat_id: i64, after_id: i64) -> Resu
 
 - [ ] **Step 2: Add unit test**
 
-In the tests module of `chat_store.rs`:
+In the tests module:
 
 ```rust
 #[test]
@@ -2235,13 +2084,10 @@ Create `src/lib/followups.ts`:
 import type { ChatMessageRow } from "./api";
 
 /**
- * Generate 3 short follow-up questions from the conversation so far.
- *
- * Uses whichever backend the chat is already using — Claude chats ping
- * Haiku (fastest tier) to stay snappy; Ollama chats reuse the chat's
- * local model. 3-second timeout; silent-fail on error.
- *
- * Ephemeral — these are not persisted.
+ * Generate 3 short follow-up questions from the last turn. Ollama-backed in
+ * Phase A; Claude-backed (Haiku) is a stub that returns [] — can be filled
+ * in later via a dedicated one-shot Tauri command. 3-second timeout.
+ * Ephemeral (not persisted).
  */
 export async function generateFollowups(params: {
   backend: "claude" | "ollama";
@@ -2252,11 +2098,10 @@ export async function generateFollowups(params: {
 }): Promise<string[]> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 3_000);
-
   try {
     const prompt = buildPrompt(params.lastUserText, params.lastAssistantText);
     if (params.backend === "claude") {
-      return await claudeHaikuFollowups(prompt, controller.signal);
+      return []; // Phase A: stubbed; Claude Haiku oneshot is a follow-up.
     }
     if (params.ollamaUrl && params.ollamaModel) {
       return await ollamaFollowups(
@@ -2284,24 +2129,6 @@ function buildPrompt(userText: string, assistantText: string): string {
     "",
     `You answered: ${assistantText.slice(0, 1000)}`,
   ].join("\n");
-}
-
-async function claudeHaikuFollowups(
-  prompt: string,
-  signal: AbortSignal,
-): Promise<string[]> {
-  // Uses a minimal Tauri command to run a one-shot Haiku call.
-  // For Phase A simplicity, we inline a short `claude -p` spawn via the
-  // existing Tauri command set — but since we don't have a dedicated
-  // "claude oneshot" command, we shell out via another invoke.
-  // If you prefer to skip the Tauri roundtrip, this can be replaced with
-  // a direct fetch to the Anthropic API — but that requires an API key.
-  //
-  // Phase A decision: gracefully return [] if we can't run the call.
-  // Followups are nice-to-have; don't block on them.
-  void prompt;
-  void signal;
-  return [];
 }
 
 async function ollamaFollowups(
@@ -2364,9 +2191,7 @@ export function extractLastTurns(rows: ChatMessageRow[]): {
 }
 ```
 
-*Note:* the Claude Haiku path is intentionally a stub returning `[]`. Phase A ships Ollama-backed followups; Claude Haiku followups are a follow-up enhancement (requires a new "claude one-shot" Tauri command to avoid the cost of bundling a second session). Marking this explicitly so the implementer doesn't think they need to build it.
-
-- [ ] **Step 8: Create `FollowupSuggestions` component**
+- [ ] **Step 8: Create `FollowupSuggestions`**
 
 Create `src/features/ask/FollowupSuggestions.tsx`:
 
@@ -2402,12 +2227,12 @@ export function FollowupSuggestions({ suggestions, onSelect }: FollowupSuggestio
 }
 ```
 
-- [ ] **Step 9: Wire regenerate + followups into `AskContext`**
+- [ ] **Step 9: Wire into `AskContext`**
 
 In `src/context/AskContext.tsx`, add imports:
 
 ```typescript
-import { deleteMessagesAfter } from "@/lib/api";
+import { deleteMessagesAfter, getChatMessages } from "@/lib/api";
 import { decodeAttachments } from "@/lib/attachments";
 import { generateFollowups, extractLastTurns } from "@/lib/followups";
 ```
@@ -2419,13 +2244,13 @@ Extend `AskContextValue`:
   regenerate: () => Promise<void>;
 ```
 
-Add state inside `AskProvider`:
+Inside `AskProvider`, add state:
 
 ```typescript
 const [followups, setFollowups] = useState<string[]>([]);
 ```
 
-Clear followups on chat switch. In `selectChat` and `startNewChat`:
+In `selectChat` and `startNewChat`, clear followups:
 
 ```typescript
   const selectChat = useCallback((id: number | null) => {
@@ -2443,35 +2268,31 @@ Clear followups on chat switch. In `selectChat` and `startNewChat`:
   }, []);
 ```
 
-Clear followups at the start of `sendMessage`:
+At the start of `sendMessage`, clear followups:
 
 ```typescript
-      if (isStreaming || !text.trim()) return;
       setError(null);
       setFollowups([]);
       setIsStreaming(true);
 ```
 
-After stream completion (both branches), trigger followup generation. Find the end of the `if (useClaude) { ... }` branch and the end of the else branch, and wrap the whole try/catch. Simplest: in the `finally` block, fire-and-forget a followup generation.
-
-Replace the `finally` block:
+At the end (in the `finally` block), trigger followup generation. Replace the existing `finally`:
 
 ```typescript
       } finally {
         setIsStreaming(false);
         abortRef.current = null;
 
-        // Fire-and-forget followup generation (3s timeout inside).
         if (chatId != null) {
           void (async () => {
-            const rows = await getChatMessages(chatId);
+            const rows = await getChatMessages(chatId!);
             const { lastUserText, lastAssistantText } = extractLastTurns(rows);
             if (!lastAssistantText) return;
             const backend = activeChat?.backend ?? (useClaude ? "claude" : "ollama");
             const suggestions = await generateFollowups({
               backend,
-              ollamaUrl: config?.chat.ollama_url,
-              ollamaModel: activeChat?.model ?? config?.chat?.model,
+              ollamaUrl: (config as ChatConfigShape | undefined)?.chat.ollama_url,
+              ollamaModel: activeChat?.model ?? (config as ChatConfigShape | undefined)?.chat.model,
               lastUserText,
               lastAssistantText,
             });
@@ -2481,7 +2302,7 @@ Replace the `finally` block:
       }
 ```
 
-(Note: `chatId` must be in scope here — it is, since it's declared in the try block before being used. Move the declaration above the try/catch to make scope clear: `let chatId: number | null = activeChatId;` at the top of the callback body.)
+(If `chatId` was declared inside the `try` block, hoist it to a `let chatId: number | null = activeChatId;` at the top of the callback body.)
 
 Add `regenerate`:
 
@@ -2489,7 +2310,6 @@ Add `regenerate`:
   const regenerate = useCallback(async () => {
     if (!activeChatId) return;
     const rows = await getChatMessages(activeChatId);
-    // Find the last user-role message (by block_type=text, skipping tool_result).
     let lastUserRow: ChatMessageRow | null = null;
     for (let i = rows.length - 1; i >= 0; i--) {
       const r = rows[i];
@@ -2500,7 +2320,6 @@ Add `regenerate`:
     }
     if (!lastUserRow) return;
 
-    // Extract the original user text + attachments from the marker.
     let userText = "";
     let attachedIds: number[] = [];
     try {
@@ -2513,31 +2332,19 @@ Add `regenerate`:
       return;
     }
 
-    // Delete everything AFTER this user message (the assistant reply and beyond).
-    // Then re-send the same user input.
-    await deleteMessagesAfter(activeChatId, lastUserRow.id);
-    // Also delete the user row itself — sendMessage will re-persist it.
-    // Implementation shortcut: delete one row less so the user message survives
-    // and we directly re-trigger the LLM. Simpler:
-    // actually, we want to keep the user message and re-run from there.
-    // deleteMessagesAfter with lastUserRow.id - 1 would delete the user row too.
-    // Stick with deleteMessagesAfter(chat, lastUserRow.id): user row survives,
-    // but then sendMessage would add ANOTHER user row. We need to delete the
-    // user row too and let sendMessage re-add it.
+    // Delete the last user row AND everything after. sendMessage will
+    // re-persist the user message as part of its normal flow.
     await deleteMessagesAfter(activeChatId, lastUserRow.id - 1);
-
     qc.invalidateQueries({ queryKey: queryKeys.chatMessages(activeChatId) });
     await sendMessage(userText, attachedIds);
   }, [activeChatId, qc, sendMessage]);
 ```
 
-*Note on the `.id - 1` trick:* since `id` is an autoincrement integer, subtracting 1 does NOT mean "the message before". It means "delete everything with id > this-1", i.e. "delete this message and everything after". If there's a message with id=lastUserRow.id-1 in another chat, the WHERE clause `chat_id = ?` filter saves us — `delete_messages_after` only touches this chat's messages.
-
-Add `followups` and `regenerate` to the value memo + deps array.
+Add `followups`, `regenerate` to `value` memo + deps.
 
 - [ ] **Step 10: Render actions + followups in `AskMessages`**
 
-In `src/features/ask/AskMessages.tsx`, import:
+In `src/features/ask/AskMessages.tsx`, add imports:
 
 ```typescript
 import { MessageActions } from "./MessageActions";
@@ -2556,50 +2363,50 @@ interface AskMessagesProps {
 }
 ```
 
-Inside the component, read followups from context:
+Inside the component, read context state:
 
 ```typescript
 const { followups, regenerate } = useAskChat();
 ```
 
-Find the map over messages. The last `assistant` message in the list should show actions + followups. Add an index check:
+In the map over messages, track the last-assistant index. Change the map signature to use the index:
 
 ```tsx
         {messages.map((m, idx) => {
           const isUser = m.role === "user";
           const isLast = idx === messages.length - 1;
-          // ... existing rendering ...
-
-          // After the border-left content block div, add:
-          {!isUser && isLast && (
-            <div className="pl-3.5 mt-2">
-              <MessageActions
-                onCopy={() => {
-                  const allText = m.parts
-                    .map((p) => {
-                      const a = p as Record<string, unknown>;
-                      if (a.type === "text") return a.text as string;
-                      return "";
-                    })
-                    .filter(Boolean)
-                    .join("\n\n");
-                  navigator.clipboard.writeText(stripMarker(allText));
-                }}
-                onRegenerate={() => void regenerate()}
-              />
-              <FollowupSuggestions
-                suggestions={followups}
-                onSelect={(t) => onSelectSuggestion?.(t)}
-              />
-            </div>
-          )}
 ```
 
-Place the new block INSIDE the `<div key={m.id}>` container but AFTER the `<div className="pl-3.5 border-l space-y-2">` parts block.
+Inside each message container, AFTER the `<div className="pl-3.5 border-l ...">` block, add:
+
+```tsx
+              {!isUser && isLast && (
+                <div className="pl-3.5 mt-2">
+                  <MessageActions
+                    onCopy={() => {
+                      const allText = m.parts
+                        .map((p) => {
+                          const a = p as Record<string, unknown>;
+                          if (a.type === "text") return a.text as string;
+                          return "";
+                        })
+                        .filter(Boolean)
+                        .join("\n\n");
+                      navigator.clipboard.writeText(stripMarker(allText));
+                    }}
+                    onRegenerate={() => void regenerate()}
+                  />
+                  <FollowupSuggestions
+                    suggestions={followups}
+                    onSelect={(t) => onSelectSuggestion?.(t)}
+                  />
+                </div>
+              )}
+```
 
 - [ ] **Step 11: Thread `onSelectSuggestion` from `AskView`**
 
-In `src/features/ask/AskView.tsx`, pass the existing `submit` function as the handler:
+In `src/features/ask/AskView.tsx`:
 
 ```tsx
           <AskMessages
@@ -2616,16 +2423,14 @@ Run:
 cargo check -p rewindos && bun x tsc --noEmit -p tsconfig.json
 bun run test
 ```
-Expected: clean. Test count +1 (the new Rust test for `delete_messages_after`).
+Expected: clean, Rust test count +1.
 
 - [ ] **Step 13: Commit**
 
 ```bash
 git add crates/rewindos-core/src/chat_store.rs \
-        src-tauri/src/chat_commands.rs \
-        src-tauri/src/lib.rs \
-        src/lib/api.ts \
-        src/lib/followups.ts \
+        src-tauri/src/chat_commands.rs src-tauri/src/lib.rs \
+        src/lib/api.ts src/lib/followups.ts \
         src/features/ask/MessageActions.tsx \
         src/features/ask/FollowupSuggestions.tsx \
         src/features/ask/AskMessages.tsx \
@@ -2636,78 +2441,164 @@ git commit -m "add copy/regen + follow-up suggestions"
 
 ---
 
-## Task 6: End-to-end verification
+## Task 6: Voice input via `SpeechInput`
+
+**Files:**
+- Modify: `src/features/ask/AskView.tsx`
+- Modify: `src-tauri/capabilities/default.json` (microphone permission if needed)
+
+- [ ] **Step 1: Check Tauri capabilities for microphone access**
+
+Read `src-tauri/capabilities/default.json`. Tauri v2's Chromium WebView allows `getUserMedia`/Web Speech API **without explicit Tauri permission** — they're controlled by the underlying Chromium stack. However, some Linux Wayland environments require the `mic` portal. Verify no additional Tauri permission is needed:
+
+Run the app briefly later in Task 7 verification; if speech input fails with a permission error, we'll add `allow` entries here then.
+
+For Phase A Step 1, **no change** to capabilities is expected. Skip this step unless a later verification run shows a permission error.
+
+- [ ] **Step 2: Wire `SpeechInput` into `AskView`'s `PromptInputFooter`**
+
+In `src/features/ask/AskView.tsx`, add import:
+
+```typescript
+import { SpeechInput } from "@/components/ai-elements/speech-input";
+```
+
+In the `<PromptInputFooter>`, add the `SpeechInput` next to the paperclip. The footer becomes:
+
+```tsx
+              <PromptInputFooter className="px-3 pb-2 pt-1 rounded-none">
+                <div className="flex items-center gap-1.5 text-text-muted">
+                  <button
+                    type="button"
+                    onClick={() => setPickerOpen(true)}
+                    disabled={isStreaming || !chatReady}
+                    className="text-text-muted hover:text-semantic disabled:opacity-40 disabled:hover:text-text-muted transition-colors p-1"
+                    title="attach screenshot"
+                    aria-label="attach screenshot"
+                  >
+                    <Paperclip className="size-4" />
+                  </button>
+                  <SpeechInput
+                    variant="ghost"
+                    size="icon"
+                    className="size-auto p-1 text-text-muted hover:text-semantic hover:bg-transparent"
+                    onTranscriptionChange={(text) => setInput((prev) => (prev ? `${prev} ${text}` : text))}
+                    disabled={isStreaming || !chatReady}
+                  />
+                  <span className="font-mono text-[10px] uppercase tracking-wider ml-2">
+                    {usingClaude ? "⇧⏎ newline · ⏎ send" : "⏎ send"}
+                  </span>
+                </div>
+                <PromptInputSubmit
+                  disabled={!chatReady || (!isStreaming && !input.trim())}
+                  status={isStreaming ? "streaming" : "ready"}
+                  onStop={cancelStream}
+                />
+              </PromptInputFooter>
+```
+
+*Note on appending*: using `(prev) => prev ? `${prev} ${text}` : text` means partial transcriptions concatenate with a space rather than replacing. This feels right for the "keep talking, add a sentence" pattern. If you prefer "each speech session replaces the whole input," use `(_) => text` instead.
+
+- [ ] **Step 3: Verify compile**
+
+Run: `bun x tsc --noEmit -p tsconfig.json`
+Expected: clean.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add src/features/ask/AskView.tsx
+git commit -m "add speech input to prompt (Web Speech API via ai-elements SpeechInput)"
+```
+
+---
+
+## Task 7: End-to-end verification
 
 **Files:** None — manual verification only.
 
 Prereqs:
 - Daemon running (`cargo build -p rewindos-daemon --release` + systemd unit up, or run inline)
-- Claude CLI installed and MCP registered (`claude mcp list` shows rewindos ✓ Connected)
-- Ollama running with at least one chat model pulled (e.g. `qwen2.5:3b`)
+- Claude CLI installed + MCP registered (`claude mcp list` shows rewindos ✓ Connected)
+- Ollama running with a chat model pulled (e.g. `qwen2.5:3b`)
+- Microphone connected + accessible (for Task 6 verification)
 
 - [ ] **Step 1: Model picker — Claude path**
 
-1. Launch: `bun run tauri dev`
-2. Open Ask view.
-3. Before sending: click the model picker header dropdown.
-4. Verify it shows both sections: CLAUDE CODE (opus/sonnet/haiku) and OLLAMA (LOCAL) with your pulled models.
-5. Pick "Claude Opus".
-6. Send any question.
-7. Verify: after first message, the picker is replaced by `opus · locked` badge.
-8. Open DevTools → `await window.__TAURI__.core.invoke("list_chats", { limit: 5 })` → confirm the new chat row has `model: "opus"`.
+1. `bun run tauri dev`.
+2. Open Ask view, open the model picker badge.
+3. `ModelSelector` opens as a Command-palette modal with search + two groups (Claude Code + Ollama).
+4. Pick "Claude Opus".
+5. Send a question.
+6. After first message, picker becomes `opus · locked` badge.
+7. DevTools: `await window.__TAURI__.core.invoke("list_chats", { limit: 5 })` → confirm `model: "opus"`.
 
 - [ ] **Step 2: Model picker — Ollama path**
 
-1. Start a new chat ("new chat" in sidebar).
-2. Pick an Ollama model from the dropdown (e.g. `qwen2.5:3b`).
-3. Send a question.
-4. Verify: the Ollama request in devtools Network tab shows `model: "qwen2.5:3b"` in the POST body.
-5. Picker becomes locked badge.
+1. New chat. Open picker. Pick an Ollama model (e.g. `qwen2.5:3b`).
+2. Send a question.
+3. DevTools Network tab: Ollama request body contains `"model":"qwen2.5:3b"`.
+4. Picker becomes locked badge.
 
 - [ ] **Step 3: Citations — Claude with tool calls**
 
-1. New Claude chat. Ask: "what did I work on today".
-2. Observe: tool calls (`get_timeline`, etc.) render as collapsible ⚙ cards.
-3. Final assistant text contains inline `#N` chips where Claude cited screenshots.
-4. Below the text: a "sources (N)" card with thumbnails.
-5. Click a `#N` chip → existing Screenshot Detail view opens.
-6. Click a thumbnail in the Sources card → same detail view opens.
+1. New Claude chat. Ask "what did I work on today".
+2. Tool calls render as collapsible ⚙ cards (prior work).
+3. Final assistant text has inline `#N` chips where Claude cited screenshots.
+4. Below the text: "sources (N)" card with thumbnails + app names + timestamps.
+5. Click a `#N` chip → Screenshot Detail view opens.
+6. Click a Sources thumbnail → same detail view opens.
 
 - [ ] **Step 4: Screenshot attachments**
 
-1. New chat. Click the paperclip in the prompt input.
-2. Picker opens: recent screenshots from the last 3 days.
-3. Type a keyword in the search box → results filter.
-4. Select 2 screenshots → count shows "2 selected".
-5. Click "attach (2)" → picker closes, chips appear above the textarea.
-6. Remove one chip via the × button → only 1 remains.
-7. Type "what was I doing here?" → Send.
+1. New chat. Click the paperclip.
+2. Picker opens with recent screenshots + search.
+3. Type a keyword, filter results.
+4. Select 2 screenshots → click "attach (2)".
+5. Picker closes; ai-elements `Attachments` chips appear above the textarea showing thumbnail + `#id · app`.
+6. Click × on a chip to remove → one remains.
+7. Type "what was I doing here?" → send.
 8. Verify:
-   - Attached chips render above your message.
-   - Assistant acknowledges the pinned screenshots in its reply.
-   - In DevTools: `await window.__TAURI__.core.invoke("get_chat_messages", { chatId: <id> })` → your user message's `content_json` starts with `[ATTACH:<ids>]\n\n`.
+   - Attachment chips render above your user message.
+   - Assistant acknowledges the pinned screenshots.
+   - `get_chat_messages` shows user content_json prefixed with `[ATTACH:<ids>]\n\n`.
 
 - [ ] **Step 5: Copy + regenerate**
 
-1. In a chat with at least one assistant reply, hover the latest reply.
-2. Click "copy" → clipboard contains the reply text (no `[REF:N]` chips, just the raw text). Button shows "copied" briefly then reverts.
-3. Click "regenerate" → downstream messages disappear, the question re-runs, a new assistant reply streams in.
-4. Verify:
-   - DB no longer contains the old assistant message (SELECT on chat_messages).
-   - New session: the Claude `claude_session_id` on the chat row was cleared (run `list_chats` again and inspect).
+1. Hover the latest assistant reply.
+2. Click "copy" → clipboard has the text (no `[REF:N]` raw, no `[ATTACH:...]` marker). Button shows "copied" then reverts.
+3. Click "regenerate" → downstream messages vanish, question re-runs, new reply streams in.
+4. DevTools: confirm old assistant message is gone, `claude_session_id` is NULL on the chat row.
 
-- [ ] **Step 6: Follow-up suggestions**
+- [ ] **Step 6: Follow-up suggestions (Ollama path)**
 
-1. After an assistant reply completes, within ~3 seconds 3 suggestion pills appear below the actions.
-2. Click a suggestion → it's sent as the next user message.
-3. If suggestions fail (Ollama offline), verify the UI silently shows none — no error banner.
+1. In an Ollama chat, after a reply completes, wait up to 3 seconds.
+2. 3 suggestion pills appear below actions.
+3. Click one → it's sent as next user message.
+4. If Ollama is stopped: no pills appear (silent-fail). No error banner.
 
-- [ ] **Step 7: Error recovery**
+*Note:* Claude chats show NO suggestions in Phase A — the Claude-Haiku path is a stub returning `[]`. This is expected.
 
-1. Stop Ollama mid-generation → error banner appears.
-2. Registered tools still work in Claude chats.
+- [ ] **Step 7: Speech input**
 
-- [ ] **Step 8: No commit** — verification checkpoint only. If bugs were found, file them as follow-ups and fix inline (each as its own commit).
+1. In a new or active chat, click the microphone icon in the prompt footer.
+2. Browser prompts for mic permission (first time only) → allow.
+3. Speak a sentence.
+4. Transcribed text appears in the textarea.
+5. Click the mic again to stop.
+6. Send.
+
+If the mic icon doesn't appear or shows a "not supported" state: you're probably running on a non-Chromium WebView. Web Speech API isn't universal — skip speech on that platform.
+
+If permission fails: add to `src-tauri/capabilities/default.json` and investigate whether Wayland's pipewire portal is blocking. Tauri v2 inherits the OS's media permission model.
+
+- [ ] **Step 8: Error recovery**
+
+1. Stop Ollama mid-generation → error banner.
+2. Claude MCP tools still work.
+3. No app crash; sidebar state preserved; new chat works.
+
+- [ ] **Step 9: No commit** — verification checkpoint only. Log bugs as fixes on their own commits.
 
 ---
 
@@ -2717,45 +2608,43 @@ Prereqs:
 
 | Spec requirement | Covered by |
 |---|---|
-| Model picker (Claude tiers + Ollama list) | Tasks 1, 2 |
+| Model picker (Claude tiers + Ollama list) via ai-elements ModelSelector | Tasks 1, 2 |
 | Per-chat model lock | Task 1 (SQL guard), Task 2 (UI badge) |
-| Citations: inline chips | Task 3 |
+| Citations: inline chips | Task 3 (custom CitationChip) |
 | Citations: Sources card | Task 3 |
-| Citations: click-through to Screenshot Detail | Task 3 (onSelectScreenshot threading) |
-| Attachment picker | Task 4 |
-| `[ATTACH:...]` marker encoding | Task 4 |
-| Context expansion on send | Task 4 |
-| Attachment chips on user messages | Task 4 |
+| Citations: click-through to Screenshot Detail | Task 3 |
+| Attachments: picker modal | Task 4 (custom Dialog) |
+| Attachments: chip rendering via ai-elements Attachments | Task 4 |
+| Attachments: `[ATTACH:...]` marker encoding | Task 4 |
+| Attachments: context expansion on send | Task 4 |
 | Copy button | Task 5 |
 | Regenerate button | Task 5 |
 | delete_messages_after + clear session_id | Task 5 |
-| Follow-up suggestions (Ollama path) | Task 5 |
+| Follow-up suggestions (Ollama) | Task 5 |
 | Follow-up suggestions (Claude Haiku) | Task 5 (explicit stub — deferred) |
 | V008 migration | Task 1 |
-| Already-done: thinking via Reasoning | n/a (no task) |
-| Verification checklist | Task 6 |
+| Speech input (Web Speech API via SpeechInput) | Task 6 |
+| Verification checklist | Task 7 |
 
-One **explicit deferred item**: Claude Haiku follow-ups. The Ollama path works; Claude-path follow-ups stub to `[]`. This is an intentional scope trim called out in Task 5 Step 7 — flag for Phase B if low-friction Claude-side generation is wanted.
+**Explicit deferral**: Claude Haiku follow-ups stubbed in Task 5. Ollama path works; Claude chats show no followups. Noted in the spec as acceptable Phase-A scope trim.
 
-**Placeholder scan:** No "TBD" / "TODO" / "similar to Task N" without code. Every code block is complete. The `claudeHaikuFollowups` stub is intentional and labeled.
+**Placeholder scan:** No "TBD" / "TODO". Every code block is complete. The `SpeechInput` fallback (non-Chromium) is labeled as a verification-time discovery — not silently assumed to work.
 
 **Type consistency:**
-- `Chat` type has `model: string | null` (Task 1) and is read that way in Task 2's `ModelPicker`.
-- `ChatMessageRow` unchanged — attachments ride on the `content_json.text` field.
-- `TextPart` defined Task 3, reused Task 3 only.
-- `DecodedMessage` defined Task 4, used in Task 4 + Task 5.
-- `parseTextWithRefs`/`collectRefs` signatures stable across Tasks 3 and consumers.
-- `encodeAttachments`/`decodeAttachments`/`stripMarker`/`hasAttachments` signatures stable.
-- `generateFollowups` params shape stable between Task 5 Step 7 and Step 9 usage.
-- `ask_claude` gains `stored_text: Option<String>` in Task 4; existing `askClaudeStream` forwards `undefined`, new `askClaudeStreamWithAttachments` forwards a value. Backward-compat preserved.
-- `ModelPicker` uses `setPendingModel` from context, added in Task 2.
-- `AttachmentChip`/`CitationChip` both accept optional `onClick` — consistent.
-- `onSelectScreenshot` threaded uniformly from `AskView` → `AskMessages` → individual chip components.
+- `Chat` type: `model: string | null` (Task 1), read same way in Task 2.
+- `TextPart`: defined Task 3, consumed Task 3 only.
+- `DecodedMessage`: defined Task 4, consumed Tasks 4 + 5.
+- `AttachmentData`: imported from ai-elements, used consistently in Task 4 (AskView + AskMessages).
+- `ask_claude` gains `stored_text: Option<String>` in Task 4; existing `askClaudeStream` forwards undefined (maps to None).
+- `parseTextWithRefs`/`collectRefs`/`encodeAttachments`/`decodeAttachments`/`stripMarker` signatures stable across consumers.
+- `generateFollowups` / `extractLastTurns` signatures stable between Task 5 Steps 7 and 9.
+- `onSelectScreenshot` threaded uniformly AskView → AskMessages.
 
-**Scope check:** 5 tasks + verification. Each is one commit. Task sizes mirror the prior streaming plan. Largest task is 4 (attachments — picker modal + marker wire-up + Rust command extension). Smallest is 1 (migration + metadata). Appropriate.
+**Scope check:** 6 tasks + verification. Task 6 (speech input) is tiny — 1 import + 1 component integration + 1 commit. Largest is Task 4 (attachments). Appropriate.
 
 **Ambiguity check:**
-- `Claude Haiku followups` stub → explicitly stated as deferred, not ambiguous.
-- `.id - 1` trick in regenerate → explained in a note; deliberate use of WHERE clause scoping.
-- `Claude --model` string format (`"sonnet"` alias vs `"claude-sonnet-4-6"`) → plan uses alias; `CLAUDE_MODELS` constants control this. Documented.
-- `getImageUrl` reference in Task 3/4 → noted as "check existing export"; implementer should grep if it doesn't exist.
+- Model string format (alias vs full name) → plan uses aliases; `CLAUDE_MODELS` constants control this, documented.
+- `.id - 1` in regenerate → explained inline; `delete_messages_after` is chat-scoped via WHERE clause.
+- `SpeechInput` on non-Chromium WebView → plan explicitly acknowledges possible skip; not silently assumed.
+- ai-elements `Attachments` preview click-through → deferred (underscore-prefix marks intent) rather than silently hand-wired.
+- Tauri capability for mic → plan says "skip unless verification shows a permission error" rather than pre-emptively patching.

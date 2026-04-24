@@ -16,12 +16,13 @@ Phase A is explicitly polish — no new backends, no multimodal, no voice. Those
 
 | Feature | Summary |
 |---|---|
-| **Model picker** | Header dropdown listing Claude tiers (opus/sonnet/haiku) + locally-installed Ollama models from `/api/tags`. Per-chat lock: model set on first message, cannot change mid-chat. New chat inherits last-selected model. |
-| **Citations** | Parse `[REF:N]` markers in assistant text, render inline as `#42` chips, collect unique refs as a `<Sources>` card below the assistant message with thumbnails. Click either → existing Screenshot Detail view. |
-| **Screenshot attach** | Paperclip button in prompt input opens a picker modal (recent screenshots + search). Selected screenshots become attachment chips above the user message text. On send, expanded into text context for the LLM. Stored as `[ATTACH:42,43]` marker prefix in `content_json`. |
+| **Model picker** | ai-elements `ModelSelector` (Command-palette / ⌘K UX) listing Claude tiers (opus/sonnet/haiku) + locally-installed Ollama models from `/api/tags`. Per-chat lock: model set on first message, cannot change mid-chat. New chat inherits last-selected model. |
+| **Citations** | Parse `[REF:N]` markers in assistant text, render inline as custom `#42` chips, collect unique refs into an ai-elements `<Sources>` card below the assistant message with thumbnails. Click either → existing Screenshot Detail view. |
+| **Screenshot attach** | Paperclip button in prompt input opens a custom picker modal (recent screenshots + search). Selected screenshots render as chips via ai-elements `Attachments`/`Attachment` components above the user message text. On send, expanded into text context for the LLM. Stored as `[ATTACH:42,43]` marker prefix in `content_json`. |
 | **Copy** | Icon under each assistant message — `navigator.clipboard.writeText(text)`. |
 | **Regenerate** | Icon under each assistant message — deletes downstream messages (all rows with `id > last_user_msg.id` in this chat), re-invokes `sendMessage` with the last user text. |
 | **Follow-up suggestions** | After stream completion, fire a second small LLM call asking for 3 short follow-up questions. Render as pills under the assistant message. Ephemeral (not persisted). 3-second timeout; silent-fail. |
+| **Speech input** | ai-elements `SpeechInput` in the prompt input footer. Uses the Web Speech API (available in Tauri's Chromium WebView) — no server-side transcription needed. Drops the recognized text into the prompt textarea. Pulled into Phase A from the original Phase B plan because the registry component makes it a 20-line integration rather than a Whisper/Piper build. |
 
 ### Already shipped (no work)
 
@@ -30,7 +31,8 @@ Phase A is explicitly polish — no new backends, no multimodal, no voice. Those
 ### Out of scope for Phase A (explicit)
 
 - **True image/file attachments** — Anthropic image-block uploads via CLI. Deferred to Phase B (multimodal).
-- **Voice input/output** — Whisper + Piper. Deferred to Phase B.
+- **Voice output (TTS)** — Piper. Deferred to Phase B. (Voice INPUT is now in scope via ai-elements `SpeechInput`.)
+- **Offline transcription fallback** — `SpeechInput`'s `onAudioRecorded` callback can pipe to local Whisper for browsers without Web Speech API. Tauri's Chromium WebView supports Web Speech natively, so the fallback isn't needed. Revisit if we ship to non-Chromium platforms.
 - **Tool-call approvals** — per-call consent UI. Deferred to Phase C (power-user).
 - **Like/thumbs feedback** — no destination (no training loop, no server). Dropped entirely.
 - **"Auto" model routing** — smart selection based on question type. Interesting but needs its own design.
