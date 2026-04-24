@@ -224,29 +224,6 @@ export interface ScreenshotRef {
   file_path: string;
 }
 
-export interface AskResponse {
-  session_id: string;
-  references: ScreenshotRef[];
-}
-
-export async function askNewSession(): Promise<string> {
-  return invoke("ask_new_session");
-}
-
-export async function askHealth(): Promise<boolean> {
-  return invoke("ask_health");
-}
-
-export async function ask(
-  sessionId: string,
-  message: string,
-): Promise<AskResponse> {
-  return invoke("ask", { sessionId, message });
-}
-
-export async function askCancel(sessionId: string): Promise<void> {
-  return invoke("ask_cancel", { sessionId });
-}
 
 // -- Delete --
 
