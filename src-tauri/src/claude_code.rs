@@ -54,12 +54,19 @@ fn find_claude_binary() -> Option<PathBuf> {
     None
 }
 
+/// Path where the Claude CLI stores user-scoped MCP server config.
+/// This is the file that `claude mcp list` reads and that `-p` mode honors.
+/// Note: `~/.claude/settings.json` also has an `mcpServers` key, but the CLI
+/// does NOT currently consult it for MCP resolution (as of Claude Code 2.1).
+fn claude_cli_config_path() -> Option<PathBuf> {
+    dirs::home_dir().map(|h| h.join(".claude.json"))
+}
+
 fn is_mcp_registered() -> bool {
-    let Some(home) = dirs::home_dir() else {
+    let Some(path) = claude_cli_config_path() else {
         return false;
     };
-    let settings_path = home.join(".claude").join("settings.json");
-    let Ok(contents) = std::fs::read_to_string(&settings_path) else {
+    let Ok(contents) = std::fs::read_to_string(&path) else {
         return false;
     };
     let Ok(json) = serde_json::from_str::<serde_json::Value>(&contents) else {
@@ -71,14 +78,10 @@ fn is_mcp_registered() -> bool {
 }
 
 pub fn register_mcp() -> Result<(), String> {
-    let home = dirs::home_dir().ok_or_else(|| "no home dir".to_string())?;
-    let settings_dir = home.join(".claude");
-    std::fs::create_dir_all(&settings_dir).map_err(|e| format!("mkdir: {e}"))?;
-    let settings_path = settings_dir.join("settings.json");
+    let path = claude_cli_config_path().ok_or_else(|| "no home dir".to_string())?;
 
-    let mut json: serde_json::Value = if settings_path.exists() {
-        let contents =
-            std::fs::read_to_string(&settings_path).map_err(|e| format!("read: {e}"))?;
+    let mut json: serde_json::Value = if path.exists() {
+        let contents = std::fs::read_to_string(&path).map_err(|e| format!("read: {e}"))?;
         if contents.trim().is_empty() {
             serde_json::json!({})
         } else {
@@ -88,6 +91,7 @@ pub fn register_mcp() -> Result<(), String> {
         serde_json::json!({})
     };
 
+    // Prefer release daemon next to the Tauri binary; fall back to PATH.
     let daemon_path = std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(|d| d.join("rewindos-daemon")))
@@ -101,7 +105,7 @@ pub fn register_mcp() -> Result<(), String> {
     });
 
     json.as_object_mut()
-        .ok_or_else(|| "settings.json root must be an object".to_string())?
+        .ok_or_else(|| "~/.claude.json root must be an object".to_string())?
         .entry("mcpServers")
         .or_insert_with(|| serde_json::json!({}))
         .as_object_mut()
@@ -109,7 +113,7 @@ pub fn register_mcp() -> Result<(), String> {
         .insert("rewindos".to_string(), entry);
 
     let pretty = serde_json::to_string_pretty(&json).map_err(|e| format!("serialize: {e}"))?;
-    std::fs::write(&settings_path, pretty).map_err(|e| format!("write: {e}"))?;
+    std::fs::write(&path, pretty).map_err(|e| format!("write: {e}"))?;
     Ok(())
 }
 
