@@ -1,3 +1,4 @@
+mod chat_commands;
 mod chat_context;
 mod claude_code;
 
@@ -1508,6 +1509,12 @@ pub fn run() {
             delete_journal_template,
             generate_journal_summary,
             export_journal,
+            chat_commands::list_chats,
+            chat_commands::get_chat_messages,
+            chat_commands::create_chat,
+            chat_commands::rename_chat,
+            chat_commands::delete_chat,
+            chat_commands::search_chats,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
