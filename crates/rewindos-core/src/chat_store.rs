@@ -119,6 +119,94 @@ pub fn mark_last_assistant_partial(db: &Database, chat_id: i64) -> Result<()> {
     Ok(())
 }
 
+pub fn rename_chat(db: &Database, chat_id: i64, title: &str) -> Result<()> {
+    let conn = db.conn();
+    conn.execute(
+        "UPDATE chats SET title = ?1 WHERE id = ?2",
+        rusqlite::params![title, chat_id],
+    )?;
+    Ok(())
+}
+
+pub fn delete_chat(db: &Database, chat_id: i64) -> Result<()> {
+    let conn = db.conn();
+    conn.execute("DELETE FROM chats WHERE id = ?1", [chat_id])?;
+    Ok(())
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ChatSearchHit {
+    pub chat_id: i64,
+    pub chat_title: String,
+    pub message_id: i64,
+    pub snippet: String,
+    pub created_at: i64,
+}
+
+pub fn search_chats(db: &Database, query: &str, limit: i64) -> Result<Vec<ChatSearchHit>> {
+    let conn = db.conn();
+    let mut stmt = conn.prepare(
+        "SELECT m.chat_id, c.title, m.id,
+                m.content_json, m.created_at
+         FROM chat_messages_fts fts
+         JOIN chat_messages m ON m.id = fts.rowid
+         JOIN chats c ON c.id = m.chat_id
+         WHERE chat_messages_fts MATCH ?1
+         ORDER BY m.created_at DESC
+         LIMIT ?2",
+    )?;
+    let rows = stmt.query_map(rusqlite::params![query, limit], |r| {
+        let content_json: String = r.get(3)?;
+        // Extract text from JSON block and create a snippet
+        let text = extract_text_from_json(&content_json);
+        let snippet = create_snippet(&text, query, 16);
+        Ok(ChatSearchHit {
+            chat_id: r.get(0)?,
+            chat_title: r.get(1)?,
+            message_id: r.get(2)?,
+            snippet,
+            created_at: r.get(4)?,
+        })
+    })?;
+    rows.collect::<rusqlite::Result<Vec<_>>>().map_err(Into::into)
+}
+
+/// Extract text from a JSON block (e.g. {"text": "..."}).
+fn extract_text_from_json(json: &str) -> String {
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(json) {
+        if let Some(text) = v.get("text").and_then(|t| t.as_str()) {
+            return text.to_string();
+        }
+    }
+    String::new()
+}
+
+/// Create a snippet of text with the query highlighted with <mark> tags.
+fn create_snippet(text: &str, query: &str, context_len: usize) -> String {
+    let lower_text = text.to_lowercase();
+    let lower_query = query.to_lowercase();
+
+    if let Some(pos) = lower_text.find(&lower_query) {
+        let start = pos.saturating_sub(context_len);
+        let end = (pos + query.len() + context_len).min(text.len());
+        let snippet = &text[start..end];
+        let relative_pos = pos - start;
+
+        let before = &snippet[..relative_pos];
+        let matched = &snippet[relative_pos..relative_pos + query.len()];
+        let after = &snippet[relative_pos + query.len()..];
+
+        format!("{}<mark>{}</mark>{}", before, matched, after)
+    } else {
+        // Fallback: return first context_len characters
+        if text.len() > context_len {
+            format!("{}…", &text[..context_len])
+        } else {
+            text.to_string()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -189,5 +277,41 @@ mod tests {
         let msgs = get_chat_messages(&db, chat).unwrap();
         assert!(!msgs[0].is_partial);
         assert!(msgs[1].is_partial);
+    }
+
+    #[test]
+    fn rename_updates_title() {
+        let db = Database::open_in_memory().unwrap();
+        let id = create_chat(&db, "old", ChatBackend::Claude, Some("s")).unwrap();
+        rename_chat(&db, id, "new").unwrap();
+        assert_eq!(get_chat(&db, id).unwrap().unwrap().title, "new");
+    }
+
+    #[test]
+    fn delete_cascades_messages_and_fts() {
+        let db = Database::open_in_memory().unwrap();
+        let id = create_chat(&db, "t", ChatBackend::Claude, Some("s")).unwrap();
+        append_message(&db, id, ChatRole::User, BlockKind::Text,
+            r#"{"text":"findme zxc"}"#, false).unwrap();
+        delete_chat(&db, id).unwrap();
+        assert!(get_chat(&db, id).unwrap().is_none());
+        let hits = search_chats(&db, "zxc", 10).unwrap();
+        assert_eq!(hits.len(), 0, "FTS should be cleaned up");
+    }
+
+    #[test]
+    fn search_returns_text_block_snippets() {
+        let db = Database::open_in_memory().unwrap();
+        let id = create_chat(&db, "Claude session", ChatBackend::Claude, Some("s")).unwrap();
+        append_message(&db, id, ChatRole::User, BlockKind::Text,
+            r#"{"text":"what did I work on yesterday"}"#, false).unwrap();
+        append_message(&db, id, ChatRole::Assistant, BlockKind::ToolUse,
+            r#"{"id":"tu_1","name":"search_screenshots","input":{"query":"work"}}"#, false).unwrap();
+        let hits = search_chats(&db, "yesterday", 10).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert!(hits[0].snippet.contains("<mark>yesterday</mark>"));
+        // tool_use should not appear in FTS
+        let tu_hits = search_chats(&db, "search_screenshots", 10).unwrap();
+        assert_eq!(tu_hits.len(), 0);
     }
 }
