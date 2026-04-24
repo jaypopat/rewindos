@@ -690,6 +690,12 @@ fn claude_detect() -> claude_code::ClaudeCodeStatus {
 }
 
 #[tauri::command]
+fn claude_register_mcp() -> Result<claude_code::ClaudeCodeStatus, String> {
+    claude_code::register_mcp()?;
+    Ok(claude_code::detect())
+}
+
+#[tauri::command]
 async fn ask(
     state: State<'_, AppState>,
     app: AppHandle,
@@ -1801,6 +1807,7 @@ pub fn run() {
             ask_health,
             ask_cancel,
             claude_detect,
+            claude_register_mcp,
             delete_screenshots_in_range,
             get_config,
             update_config,
