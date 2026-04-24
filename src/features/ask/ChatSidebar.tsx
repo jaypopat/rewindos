@@ -1,8 +1,9 @@
 import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, Search, Pencil, Trash2, X } from "lucide-react";
+import { Plus, Search, Pencil, Trash2, X, Download } from "lucide-react";
 import {
   deleteChat,
+  exportChatMarkdown,
   listChats,
   renameChat,
   searchChats,
@@ -149,6 +150,22 @@ export function ChatSidebar() {
                         className="opacity-0 group-hover:opacity-100 text-text-muted hover:text-text-primary"
                       >
                         <Pencil className="size-3" />
+                      </button>
+                      <button
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          const md = await exportChatMarkdown(c.id);
+                          const blob = new Blob([md], { type: "text/markdown" });
+                          const url = URL.createObjectURL(blob);
+                          const a = document.createElement("a");
+                          a.href = url;
+                          a.download = `${c.title.replace(/[^a-z0-9]/gi, "_")}.md`;
+                          a.click();
+                          URL.revokeObjectURL(url);
+                        }}
+                        className="opacity-0 group-hover:opacity-100 text-text-muted hover:text-semantic"
+                      >
+                        <Download className="size-3" />
                       </button>
                       <button
                         onClick={(e) => {

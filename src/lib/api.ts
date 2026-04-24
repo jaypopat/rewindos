@@ -691,3 +691,7 @@ export async function deleteChat(chatId: number): Promise<void> {
 export async function searchChats(query: string, limit = 50): Promise<ChatSearchHit[]> {
   return invoke("search_chats", { query, limit });
 }
+
+export async function exportChatMarkdown(chatId: number): Promise<string> {
+  return invoke("export_chat_markdown", { chatId });
+}
