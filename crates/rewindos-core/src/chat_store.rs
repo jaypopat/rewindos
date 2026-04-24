@@ -147,7 +147,8 @@ pub fn search_chats(db: &Database, query: &str, limit: i64) -> Result<Vec<ChatSe
     let conn = db.conn();
     let mut stmt = conn.prepare(
         "SELECT m.chat_id, c.title, m.id,
-                m.content_json, m.created_at
+                snippet(chat_messages_fts, 0, '<mark>', '</mark>', '…', 16),
+                m.created_at
          FROM chat_messages_fts fts
          JOIN chat_messages m ON m.id = fts.rowid
          JOIN chats c ON c.id = m.chat_id
@@ -156,55 +157,15 @@ pub fn search_chats(db: &Database, query: &str, limit: i64) -> Result<Vec<ChatSe
          LIMIT ?2",
     )?;
     let rows = stmt.query_map(rusqlite::params![query, limit], |r| {
-        let content_json: String = r.get(3)?;
-        // Extract text from JSON block and create a snippet
-        let text = extract_text_from_json(&content_json);
-        let snippet = create_snippet(&text, query, 16);
         Ok(ChatSearchHit {
             chat_id: r.get(0)?,
             chat_title: r.get(1)?,
             message_id: r.get(2)?,
-            snippet,
+            snippet: r.get(3)?,
             created_at: r.get(4)?,
         })
     })?;
     rows.collect::<rusqlite::Result<Vec<_>>>().map_err(Into::into)
-}
-
-/// Extract text from a JSON block (e.g. {"text": "..."}).
-fn extract_text_from_json(json: &str) -> String {
-    if let Ok(v) = serde_json::from_str::<serde_json::Value>(json) {
-        if let Some(text) = v.get("text").and_then(|t| t.as_str()) {
-            return text.to_string();
-        }
-    }
-    String::new()
-}
-
-/// Create a snippet of text with the query highlighted with <mark> tags.
-fn create_snippet(text: &str, query: &str, context_len: usize) -> String {
-    let lower_text = text.to_lowercase();
-    let lower_query = query.to_lowercase();
-
-    if let Some(pos) = lower_text.find(&lower_query) {
-        let start = pos.saturating_sub(context_len);
-        let end = (pos + query.len() + context_len).min(text.len());
-        let snippet = &text[start..end];
-        let relative_pos = pos - start;
-
-        let before = &snippet[..relative_pos];
-        let matched = &snippet[relative_pos..relative_pos + query.len()];
-        let after = &snippet[relative_pos + query.len()..];
-
-        format!("{}<mark>{}</mark>{}", before, matched, after)
-    } else {
-        // Fallback: return first context_len characters
-        if text.len() > context_len {
-            format!("{}…", &text[..context_len])
-        } else {
-            text.to_string()
-        }
-    }
 }
 
 #[cfg(test)]

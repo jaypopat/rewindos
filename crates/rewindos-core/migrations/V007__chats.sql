@@ -24,11 +24,7 @@ CREATE TABLE chat_messages (
 
 CREATE INDEX idx_chat_messages_chat ON chat_messages(chat_id, created_at);
 
-CREATE VIRTUAL TABLE chat_messages_fts USING fts5(
-    body,
-    content='',
-    contentless_delete=1
-);
+CREATE VIRTUAL TABLE chat_messages_fts USING fts5(body);
 
 CREATE TRIGGER chat_messages_ai AFTER INSERT ON chat_messages
 WHEN NEW.block_type IN ('text', 'thinking')
