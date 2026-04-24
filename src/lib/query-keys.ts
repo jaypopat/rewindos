@@ -45,4 +45,7 @@ export const queryKeys = {
   openTodos: (start: string, end: string) =>
     ["open-todos", start, end] as const,
   config: () => ["config"] as const,
+  chats: () => ["chats"] as const,
+  chatMessages: (chatId: number) => ["chat-messages", chatId] as const,
+  chatSearch: (query: string) => ["chat-search", query] as const,
 };
