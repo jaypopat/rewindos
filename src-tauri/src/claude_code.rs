@@ -79,11 +79,30 @@ pub fn register_mcp() -> Result<(), String> {
     Ok(())
 }
 
-pub async fn ask_claude_spawn(prompt: &str) -> Result<tokio::process::Child, String> {
-    Command::new("claude")
-        .arg("-p")
+pub async fn ask_claude_stream_spawn(
+    prompt: &str,
+    system_prompt: &str,
+    session_id: Option<&str>,
+    resume: bool,
+) -> Result<tokio::process::Child, String> {
+    let mut cmd = Command::new("claude");
+    cmd.arg("-p")
         .arg(prompt)
-        .stdout(Stdio::piped())
+        .arg("--output-format")
+        .arg("stream-json")
+        .arg("--verbose")
+        .arg("--append-system-prompt")
+        .arg(system_prompt);
+
+    if let Some(sid) = session_id {
+        if resume {
+            cmd.arg("--resume").arg(sid);
+        } else {
+            cmd.arg("--session-id").arg(sid);
+        }
+    }
+
+    cmd.stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true)
         .spawn()

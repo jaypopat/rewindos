@@ -8,8 +8,6 @@ import {
   type ReactNode,
 } from "react";
 import {
-  askClaude,
-  askClaudeCancel,
   buildChatContext,
   claudeDetect,
   getConfig,
@@ -99,15 +97,12 @@ export function AskProvider({ children }: { children: ReactNode }) {
         const useClaude = claude.available && claude.mcp_registered;
 
         if (useClaude) {
-          const prompt = `${SYSTEM_PROMPT}\n\nCurrent time: ${new Date().toISOString()}\n\n${ctx.context}\n\nUser question: ${text}`;
-          const response = await askClaude(sessionIdRef.current, prompt);
-          setMessages((prev) => {
-            const last = prev[prev.length - 1];
-            if (last && last.role === "assistant") {
-              return [...prev.slice(0, -1), { ...last, content: response }];
-            }
-            return prev;
-          });
+          // TODO(Task 8): wire askClaudeStream(chatId, prompt, onEvent) with the
+          // new DB-backed active-chat model. This stub keeps tsc clean between
+          // tasks 7 and 8; the Claude path is non-functional in the interim.
+          throw new Error(
+            "Claude streaming is being rewritten (Task 8); switch to Ollama for now.",
+          );
         } else {
           const config = (await getConfig()) as unknown as RootConfigShape;
           const historyMessages: OllamaMessage[] = messages
@@ -167,7 +162,7 @@ export function AskProvider({ children }: { children: ReactNode }) {
   const cancelStream = useCallback(() => {
     if (!isStreaming) return;
     abortRef.current?.abort();
-    askClaudeCancel(sessionIdRef.current).catch(() => {});
+    // TODO(Task 8): call askClaudeCancel(chatId) once active-chat model lands.
     setIsStreaming(false);
   }, [isStreaming]);
 

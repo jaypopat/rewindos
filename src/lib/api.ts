@@ -1,4 +1,4 @@
-import { invoke, convertFileSrc } from "@tauri-apps/api/core";
+import { invoke, convertFileSrc, Channel } from "@tauri-apps/api/core";
 
 export interface SearchFilters {
   start_time?: number;
@@ -608,12 +608,27 @@ export async function buildChatContext(query: string): Promise<ChatContext> {
   return invoke("build_chat_context", { query });
 }
 
-export async function askClaude(sessionId: string, prompt: string): Promise<string> {
-  return invoke("ask_claude", { sessionId, prompt });
+export type AskStreamEvent =
+  | { type: "session_started"; session_id: string }
+  | { type: "text"; text: string }
+  | { type: "tool_use"; id: string; name: string; input: unknown }
+  | { type: "tool_result"; tool_use_id: string; content: string; is_error: boolean }
+  | { type: "thinking"; text: string }
+  | { type: "done"; total_cost_usd: number | null }
+  | { type: "error"; message: string };
+
+export async function askClaudeStream(
+  chatId: number,
+  prompt: string,
+  onEvent: (ev: AskStreamEvent) => void,
+): Promise<void> {
+  const channel = new Channel<AskStreamEvent>();
+  channel.onmessage = onEvent;
+  return invoke("ask_claude", { chatId, prompt, onEvent: channel });
 }
 
-export async function askClaudeCancel(sessionId: string): Promise<void> {
-  return invoke("ask_claude_cancel", { sessionId });
+export async function askClaudeCancel(chatId: number): Promise<void> {
+  return invoke("ask_claude_cancel", { chatId });
 }
 
 // -- Chat persistence --
