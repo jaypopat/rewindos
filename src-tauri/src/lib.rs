@@ -1,3 +1,4 @@
+mod chat_context;
 mod claude_code;
 
 use std::collections::HashMap;
@@ -693,6 +694,19 @@ fn claude_detect() -> claude_code::ClaudeCodeStatus {
 fn claude_register_mcp() -> Result<claude_code::ClaudeCodeStatus, String> {
     claude_code::register_mcp()?;
     Ok(claude_code::detect())
+}
+
+#[tauri::command]
+async fn build_chat_context(
+    state: State<'_, AppState>,
+    query: String,
+) -> Result<chat_context::ChatContext, String> {
+    let config = state
+        .config
+        .lock()
+        .map_err(|e| format!("config lock: {e}"))?
+        .clone();
+    chat_context::build(&state.db, state.embedding_client.as_ref(), &config, &query).await
 }
 
 #[tauri::command]
@@ -1808,6 +1822,7 @@ pub fn run() {
             ask_cancel,
             claude_detect,
             claude_register_mcp,
+            build_chat_context,
             delete_screenshots_in_range,
             get_config,
             update_config,

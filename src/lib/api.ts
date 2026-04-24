@@ -620,3 +620,13 @@ export async function claudeDetect(): Promise<ClaudeCodeStatus> {
 export async function claudeRegisterMcp(): Promise<ClaudeCodeStatus> {
   return invoke("claude_register_mcp");
 }
+
+export interface ChatContext {
+  context: string;
+  references: ScreenshotRef[];
+  intent_category: string;
+}
+
+export async function buildChatContext(query: string): Promise<ChatContext> {
+  return invoke("build_chat_context", { query });
+}
