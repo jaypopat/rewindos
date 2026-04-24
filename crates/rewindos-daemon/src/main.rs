@@ -604,6 +604,7 @@ async fn run_daemon() -> anyhow::Result<()> {
                             let db = backfill_db.lock().unwrap_or_else(|e| e.into_inner());
                             if let Err(e) = db.insert_embedding(screenshot_id, &embedding) {
                                 warn!(screenshot_id, error = %e, "backfill: failed to store embedding");
+                                let _ = db.mark_embedding_failed(screenshot_id);
                             } else {
                                 total += 1;
                             }
@@ -614,6 +615,8 @@ async fn run_daemon() -> anyhow::Result<()> {
                         }
                         Err(e) => {
                             warn!(screenshot_id, error = %e, "backfill: failed to embed");
+                            let db = backfill_db.lock().unwrap_or_else(|e| e.into_inner());
+                            let _ = db.mark_embedding_failed(screenshot_id);
                         }
                     }
                     // Small delay to avoid overwhelming Ollama
