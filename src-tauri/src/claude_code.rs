@@ -131,7 +131,13 @@ pub async fn ask_claude_stream_spawn(
         .arg("stream-json")
         .arg("--verbose")
         .arg("--append-system-prompt")
-        .arg(system_prompt);
+        .arg(system_prompt)
+        // Pre-approve every tool from our own MCP server. `-p` mode has no TTY
+        // for interactive approval, so without this Claude returns an error
+        // ("Claude requested permissions to use mcp__rewindos__*...") on the
+        // first tool call. Scoped to rewindos — other MCP servers still gate.
+        .arg("--allowedTools")
+        .arg("mcp__rewindos__*");
 
     if let Some(sid) = session_id {
         if resume {
