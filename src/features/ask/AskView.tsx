@@ -82,12 +82,17 @@ export function AskView({ onSelectScreenshot }: AskViewProps) {
   const chatReady = usingClaude || ollamaOnline;
 
   const submit = useCallback(
-    (textOverride?: string) => {
+    async (textOverride?: string) => {
       const msg = (textOverride ?? input).trim();
       if (!msg || isStreaming || !chatReady) return;
-      void sendMessage(msg, attachedIds);
-      setInput("");
-      setAttachedIds([]);
+      const idsAtSend = attachedIds;
+      try {
+        await sendMessage(msg, idsAtSend);
+        setInput("");
+        setAttachedIds([]);
+      } catch {
+        // leave input + attachments in place so user can retry
+      }
     },
     [input, isStreaming, chatReady, sendMessage, attachedIds],
   );
