@@ -122,6 +122,7 @@ pub async fn ask_claude_stream_spawn(
     system_prompt: &str,
     session_id: Option<&str>,
     resume: bool,
+    model: Option<&str>,
 ) -> Result<tokio::process::Child, String> {
     let binary = find_claude_binary().ok_or_else(|| "claude CLI not found".to_string())?;
     let mut cmd = Command::new(&binary);
@@ -138,6 +139,10 @@ pub async fn ask_claude_stream_spawn(
         // first tool call. Scoped to rewindos — other MCP servers still gate.
         .arg("--allowedTools")
         .arg("mcp__rewindos__*");
+
+    if let Some(m) = model {
+        cmd.arg("--model").arg(m);
+    }
 
     if let Some(sid) = session_id {
         if resume {

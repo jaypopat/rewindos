@@ -662,12 +662,12 @@ async fn ask_claude(
     use rewindos_core::schema::{BlockKind, ChatRole};
     use tokio::io::{AsyncBufReadExt, BufReader};
 
-    let existing_session_id = {
+    let (existing_session_id, chat_model) = {
         let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
         let chat = chat_store::get_chat(&db, chat_id)
             .map_err(|e| e.to_string())?
             .ok_or_else(|| format!("chat {chat_id} not found"))?;
-        chat.claude_session_id.clone()
+        (chat.claude_session_id.clone(), chat.model.clone())
     };
 
     {
@@ -694,6 +694,7 @@ async fn ask_claude(
         SYSTEM_PROMPT_FOR_CLAUDE,
         Some(&session_arg),
         resume,
+        chat_model.as_deref(),
     )
     .await?;
 
