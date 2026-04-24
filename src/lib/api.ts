@@ -630,3 +630,11 @@ export interface ChatContext {
 export async function buildChatContext(query: string): Promise<ChatContext> {
   return invoke("build_chat_context", { query });
 }
+
+export async function askClaude(sessionId: string, prompt: string): Promise<string> {
+  return invoke("ask_claude", { sessionId, prompt });
+}
+
+export async function askClaudeCancel(sessionId: string): Promise<void> {
+  return invoke("ask_claude_cancel", { sessionId });
+}
