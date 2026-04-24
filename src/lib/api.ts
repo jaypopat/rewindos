@@ -604,3 +604,15 @@ export async function updateConfig(
 ): Promise<void> {
   return invoke("update_config", { configJson: config });
 }
+
+// -- Claude Code integration --
+
+export interface ClaudeCodeStatus {
+  available: boolean;
+  path: string | null;
+  mcp_registered: boolean;
+}
+
+export async function claudeDetect(): Promise<ClaudeCodeStatus> {
+  return invoke("claude_detect");
+}

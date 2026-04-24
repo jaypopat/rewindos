@@ -1,3 +1,5 @@
+mod claude_code;
+
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tokio::sync::watch;
@@ -680,6 +682,11 @@ fn ask_cancel(state: State<'_, AppState>, session_id: String) -> Result<(), Stri
         let _ = tx.send(true);
     }
     Ok(())
+}
+
+#[tauri::command]
+fn claude_detect() -> claude_code::ClaudeCodeStatus {
+    claude_code::detect()
 }
 
 #[tauri::command]
@@ -1793,6 +1800,7 @@ pub fn run() {
             ask_new_session,
             ask_health,
             ask_cancel,
+            claude_detect,
             delete_screenshots_in_range,
             get_config,
             update_config,
