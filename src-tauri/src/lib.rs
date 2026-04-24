@@ -666,6 +666,7 @@ async fn ask_claude(
     state: State<'_, AppState>,
     chat_id: i64,
     prompt: String,
+    stored_text: Option<String>,
     on_event: tauri::ipc::Channel<ask_stream::AskStreamEvent>,
 ) -> Result<(), String> {
     use rewindos_core::chat_store;
@@ -682,7 +683,8 @@ async fn ask_claude(
 
     {
         let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
-        let body = serde_json::json!({ "text": prompt }).to_string();
+        let to_store = stored_text.as_deref().unwrap_or(&prompt);
+        let body = serde_json::json!({ "text": to_store }).to_string();
         chat_store::append_message(
             &db,
             chat_id,

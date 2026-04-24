@@ -12,11 +12,13 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   askClaudeCancel,
   askClaudeStream,
+  askClaudeStreamWithAttachments,
   buildChatContext,
   claudeDetect,
   createChat,
   getChatMessages,
   getConfig,
+  getScreenshotsByIds,
   listChats,
   setModel,
   type AskStreamEvent,
@@ -25,6 +27,7 @@ import {
 } from "@/lib/api";
 import { ollamaChat, type OllamaMessage } from "@/lib/ollama-chat";
 import { queryKeys } from "@/lib/query-keys";
+import { encodeAttachments } from "@/lib/attachments";
 
 export interface RootConfigShape {
   chat: {
@@ -41,7 +44,7 @@ interface AskContextValue {
   messages: ChatMessageRow[];
   isStreaming: boolean;
   error: string | null;
-  sendMessage: (text: string) => Promise<void>;
+  sendMessage: (text: string, attachedIds?: number[]) => Promise<void>;
   cancelStream: () => void;
   selectChat: (chatId: number | null) => void;
   startNewChat: () => void;
@@ -101,7 +104,7 @@ export function AskProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const sendMessage = useCallback(
-    async (text: string) => {
+    async (text: string, attachedIds: number[] = []) => {
       if (isStreaming || !text.trim()) return;
       setError(null);
       setIsStreaming(true);
@@ -133,15 +136,27 @@ export function AskProvider({ children }: { children: ReactNode }) {
           qc.invalidateQueries({ queryKey: ["chat", chatId] as const });
         }
 
+        const expandedText = await buildAttachedContext(attachedIds, text);
+        const storedText = encodeAttachments(attachedIds, text);
+
         if (useClaude) {
-          await askClaudeStream(chatId, text, (ev) => {
-            handleEvent(ev, chatId!, qc, setError);
-          });
+          if (attachedIds.length > 0) {
+            await askClaudeStreamWithAttachments(
+              chatId,
+              storedText,
+              expandedText,
+              (ev) => handleEvent(ev, chatId!, qc, setError),
+            );
+          } else {
+            await askClaudeStream(chatId, text, (ev) =>
+              handleEvent(ev, chatId!, qc, setError),
+            );
+          }
         } else {
           const ctx = await buildChatContext(text);
           const config = (await getConfig()) as unknown as RootConfigShape;
 
-          await persistUserMessage(chatId, text);
+          await persistUserMessage(chatId, storedText);
           qc.invalidateQueries({ queryKey: queryKeys.chatMessages(chatId) });
 
           const prevMessages = messages
@@ -159,7 +174,7 @@ export function AskProvider({ children }: { children: ReactNode }) {
           const ollamaMessages: OllamaMessage[] = [
             { role: "system", content: systemContent },
             ...prevMessages,
-            { role: "user", content: text },
+            { role: "user", content: expandedText },
           ];
 
           abortRef.current = new AbortController();
@@ -308,4 +323,27 @@ export function useAskChat() {
   const ctx = useContext(AskContext);
   if (!ctx) throw new Error("useAskChat must be used within AskProvider");
   return ctx;
+}
+
+async function buildAttachedContext(ids: number[], userText: string): Promise<string> {
+  if (ids.length === 0) return userText;
+  const shots = await getScreenshotsByIds(ids);
+  const lines = shots.map((s) => {
+    const ts = new Date(s.timestamp * 1000).toLocaleString(undefined, {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+    const app = s.app_name ?? "unknown";
+    const title = s.window_title ? ` — ${s.window_title}` : "";
+    return `- #${s.id} (${ts}, ${app}${title})`;
+  });
+  return [
+    "[Attached screenshots — the user pinned these as context]",
+    ...lines,
+    "[End attached screenshots]",
+    "",
+    userText,
+  ].join("\n");
 }

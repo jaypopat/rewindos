@@ -1,14 +1,16 @@
 import { useCallback, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Loader2 } from "lucide-react";
+import { Loader2, Paperclip } from "lucide-react";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import { cn } from "@/lib/utils";
 import { queryKeys } from "@/lib/query-keys";
-import { claudeDetect, getConfig } from "@/lib/api";
+import { claudeDetect, getConfig, getScreenshotsByIds } from "@/lib/api";
 import { ollamaHealth } from "@/lib/ollama-chat";
 import { useAskChat } from "@/context/AskContext";
 import { AskMessages } from "./AskMessages";
 import { AskEmptyState } from "./AskEmptyState";
 import { AskModelPicker } from "./AskModelPicker";
+import { AttachmentPicker } from "./AttachmentPicker";
 import { ChatSidebar } from "./ChatSidebar";
 import {
   PromptInput,
@@ -16,6 +18,14 @@ import {
   PromptInputFooter,
   PromptInputSubmit,
 } from "@/components/ai-elements/prompt-input";
+import {
+  Attachments,
+  Attachment,
+  AttachmentPreview,
+  AttachmentInfo,
+  AttachmentRemove,
+  type AttachmentData,
+} from "@/components/ai-elements/attachments";
 
 interface AskViewProps {
   onSelectScreenshot: (id: number) => void;
@@ -28,6 +38,23 @@ interface ChatUrlConfig {
 export function AskView({ onSelectScreenshot }: AskViewProps) {
   const { messages, isStreaming, error, sendMessage, cancelStream } = useAskChat();
   const [input, setInput] = useState("");
+  const [attachedIds, setAttachedIds] = useState<number[]>([]);
+  const [pickerOpen, setPickerOpen] = useState(false);
+
+  const { data: attachedShots = [] } = useQuery({
+    queryKey: queryKeys.screenshotsByIds(attachedIds),
+    queryFn: () => getScreenshotsByIds(attachedIds),
+    enabled: attachedIds.length > 0,
+    staleTime: 60_000,
+  });
+
+  const attachmentData: AttachmentData[] = attachedShots.map((s) => ({
+    type: "file",
+    id: String(s.id),
+    url: convertFileSrc(s.thumbnail_path ?? s.file_path),
+    filename: `#${s.id} · ${s.app_name ?? "unknown"}`,
+    mediaType: "image/webp",
+  })) as AttachmentData[];
 
   const { data: config } = useQuery({
     queryKey: queryKeys.config(),
@@ -58,10 +85,11 @@ export function AskView({ onSelectScreenshot }: AskViewProps) {
     (textOverride?: string) => {
       const msg = (textOverride ?? input).trim();
       if (!msg || isStreaming || !chatReady) return;
-      void sendMessage(msg);
+      void sendMessage(msg, attachedIds);
       setInput("");
+      setAttachedIds([]);
     },
-    [input, isStreaming, chatReady, sendMessage],
+    [input, isStreaming, chatReady, sendMessage, attachedIds],
   );
 
   const onPromptSubmit = useCallback(
@@ -125,6 +153,27 @@ export function AskView({ onSelectScreenshot }: AskViewProps) {
         {/* Prompt */}
         <div className="border-t border-border/50 px-6 py-4 shrink-0 bg-surface-raised/20">
           <div className="max-w-3xl mx-auto">
+            {attachedIds.length > 0 && (
+              <div className="mb-2">
+                <Attachments variant="inline">
+                  {attachmentData.map((data) => (
+                    <Attachment
+                      key={data.id}
+                      data={data}
+                      onRemove={() =>
+                        setAttachedIds((prev) =>
+                          prev.filter((x) => String(x) !== data.id),
+                        )
+                      }
+                    >
+                      <AttachmentPreview />
+                      <AttachmentInfo />
+                      <AttachmentRemove />
+                    </Attachment>
+                  ))}
+                </Attachments>
+              </div>
+            )}
             <PromptInput
               onSubmit={onPromptSubmit}
               className="border border-border/50 bg-surface-raised/40 focus-within:border-semantic/40 transition-colors rounded-none"
@@ -146,6 +195,16 @@ export function AskView({ onSelectScreenshot }: AskViewProps) {
               />
               <PromptInputFooter className="px-3 pb-2 pt-1 rounded-none">
                 <div className="flex items-center gap-3 text-text-muted">
+                  <button
+                    type="button"
+                    onClick={() => setPickerOpen(true)}
+                    disabled={isStreaming || !chatReady}
+                    className="text-text-muted hover:text-semantic disabled:opacity-40 disabled:hover:text-text-muted transition-colors"
+                    title="attach screenshot"
+                    aria-label="attach screenshot"
+                  >
+                    <Paperclip className="size-4" />
+                  </button>
                   <span className="font-mono text-[10px] uppercase tracking-wider">
                     {usingClaude ? "⇧⏎ newline · ⏎ send" : "⏎ send"}
                   </span>
@@ -160,6 +219,14 @@ export function AskView({ onSelectScreenshot }: AskViewProps) {
           </div>
         </div>
       </div>
+
+      <AttachmentPicker
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        onAttach={(ids) =>
+          setAttachedIds((prev) => Array.from(new Set([...prev, ...ids])))
+        }
+      />
     </div>
   );
 }

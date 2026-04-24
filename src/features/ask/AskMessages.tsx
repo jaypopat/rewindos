@@ -1,4 +1,6 @@
 import { Streamdown } from "streamdown";
+import { useQuery } from "@tanstack/react-query";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import {
   Conversation,
   ConversationContent,
@@ -16,8 +18,17 @@ import {
   ToolInput,
   ToolOutput,
 } from "@/components/ai-elements/tool";
+import {
+  Attachments,
+  Attachment,
+  AttachmentPreview,
+  AttachmentInfo,
+  type AttachmentData,
+} from "@/components/ai-elements/attachments";
 import { toUIMessages } from "@/lib/chat-messages";
-import type { ChatMessageRow } from "@/lib/api";
+import { getScreenshotsByIds, type ChatMessageRow } from "@/lib/api";
+import { queryKeys } from "@/lib/query-keys";
+import { decodeAttachments } from "@/lib/attachments";
 import type { ToolUIPart } from "ai";
 import { cn } from "@/lib/utils";
 import { parseTextWithRefs, collectRefs } from "@/lib/citations";
@@ -89,12 +100,11 @@ export function AskMessages({ rows, onSelectScreenshot }: AskMessagesProps) {
                     const text = (anyPart.text as string) ?? "";
                     if (isUser) {
                       return (
-                        <div
+                        <UserTextWithAttachments
                           key={key}
-                          className="text-sm text-text-primary whitespace-pre-wrap"
-                        >
-                          {text}
-                        </div>
+                          text={text}
+                          onSelectScreenshot={onSelectScreenshot}
+                        />
                       );
                     }
                     return (
@@ -178,5 +188,49 @@ function AssistantTextWithCitations({
         <CitationSources ids={refIds} onSelect={onSelectScreenshot} />
       )}
     </>
+  );
+}
+
+function UserTextWithAttachments({
+  text,
+  onSelectScreenshot: _onSelectScreenshot,
+}: {
+  text: string;
+  onSelectScreenshot?: (id: number) => void;
+}) {
+  const decoded = decodeAttachments(text);
+  const { data: shots = [] } = useQuery({
+    queryKey: queryKeys.screenshotsByIds(decoded.ids),
+    queryFn: () => getScreenshotsByIds(decoded.ids),
+    enabled: decoded.ids.length > 0,
+    staleTime: 60_000,
+  });
+
+  const attachmentData: AttachmentData[] = shots.map((s) => ({
+    type: "file",
+    id: String(s.id),
+    url: convertFileSrc(s.thumbnail_path ?? s.file_path),
+    filename: `#${s.id} · ${s.app_name ?? "unknown"}`,
+    mediaType: "image/webp",
+  })) as AttachmentData[];
+
+  return (
+    <div className="space-y-2">
+      {decoded.ids.length > 0 && (
+        <Attachments variant="inline">
+          {attachmentData.map((data) => (
+            <Attachment key={data.id} data={data}>
+              <AttachmentPreview />
+              <AttachmentInfo />
+            </Attachment>
+          ))}
+        </Attachments>
+      )}
+      {decoded.text && (
+        <div className="text-sm text-text-primary whitespace-pre-wrap">
+          {decoded.text}
+        </div>
+      )}
+    </div>
   );
 }
