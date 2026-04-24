@@ -1,5 +1,5 @@
 use rewindos_core::chat_store::{self, ChatSearchHit};
-use rewindos_core::schema::{Chat, ChatBackend, ChatMessageRow};
+use rewindos_core::schema::{BlockKind, Chat, ChatBackend, ChatMessageRow, ChatRole};
 use tauri::State;
 
 use crate::AppState;
@@ -57,4 +57,21 @@ pub fn search_chats(
 ) -> Result<Vec<ChatSearchHit>, String> {
     let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
     chat_store::search_chats(&db, &query, limit.unwrap_or(50)).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn append_chat_message(
+    state: State<'_, AppState>,
+    chat_id: i64,
+    role: String,
+    block_type: String,
+    content_json: String,
+    is_partial: bool,
+) -> Result<i64, String> {
+    let role_enum = ChatRole::parse_sql(&role).ok_or_else(|| format!("bad role: {role}"))?;
+    let block_enum =
+        BlockKind::parse_sql(&block_type).ok_or_else(|| format!("bad block: {block_type}"))?;
+    let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+    chat_store::append_message(&db, chat_id, role_enum, block_enum, &content_json, is_partial)
+        .map_err(|e| e.to_string())
 }

@@ -1660,6 +1660,7 @@ pub fn run() {
             chat_commands::rename_chat,
             chat_commands::delete_chat,
             chat_commands::search_chats,
+            chat_commands::append_chat_message,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
