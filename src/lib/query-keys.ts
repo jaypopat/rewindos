@@ -4,6 +4,7 @@ export const queryKeys = {
   search: (query: string, filters: SearchFilters) =>
     ["search", query, filters] as const,
   screenshot: (id: number) => ["screenshot", id] as const,
+  screenshotsByIds: (ids: number[]) => ["screenshots-by-ids", ...ids] as const,
   daemonStatus: () => ["daemon-status"] as const,
   appNames: () => ["app-names"] as const,
   activity: (sinceTimestamp: number, untilTimestamp?: number) =>
