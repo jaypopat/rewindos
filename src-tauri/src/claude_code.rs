@@ -1,4 +1,6 @@
 use std::path::PathBuf;
+use std::process::Stdio;
+use tokio::process::Command;
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ClaudeCodeStatus {
@@ -75,4 +77,15 @@ pub fn register_mcp() -> Result<(), String> {
     let pretty = serde_json::to_string_pretty(&json).map_err(|e| format!("serialize: {e}"))?;
     std::fs::write(&settings_path, pretty).map_err(|e| format!("write: {e}"))?;
     Ok(())
+}
+
+pub async fn ask_claude_spawn(prompt: &str) -> Result<tokio::process::Child, String> {
+    Command::new("claude")
+        .arg("-p")
+        .arg(prompt)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|e| format!("spawn claude: {e}"))
 }

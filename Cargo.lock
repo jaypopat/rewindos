@@ -4269,6 +4269,7 @@ dependencies = [
  "chrono",
  "dirs",
  "futures",
+ "nix 0.29.0",
  "regex-lite",
  "reqwest 0.12.28",
  "rewindos-core",

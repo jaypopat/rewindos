@@ -33,6 +33,7 @@ struct AppState {
     chat_sessions: Arc<Mutex<HashMap<String, Vec<ChatMessage>>>>,
     ask_cancel_tokens: Arc<Mutex<HashMap<String, watch::Sender<bool>>>>,
     embedding_client: Option<EmbeddingClient>,
+    claude_pids: Arc<tokio::sync::Mutex<HashMap<String, u32>>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -707,6 +708,54 @@ async fn build_chat_context(
         .map_err(|e| format!("config lock: {e}"))?
         .clone();
     chat_context::build(&state.db, state.embedding_client.as_ref(), &config, &query).await
+}
+
+#[tauri::command]
+async fn ask_claude(
+    state: State<'_, AppState>,
+    session_id: String,
+    prompt: String,
+) -> Result<String, String> {
+    let child = claude_code::ask_claude_spawn(&prompt).await?;
+    let pid = child.id().ok_or("no pid for claude child")?;
+
+    {
+        let mut map = state.claude_pids.lock().await;
+        map.insert(session_id.clone(), pid);
+    }
+
+    let output_result = child.wait_with_output().await;
+
+    {
+        let mut map = state.claude_pids.lock().await;
+        map.remove(&session_id);
+    }
+
+    let output = output_result.map_err(|e| format!("wait: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        return Err(format!("claude exited {}: {}", output.status, stderr));
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+#[tauri::command]
+async fn ask_claude_cancel(
+    state: State<'_, AppState>,
+    session_id: String,
+) -> Result<(), String> {
+    let pid = {
+        let map = state.claude_pids.lock().await;
+        map.get(&session_id).copied()
+    };
+    if let Some(pid) = pid {
+        use nix::sys::signal::{kill, Signal};
+        use nix::unistd::Pid;
+        let _ = kill(Pid::from_raw(pid as i32), Signal::SIGTERM);
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -1623,6 +1672,7 @@ pub fn run() {
                 chat_sessions: Arc::new(Mutex::new(HashMap::new())),
                 ask_cancel_tokens: Arc::new(Mutex::new(HashMap::new())),
                 embedding_client,
+                claude_pids: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             });
 
             // Register Ctrl+Shift+Space global shortcut
@@ -1823,6 +1873,8 @@ pub fn run() {
             claude_detect,
             claude_register_mcp,
             build_chat_context,
+            ask_claude,
+            ask_claude_cancel,
             delete_screenshots_in_range,
             get_config,
             update_config,
