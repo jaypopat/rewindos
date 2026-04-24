@@ -417,7 +417,7 @@ impl ChatBackend {
             ChatBackend::Ollama => "ollama",
         }
     }
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse_sql(s: &str) -> Option<Self> {
         match s {
             "claude" => Some(ChatBackend::Claude),
             "ollama" => Some(ChatBackend::Ollama),
@@ -440,7 +440,7 @@ impl ChatRole {
             ChatRole::Assistant => "assistant",
         }
     }
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse_sql(s: &str) -> Option<Self> {
         match s {
             "user" => Some(ChatRole::User),
             "assistant" => Some(ChatRole::Assistant),
@@ -467,7 +467,7 @@ impl BlockKind {
             BlockKind::Thinking => "thinking",
         }
     }
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse_sql(s: &str) -> Option<Self> {
         match s {
             "text" => Some(BlockKind::Text),
             "tool_use" => Some(BlockKind::ToolUse),
