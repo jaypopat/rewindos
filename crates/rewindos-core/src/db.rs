@@ -3165,4 +3165,31 @@ mod tests {
         assert_eq!(attached.len(), 1);
         assert_eq!(attached[0].screenshot_id, ss_id2);
     }
+
+    // ── Chat table migration tests ──────────────────────────────────
+
+    #[test]
+    fn v007_creates_chat_tables() {
+        let db = make_test_db();
+        let tables: Vec<String> = db
+            .conn
+            .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .unwrap();
+        assert!(
+            tables.iter().any(|t| t == "chats"),
+            "chats table missing: {tables:?}"
+        );
+        assert!(
+            tables.iter().any(|t| t == "chat_messages"),
+            "chat_messages table missing: {tables:?}"
+        );
+        assert!(
+            tables.iter().any(|t| t == "chat_messages_fts"),
+            "chat_messages_fts table missing: {tables:?}"
+        );
+    }
 }
