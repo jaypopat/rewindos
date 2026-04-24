@@ -648,6 +648,22 @@ export async function askClaudeStream(
   return invoke("ask_claude", { chatId, prompt, onEvent: channel });
 }
 
+export async function askClaudeStreamWithAttachments(
+  chatId: number,
+  storedText: string,
+  expandedText: string,
+  onEvent: (ev: AskStreamEvent) => void,
+): Promise<void> {
+  const channel = new Channel<AskStreamEvent>();
+  channel.onmessage = onEvent;
+  return invoke("ask_claude", {
+    chatId,
+    prompt: expandedText,
+    storedText,
+    onEvent: channel,
+  });
+}
+
 export async function askClaudeCancel(chatId: number): Promise<void> {
   return invoke("ask_claude_cancel", { chatId });
 }
