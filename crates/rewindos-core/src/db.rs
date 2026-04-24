@@ -328,6 +328,12 @@ impl Database {
         Ok(db)
     }
 
+    /// Get a reference to the underlying rusqlite connection.
+    /// Exposed for use by other modules like chat_store.
+    pub(crate) fn conn(&self) -> &Connection {
+        &self.conn
+    }
+
     fn apply_pragmas(&self) -> Result<()> {
         self.conn.execute_batch(
             "PRAGMA journal_mode = WAL;
