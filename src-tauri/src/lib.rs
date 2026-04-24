@@ -1,3 +1,4 @@
+mod ask_stream;
 mod chat_commands;
 mod chat_context;
 mod claude_code;
