@@ -28,16 +28,20 @@ import {
 import { toUIMessages } from "@/lib/chat-messages";
 import { getScreenshotsByIds, type ChatMessageRow } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
-import { decodeAttachments } from "@/lib/attachments";
+import { decodeAttachments, stripMarker } from "@/lib/attachments";
 import type { ToolUIPart } from "ai";
 import { cn } from "@/lib/utils";
 import { parseTextWithRefs, collectRefs } from "@/lib/citations";
 import { CitationChip } from "./CitationChip";
 import { CitationSources } from "./CitationSources";
+import { MessageActions } from "./MessageActions";
+import { FollowupSuggestions } from "./FollowupSuggestions";
+import { useAskChat } from "@/context/AskContext";
 
 interface AskMessagesProps {
   rows: ChatMessageRow[];
   onSelectScreenshot?: (id: number) => void;
+  onSelectSuggestion?: (text: string) => void;
 }
 
 function RoleHeader({ role }: { role: "user" | "assistant" }) {
@@ -74,14 +78,16 @@ const ASSISTANT_PROSE =
   "[&_strong]:text-text-primary [&_strong]:font-semibold " +
   "[&_ul]:list-disc [&_ul]:list-inside [&_ol]:list-decimal [&_ol]:list-inside [&_li]:text-text-secondary";
 
-export function AskMessages({ rows, onSelectScreenshot }: AskMessagesProps) {
+export function AskMessages({ rows, onSelectScreenshot, onSelectSuggestion }: AskMessagesProps) {
   const messages = toUIMessages(rows);
+  const { followups, regenerate } = useAskChat();
 
   return (
     <Conversation className="flex-1 min-h-0">
       <ConversationContent className="max-w-3xl mx-auto w-full px-6 py-5 space-y-5">
-        {messages.map((m) => {
+        {messages.map((m, idx) => {
           const isUser = m.role === "user";
+          const isLast = idx === messages.length - 1;
           return (
             <div key={m.id} className="animate-fade-in">
               <RoleHeader role={m.role as "user" | "assistant"} />
@@ -155,6 +161,28 @@ export function AskMessages({ rows, onSelectScreenshot }: AskMessagesProps) {
                   return null;
                 })}
               </div>
+              {!isUser && isLast && (
+                <div className="pl-3.5 mt-2">
+                  <MessageActions
+                    onCopy={() => {
+                      const allText = m.parts
+                        .map((p) => {
+                          const a = p as Record<string, unknown>;
+                          if (a.type === "text") return a.text as string;
+                          return "";
+                        })
+                        .filter(Boolean)
+                        .join("\n\n");
+                      navigator.clipboard.writeText(stripMarker(allText));
+                    }}
+                    onRegenerate={() => void regenerate()}
+                  />
+                  <FollowupSuggestions
+                    suggestions={followups}
+                    onSelect={(t) => onSelectSuggestion?.(t)}
+                  />
+                </div>
+              )}
             </div>
           );
         })}

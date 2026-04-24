@@ -726,6 +726,13 @@ export async function deleteChat(chatId: number): Promise<void> {
   return invoke("delete_chat", { chatId });
 }
 
+export async function deleteMessagesAfter(
+  chatId: number,
+  afterId: number,
+): Promise<void> {
+  return invoke("delete_messages_after", { chatId, afterId });
+}
+
 export async function searchChats(query: string, limit = 50): Promise<ChatSearchHit[]> {
   return invoke("search_chats", { query, limit });
 }

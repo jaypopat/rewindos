@@ -157,6 +157,23 @@ pub fn delete_chat(db: &Database, chat_id: i64) -> Result<()> {
     Ok(())
 }
 
+/// Delete all messages in a chat with id strictly greater than `after_id`.
+/// Also clears `claude_session_id` on the chat row — the Claude-side session
+/// history no longer matches our local view after truncation, so the next
+/// turn must start a fresh session with the reconstructed history.
+pub fn delete_messages_after(db: &Database, chat_id: i64, after_id: i64) -> Result<()> {
+    let conn = db.conn();
+    conn.execute(
+        "DELETE FROM chat_messages WHERE chat_id = ?1 AND id > ?2",
+        rusqlite::params![chat_id, after_id],
+    )?;
+    conn.execute(
+        "UPDATE chats SET claude_session_id = NULL WHERE id = ?1",
+        rusqlite::params![chat_id],
+    )?;
+    Ok(())
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ChatSearchHit {
     pub chat_id: i64,
@@ -318,6 +335,23 @@ mod tests {
         assert!(get_chat(&db, id).unwrap().is_none());
         let hits = search_chats(&db, "zxc", 10).unwrap();
         assert_eq!(hits.len(), 0, "FTS should be cleaned up");
+    }
+
+    #[test]
+    fn delete_messages_after_truncates_and_clears_session() {
+        let db = Database::open_in_memory().unwrap();
+        let id = create_chat(&db, "t", ChatBackend::Claude, Some("sess-xyz")).unwrap();
+        let m1 = append_message(&db, id, ChatRole::User, BlockKind::Text, r#"{"text":"a"}"#, false).unwrap();
+        let _m2 = append_message(&db, id, ChatRole::Assistant, BlockKind::Text, r#"{"text":"b"}"#, false).unwrap();
+        let _m3 = append_message(&db, id, ChatRole::User, BlockKind::Text, r#"{"text":"c"}"#, false).unwrap();
+
+        delete_messages_after(&db, id, m1).unwrap();
+        let remaining = get_chat_messages(&db, id).unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].id, m1);
+
+        let chat = get_chat(&db, id).unwrap().unwrap();
+        assert_eq!(chat.claude_session_id, None);
     }
 
     #[test]

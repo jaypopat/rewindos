@@ -130,7 +130,11 @@ export function AskView({ onSelectScreenshot }: AskViewProps) {
         {messages.length === 0 ? (
           <AskEmptyState onSuggest={submit} />
         ) : (
-          <AskMessages rows={messages} onSelectScreenshot={onSelectScreenshot} />
+          <AskMessages
+            rows={messages}
+            onSelectScreenshot={onSelectScreenshot}
+            onSelectSuggestion={submit}
+          />
         )}
 
         {/* Streaming indicator */}

@@ -16,6 +16,7 @@ import {
   buildChatContext,
   claudeDetect,
   createChat,
+  deleteMessagesAfter,
   getChatMessages,
   getConfig,
   getScreenshotsByIds,
@@ -27,7 +28,8 @@ import {
 } from "@/lib/api";
 import { ollamaChat, type OllamaMessage } from "@/lib/ollama-chat";
 import { queryKeys } from "@/lib/query-keys";
-import { encodeAttachments } from "@/lib/attachments";
+import { decodeAttachments, encodeAttachments } from "@/lib/attachments";
+import { extractLastTurns, generateFollowups } from "@/lib/followups";
 
 export interface RootConfigShape {
   chat: {
@@ -50,6 +52,8 @@ interface AskContextValue {
   startNewChat: () => void;
   pendingModel: string | null;
   setPendingModel: (model: string | null) => void;
+  followups: string[];
+  regenerate: () => Promise<void>;
 }
 
 const AskContext = createContext<AskContextValue | null>(null);
@@ -91,15 +95,19 @@ export function AskProvider({ children }: { children: ReactNode }) {
     setPendingModelState(m);
   }, []);
 
+  const [followups, setFollowups] = useState<string[]>([]);
+
   const selectChat = useCallback((id: number | null) => {
     setActiveChatId(id);
     setError(null);
+    setFollowups([]);
     abortRef.current?.abort();
   }, []);
 
   const startNewChat = useCallback(() => {
     setActiveChatId(null);
     setError(null);
+    setFollowups([]);
     abortRef.current?.abort();
   }, []);
 
@@ -107,11 +115,16 @@ export function AskProvider({ children }: { children: ReactNode }) {
     async (text: string, attachedIds: number[] = []) => {
       if (isStreaming || !text.trim()) return;
       setError(null);
+      setFollowups([]);
       setIsStreaming(true);
 
+      // Hoisted so the `finally` block can reference the id actually used for this send.
+      // Reading `activeChatId` again in finally could be stale if the user navigated.
+      let chatId: number | null = activeChatId;
+      let useClaude = false;
       try {
         const claude = await claudeDetect();
-        const useClaude = claude.available && claude.mcp_registered;
+        useClaude = claude.available && claude.mcp_registered;
 
         // Build attachment context FIRST — if daemon fails here, we haven't created a chat stub
         // and the user won't see an orphan "New chat" row in the sidebar.
@@ -128,7 +141,6 @@ export function AskProvider({ children }: { children: ReactNode }) {
         const effectiveModel =
           activeChat?.model ?? pendingModel ?? backendDefault;
 
-        let chatId = activeChatId;
         if (chatId == null) {
           const title = text.slice(0, 60).trim() || "New chat";
           chatId = await createChat(title, useClaude ? "claude" : "ollama", null);
@@ -228,6 +240,23 @@ export function AskProvider({ children }: { children: ReactNode }) {
       } finally {
         setIsStreaming(false);
         abortRef.current = null;
+
+        if (chatId != null) {
+          void (async () => {
+            const rows = await getChatMessages(chatId!);
+            const { lastUserText, lastAssistantText } = extractLastTurns(rows);
+            if (!lastAssistantText) return;
+            const backend = activeChat?.backend ?? (useClaude ? "claude" : "ollama");
+            const suggestions = await generateFollowups({
+              backend,
+              ollamaUrl: (appConfig as RootConfigShape | undefined)?.chat.ollama_url,
+              ollamaModel: activeChat?.model ?? (appConfig as RootConfigShape | undefined)?.chat.model,
+              lastUserText,
+              lastAssistantText,
+            });
+            setFollowups(suggestions);
+          })();
+        }
       }
     },
     [activeChatId, activeChat, messages, isStreaming, pendingModel, appConfig, qc],
@@ -241,6 +270,38 @@ export function AskProvider({ children }: { children: ReactNode }) {
     }
     setIsStreaming(false);
   }, [activeChatId, qc]);
+
+  const regenerate = useCallback(async () => {
+    if (!activeChatId) return;
+    const rows = await getChatMessages(activeChatId);
+    let lastUserRow: ChatMessageRow | null = null;
+    for (let i = rows.length - 1; i >= 0; i--) {
+      const r = rows[i];
+      if (r.role === "user" && r.block_type === "text") {
+        lastUserRow = r;
+        break;
+      }
+    }
+    if (!lastUserRow) return;
+
+    let userText = "";
+    let attachedIds: number[] = [];
+    try {
+      const v = JSON.parse(lastUserRow.content_json);
+      const raw = typeof v.text === "string" ? v.text : "";
+      const decoded = decodeAttachments(raw);
+      userText = decoded.text;
+      attachedIds = decoded.ids;
+    } catch {
+      return;
+    }
+
+    // Delete the last user row AND everything after. sendMessage will
+    // re-persist the user message as part of its normal flow.
+    await deleteMessagesAfter(activeChatId, lastUserRow.id - 1);
+    qc.invalidateQueries({ queryKey: queryKeys.chatMessages(activeChatId) });
+    await sendMessage(userText, attachedIds);
+  }, [activeChatId, qc, sendMessage]);
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
@@ -257,6 +318,8 @@ export function AskProvider({ children }: { children: ReactNode }) {
       startNewChat,
       pendingModel,
       setPendingModel,
+      followups,
+      regenerate,
     }),
     [
       activeChatId,
@@ -270,6 +333,8 @@ export function AskProvider({ children }: { children: ReactNode }) {
       startNewChat,
       pendingModel,
       setPendingModel,
+      followups,
+      regenerate,
     ],
   );
 
