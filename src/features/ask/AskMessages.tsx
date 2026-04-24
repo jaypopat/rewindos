@@ -4,7 +4,6 @@ import {
   ConversationContent,
   ConversationScrollButton,
 } from "@/components/ai-elements/conversation";
-import { Message, MessageContent } from "@/components/ai-elements/message";
 import {
   Reasoning,
   ReasoningTrigger,
@@ -20,67 +19,129 @@ import {
 import { toUIMessages } from "@/lib/chat-messages";
 import type { ChatMessageRow } from "@/lib/api";
 import type { ToolUIPart } from "ai";
+import { cn } from "@/lib/utils";
 
 interface AskMessagesProps {
   rows: ChatMessageRow[];
 }
+
+function RoleHeader({ role }: { role: "user" | "assistant" }) {
+  const isUser = role === "user";
+  return (
+    <div className="flex items-center gap-2 mb-1.5">
+      <div
+        className={cn(
+          "w-1.5 h-1.5",
+          isUser ? "bg-accent" : "bg-semantic",
+        )}
+      />
+      <span
+        className={cn(
+          "font-mono text-[10px] uppercase tracking-[0.2em]",
+          isUser ? "text-accent" : "text-semantic",
+        )}
+      >
+        {isUser ? "you" : "rewindos"}
+      </span>
+    </div>
+  );
+}
+
+const ASSISTANT_PROSE =
+  "text-sm text-text-secondary leading-relaxed " +
+  "[&>p]:my-1.5 [&>ul]:my-1.5 [&>ol]:my-1.5 [&>pre]:my-2 " +
+  "[&>h1]:text-base [&>h1]:font-semibold [&>h1]:text-text-primary [&>h1]:mt-3 [&>h1]:mb-1 " +
+  "[&>h2]:text-sm [&>h2]:font-semibold [&>h2]:text-text-primary [&>h2]:mt-2 [&>h2]:mb-1 " +
+  "[&>h3]:text-sm [&>h3]:font-medium [&>h3]:text-text-primary [&>h3]:mt-2 [&>h3]:mb-0.5 " +
+  "[&>blockquote]:border-l-2 [&>blockquote]:border-semantic/30 [&>blockquote]:pl-3 [&>blockquote]:text-text-muted [&>blockquote]:italic " +
+  "[&_code]:font-mono [&_code]:text-xs [&_code]:bg-surface-overlay [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-accent [&_code]:rounded-sm " +
+  "[&_a]:text-accent [&_a]:hover:underline " +
+  "[&_strong]:text-text-primary [&_strong]:font-semibold " +
+  "[&_ul]:list-disc [&_ul]:list-inside [&_ol]:list-decimal [&_ol]:list-inside [&_li]:text-text-secondary";
 
 export function AskMessages({ rows }: AskMessagesProps) {
   const messages = toUIMessages(rows);
 
   return (
     <Conversation className="flex-1 min-h-0">
-      <ConversationContent>
-        {messages.map((m) => (
-          <Message from={m.role} key={m.id}>
-            <MessageContent>
-              {m.parts.map((part, i) => {
-                const key = `${m.id}-${i}`;
-                const anyPart = part as Record<string, unknown>;
-                const type = anyPart.type;
+      <ConversationContent className="max-w-3xl mx-auto w-full px-6 py-5 space-y-5">
+        {messages.map((m) => {
+          const isUser = m.role === "user";
+          return (
+            <div key={m.id} className="animate-fade-in">
+              <RoleHeader role={m.role as "user" | "assistant"} />
+              <div
+                className={cn(
+                  "pl-3.5 border-l space-y-2",
+                  isUser ? "border-accent/30" : "border-semantic/20",
+                )}
+              >
+                {m.parts.map((part, i) => {
+                  const key = `${m.id}-${i}`;
+                  const anyPart = part as Record<string, unknown>;
+                  const type = anyPart.type;
 
-                if (type === "text") {
-                  return (
-                    <Streamdown key={key}>
-                      {(anyPart.text as string) ?? ""}
-                    </Streamdown>
-                  );
-                }
+                  if (type === "text") {
+                    const text = (anyPart.text as string) ?? "";
+                    if (isUser) {
+                      return (
+                        <div
+                          key={key}
+                          className="text-sm text-text-primary whitespace-pre-wrap"
+                        >
+                          {text}
+                        </div>
+                      );
+                    }
+                    return (
+                      <div key={key} className={ASSISTANT_PROSE}>
+                        <Streamdown>{text}</Streamdown>
+                      </div>
+                    );
+                  }
 
-                if (type === "reasoning") {
-                  return (
-                    <Reasoning key={key}>
-                      <ReasoningTrigger />
-                      <ReasoningContent>
-                        {(anyPart.text as string) ?? ""}
-                      </ReasoningContent>
-                    </Reasoning>
-                  );
-                }
+                  if (type === "reasoning") {
+                    return (
+                      <Reasoning
+                        key={key}
+                        className="border border-border/30 bg-surface-raised/10 rounded-none"
+                      >
+                        <ReasoningTrigger />
+                        <ReasoningContent>
+                          {(anyPart.text as string) ?? ""}
+                        </ReasoningContent>
+                      </Reasoning>
+                    );
+                  }
 
-                if (typeof type === "string" && type.startsWith("tool-")) {
-                  const toolType = type as ToolUIPart["type"];
-                  const state = anyPart.state as ToolUIPart["state"];
-                  const output = anyPart.output;
-                  const errorText = anyPart.errorText as string | undefined;
-                  return (
-                    <Tool key={key} defaultOpen={false}>
-                      <ToolHeader type={toolType} state={state} />
-                      <ToolContent>
-                        <ToolInput input={anyPart.input} />
-                        {output !== undefined && (
-                          <ToolOutput output={output} errorText={errorText} />
-                        )}
-                      </ToolContent>
-                    </Tool>
-                  );
-                }
+                  if (typeof type === "string" && type.startsWith("tool-")) {
+                    const toolType = type as ToolUIPart["type"];
+                    const state = anyPart.state as ToolUIPart["state"];
+                    const output = anyPart.output;
+                    const errorText = anyPart.errorText as string | undefined;
+                    return (
+                      <Tool
+                        key={key}
+                        defaultOpen={false}
+                        className="border border-border/40 bg-surface-raised/20 rounded-none"
+                      >
+                        <ToolHeader type={toolType} state={state} />
+                        <ToolContent>
+                          <ToolInput input={anyPart.input} />
+                          {output !== undefined && (
+                            <ToolOutput output={output} errorText={errorText} />
+                          )}
+                        </ToolContent>
+                      </Tool>
+                    );
+                  }
 
-                return null;
-              })}
-            </MessageContent>
-          </Message>
-        ))}
+                  return null;
+                })}
+              </div>
+            </div>
+          );
+        })}
       </ConversationContent>
       <ConversationScrollButton />
     </Conversation>

@@ -7,6 +7,7 @@ import { claudeDetect, getConfig } from "@/lib/api";
 import { ollamaHealth } from "@/lib/ollama-chat";
 import { useAskChat } from "@/context/AskContext";
 import { AskMessages } from "./AskMessages";
+import { AskEmptyState } from "./AskEmptyState";
 import { ChatSidebar } from "./ChatSidebar";
 import {
   PromptInput,
@@ -14,7 +15,6 @@ import {
   PromptInputFooter,
   PromptInputSubmit,
 } from "@/components/ai-elements/prompt-input";
-import { Suggestion, Suggestions } from "@/components/ai-elements/suggestion";
 
 interface AskViewProps {
   onSelectScreenshot: (id: number) => void;
@@ -70,85 +70,79 @@ export function AskView({ onSelectScreenshot: _onSelectScreenshot }: AskViewProp
     [submit],
   );
 
+  const backendLabel = usingClaude ? "claude" : "local";
+  const backendTitle = usingClaude
+    ? "Claude Code with MCP — full screen history tools"
+    : ollamaOnline
+      ? "Local Ollama — text-only context"
+      : "No chat backend available";
+
   return (
     <div className="flex-1 flex min-h-0">
       <ChatSidebar />
+
       <div className="flex-1 flex flex-col min-h-0">
-        <div className="flex items-center justify-between px-5 py-2 border-b border-border/50 shrink-0">
-          <div className="flex items-center gap-2">
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-2.5 border-b border-border/50 shrink-0">
+          <div className="flex items-center gap-3">
             <div
               className={cn(
-                "w-1.5 h-1.5 rounded-full transition-colors",
-                chatReady ? "bg-signal-success" : "bg-signal-error",
+                "w-1.5 h-1.5 transition-colors",
+                chatReady ? "bg-signal-success animate-pulse-glow" : "bg-signal-error",
               )}
-              title={
-                usingClaude
-                  ? "Claude Code connected"
-                  : ollamaOnline
-                    ? "Ollama connected"
-                    : "No chat backend available"
-              }
             />
-            <span className="font-mono text-xs text-text-muted uppercase tracking-wider">
+            <span className="font-mono text-xs text-text-primary uppercase tracking-[0.2em]">
               ask
             </span>
+            <span className="text-border">·</span>
             <span
               className={cn(
                 "font-mono text-[10px] uppercase tracking-wider",
                 usingClaude ? "text-semantic" : "text-text-muted",
               )}
+              title={backendTitle}
             >
-              · {usingClaude ? "claude" : "local"}
+              {backendLabel}
             </span>
           </div>
         </div>
 
+        {/* Messages or empty state */}
         {messages.length === 0 ? (
-          <div className="flex-1 flex items-center justify-center min-h-0 px-5">
-            <Suggestions>
-              <Suggestion
-                suggestion="what did I do in the last hour"
-                onClick={(s) => submit(s)}
-              />
-              <Suggestion
-                suggestion="last time I was in firefox"
-                onClick={(s) => submit(s)}
-              />
-              <Suggestion
-                suggestion="which apps did I use most today"
-                onClick={(s) => submit(s)}
-              />
-            </Suggestions>
-          </div>
+          <AskEmptyState onSuggest={submit} />
         ) : (
           <AskMessages rows={messages} />
         )}
 
+        {/* Streaming indicator */}
         {isStreaming && (
-          <div className="px-5 py-1 shrink-0 flex items-center gap-2 text-text-muted">
+          <div className="px-6 py-1.5 shrink-0 flex items-center gap-2 text-semantic border-t border-border/30">
             <Loader2 className="size-3 animate-spin" />
-            <span className="font-mono text-[10px] uppercase tracking-wider">
+            <span className="font-mono text-[10px] uppercase tracking-[0.2em]">
               thinking
             </span>
           </div>
         )}
 
+        {/* Error */}
         {error && (
-          <div className="mx-5 mb-2 px-3 py-2 border border-signal-error/30 bg-signal-error/5 shrink-0">
-            <div className="flex items-center gap-2">
-              <span className="font-mono text-[10px] text-signal-error uppercase tracking-wider">
+          <div className="mx-6 mb-2 px-3 py-2 border border-signal-error/30 bg-signal-error/5 shrink-0">
+            <div className="flex items-start gap-2">
+              <span className="font-mono text-[10px] text-signal-error uppercase tracking-wider mt-0.5 shrink-0">
                 err
               </span>
-              <span className="text-xs text-signal-error/80 truncate">
-                {error}
-              </span>
+              <span className="text-xs text-signal-error/90">{error}</span>
             </div>
           </div>
         )}
 
-        <div className="border-t border-border/50 px-5 py-3 shrink-0">
-          <div className="max-w-2xl mx-auto">
-            <PromptInput onSubmit={onPromptSubmit}>
+        {/* Prompt */}
+        <div className="border-t border-border/50 px-6 py-4 shrink-0 bg-surface-raised/20">
+          <div className="max-w-3xl mx-auto">
+            <PromptInput
+              onSubmit={onPromptSubmit}
+              className="border border-border/50 bg-surface-raised/40 focus-within:border-semantic/40 transition-colors rounded-none"
+            >
               <PromptInputTextarea
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
@@ -156,13 +150,20 @@ export function AskView({ onSelectScreenshot: _onSelectScreenshot }: AskViewProp
                   !chatReady
                     ? "connect claude or start ollama to chat"
                     : isStreaming
-                      ? "thinking..."
-                      : "ask about your screen history"
+                      ? "claude is thinking…"
+                      : usingClaude
+                        ? "ask about your screen history — uses MCP tools"
+                        : "ask about your screen history"
                 }
                 disabled={isStreaming || !chatReady}
+                className="font-sans text-sm"
               />
-              <PromptInputFooter>
-                <div />
+              <PromptInputFooter className="px-3 pb-2 pt-1 rounded-none">
+                <div className="flex items-center gap-3 text-text-muted">
+                  <span className="font-mono text-[10px] uppercase tracking-wider">
+                    {usingClaude ? "⇧⏎ newline · ⏎ send" : "⏎ send"}
+                  </span>
+                </div>
                 <PromptInputSubmit
                   disabled={!chatReady || (!isStreaming && !input.trim())}
                   status={isStreaming ? "streaming" : "ready"}

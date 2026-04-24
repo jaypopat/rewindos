@@ -10,7 +10,7 @@ pub struct ClaudeCodeStatus {
 }
 
 pub fn detect() -> ClaudeCodeStatus {
-    let path: Option<PathBuf> = which::which("claude").ok();
+    let path = find_claude_binary();
     let available = path.is_some();
     let mcp_registered = is_mcp_registered();
     ClaudeCodeStatus {
@@ -18,6 +18,40 @@ pub fn detect() -> ClaudeCodeStatus {
         path: path.map(|p| p.to_string_lossy().into_owned()),
         mcp_registered,
     }
+}
+
+/// Resolve the `claude` CLI. Tries `$PATH` first (covers terminal launches),
+/// then falls back to well-known install locations — desktop apps often
+/// inherit a stripped PATH that doesn't include the user's `~/.local/bin`
+/// or node global bins, even when `claude` is clearly installed.
+fn find_claude_binary() -> Option<PathBuf> {
+    if let Ok(p) = which::which("claude") {
+        return Some(p);
+    }
+    let home = dirs::home_dir()?;
+    let candidates = [
+        home.join(".local/bin/claude"),
+        home.join(".npm-global/bin/claude"),
+        home.join(".bun/bin/claude"),
+        home.join(".yarn/bin/claude"),
+        home.join(".volta/bin/claude"),
+    ];
+    for c in &candidates {
+        if c.is_file() {
+            return Some(c.clone());
+        }
+    }
+    // Try common node-version-manager paths (nvm, fnm) without glob crate
+    let nvm_root = home.join(".nvm/versions/node");
+    if let Ok(entries) = std::fs::read_dir(&nvm_root) {
+        for e in entries.flatten() {
+            let candidate = e.path().join("bin/claude");
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    None
 }
 
 fn is_mcp_registered() -> bool {
@@ -85,7 +119,8 @@ pub async fn ask_claude_stream_spawn(
     session_id: Option<&str>,
     resume: bool,
 ) -> Result<tokio::process::Child, String> {
-    let mut cmd = Command::new("claude");
+    let binary = find_claude_binary().ok_or_else(|| "claude CLI not found".to_string())?;
+    let mut cmd = Command::new(&binary);
     cmd.arg("-p")
         .arg(prompt)
         .arg("--output-format")
