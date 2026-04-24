@@ -44,6 +44,16 @@ pub fn rename_chat(
 }
 
 #[tauri::command]
+pub fn set_model(
+    state: State<'_, AppState>,
+    chat_id: i64,
+    model: String,
+) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+    chat_store::set_chat_model(&db, chat_id, &model).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub fn delete_chat(state: State<'_, AppState>, chat_id: i64) -> Result<(), String> {
     let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
     chat_store::delete_chat(&db, chat_id).map_err(|e| e.to_string())

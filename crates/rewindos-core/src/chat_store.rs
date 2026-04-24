@@ -21,7 +21,7 @@ pub fn create_chat(
 pub fn list_chats(db: &Database, limit: i64) -> Result<Vec<Chat>> {
     let conn = db.conn();
     let mut stmt = conn.prepare(
-        "SELECT id, title, claude_session_id, backend, created_at, last_activity_at
+        "SELECT id, title, claude_session_id, backend, created_at, last_activity_at, model
          FROM chats ORDER BY last_activity_at DESC LIMIT ?1",
     )?;
     let rows = stmt.query_map([limit], |r| {
@@ -33,6 +33,7 @@ pub fn list_chats(db: &Database, limit: i64) -> Result<Vec<Chat>> {
             backend: ChatBackend::parse_sql(&backend_str).unwrap_or(ChatBackend::Claude),
             created_at: r.get(4)?,
             last_activity_at: r.get(5)?,
+            model: r.get(6)?,
         })
     })?;
     rows.collect::<rusqlite::Result<Vec<_>>>().map_err(Into::into)
@@ -41,7 +42,7 @@ pub fn list_chats(db: &Database, limit: i64) -> Result<Vec<Chat>> {
 pub fn get_chat(db: &Database, chat_id: i64) -> Result<Option<Chat>> {
     let conn = db.conn();
     let mut stmt = conn.prepare(
-        "SELECT id, title, claude_session_id, backend, created_at, last_activity_at
+        "SELECT id, title, claude_session_id, backend, created_at, last_activity_at, model
          FROM chats WHERE id = ?1",
     )?;
     let mut rows = stmt.query([chat_id])?;
@@ -54,6 +55,7 @@ pub fn get_chat(db: &Database, chat_id: i64) -> Result<Option<Chat>> {
             backend: ChatBackend::parse_sql(&backend_str).unwrap_or(ChatBackend::Claude),
             created_at: r.get(4)?,
             last_activity_at: r.get(5)?,
+            model: r.get(6)?,
         }))
     } else {
         Ok(None)
@@ -135,6 +137,16 @@ pub fn set_claude_session_id(db: &Database, chat_id: i64, session_id: &str) -> R
     db.conn().execute(
         "UPDATE chats SET claude_session_id = ?1 WHERE id = ?2 AND claude_session_id IS NULL",
         rusqlite::params![session_id, chat_id],
+    )?;
+    Ok(())
+}
+
+/// Lock a chat's model. Only sets if currently NULL — a chat cannot
+/// change models mid-conversation (matches the UI's locked badge).
+pub fn set_chat_model(db: &Database, chat_id: i64, model: &str) -> Result<()> {
+    db.conn().execute(
+        "UPDATE chats SET model = ?1 WHERE id = ?2 AND model IS NULL",
+        rusqlite::params![model, chat_id],
     )?;
     Ok(())
 }
@@ -276,6 +288,23 @@ mod tests {
         assert_eq!(
             get_chat(&db, id).unwrap().unwrap().claude_session_id.as_deref(),
             Some("sess_abc"),
+        );
+    }
+
+    #[test]
+    fn set_chat_model_only_sets_when_null() {
+        let db = Database::open_in_memory().unwrap();
+        let id = create_chat(&db, "t", ChatBackend::Claude, None).unwrap();
+        assert_eq!(get_chat(&db, id).unwrap().unwrap().model, None);
+
+        set_chat_model(&db, id, "sonnet").unwrap();
+        assert_eq!(get_chat(&db, id).unwrap().unwrap().model.as_deref(), Some("sonnet"));
+
+        set_chat_model(&db, id, "opus").unwrap();
+        assert_eq!(
+            get_chat(&db, id).unwrap().unwrap().model.as_deref(),
+            Some("sonnet"),
+            "second call must not overwrite",
         );
     }
 
