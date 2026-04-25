@@ -8,7 +8,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { search, type SearchFilters } from "@/lib/api";
+import { browseScreenshots, search, type SearchFilters } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
 import { convertFileSrc } from "@tauri-apps/api/core";
@@ -35,13 +35,23 @@ export function AttachmentPicker({ open, onClose, onAttach }: AttachmentPickerPr
     };
   }, []);
 
+  const trimmedQuery = query.trim();
+  const hasQuery = trimmedQuery.length > 0;
+
   const { data: searchResponse } = useQuery({
-    queryKey: queryKeys.search(query, filters),
-    queryFn: () => search(query, filters),
-    enabled: open,
+    queryKey: queryKeys.search(trimmedQuery, filters),
+    queryFn: () => search(trimmedQuery, filters),
+    enabled: open && hasQuery,
   });
 
-  const results = searchResponse?.results ?? [];
+  const { data: recentItems } = useQuery({
+    queryKey: ["attachment-picker-recent", filters.start_time, filters.end_time] as const,
+    queryFn: () =>
+      browseScreenshots(filters.start_time, filters.end_time, undefined, filters.limit),
+    enabled: open && !hasQuery,
+  });
+
+  const results = hasQuery ? (searchResponse?.results ?? []) : (recentItems ?? []);
 
   const toggle = (id: number) => {
     setSelected((prev) => {

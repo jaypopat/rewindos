@@ -84,11 +84,13 @@ interface SlashMenuDropdownProps {
 
 function SlashMenuDropdown({ items, command, keyDownRef }: SlashMenuDropdownProps) {
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [prevItems, setPrevItems] = useState(items);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
+  if (items !== prevItems) {
+    setPrevItems(items);
     setSelectedIndex(0);
-  }, [items]);
+  }
 
   // Scroll selected item into view
   useEffect(() => {
