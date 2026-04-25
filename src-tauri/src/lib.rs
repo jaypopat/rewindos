@@ -308,6 +308,67 @@ struct AppTimeEntry {
     session_count: usize,
 }
 
+async fn generate_summary_ollama(prompt: &str, url: &str, model: &str) -> Option<String> {
+    let client = match reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            warn!("Failed to build HTTP client: {e}");
+            return None;
+        }
+    };
+
+    let resp = match client
+        .post(url)
+        .json(&serde_json::json!({
+            "model": model,
+            "prompt": prompt,
+            "stream": false,
+            "options": { "temperature": 0.7, "num_predict": 512 }
+        }))
+        .send()
+        .await
+    {
+        Ok(r) if r.status().is_success() => r,
+        Ok(r) => {
+            warn!("Ollama returned {}: {}", r.status(), r.text().await.unwrap_or_default());
+            return None;
+        }
+        Err(e) => {
+            warn!("Ollama request failed: {e}");
+            return None;
+        }
+    };
+
+    let json: serde_json::Value = match resp.json().await {
+        Ok(j) => j,
+        Err(e) => {
+            warn!("Failed to parse Ollama response: {e}");
+            return None;
+        }
+    };
+
+    let raw = json["response"].as_str().unwrap_or("").trim();
+    if raw.is_empty() {
+        return None;
+    }
+    // Strip <think>...</think> blocks emitted by reasoning models
+    let cleaned = if let Some(after) = raw.strip_prefix("<think>") {
+        after
+            .find("</think>")
+            .map(|end| after[end + 8..].trim())
+            .unwrap_or(raw)
+            .to_string()
+    } else {
+        let re = regex_lite::Regex::new(r"(?s)<think>.*?</think>").unwrap();
+        re.replace_all(raw, "").trim().to_string()
+    };
+    Some(cleaned)
+}
+
 #[tauri::command]
 async fn get_daily_summary(
     state: State<'_, AppState>,
@@ -518,7 +579,7 @@ async fn get_daily_summary(
         context_lines.join("\n"),
     );
 
-    // 4. Call Ollama — graceful failure
+    // 4. Generate summary — prefer Claude when available, fall back to Ollama
     let (ollama_url, ollama_model) = {
         let cfg = state
             .config
@@ -530,77 +591,36 @@ async fn get_daily_summary(
         )
     };
 
-    let summary_text: Option<String> = match reqwest::Client::builder()
-        .connect_timeout(std::time::Duration::from_secs(10))
-        .timeout(std::time::Duration::from_secs(120))
-        .build()
-    {
-        Ok(client) => {
-            match client
-                .post(&ollama_url)
-                .json(&serde_json::json!({
-                    "model": ollama_model,
-                    "prompt": prompt,
-                    "stream": false,
-                    "options": {
-                        "temperature": 0.7,
-                        "num_predict": 512,
-                    }
-                }))
-                .send()
-                .await
-            {
-                Ok(resp) if resp.status().is_success() => {
-                    match resp.json::<serde_json::Value>().await {
-                        Ok(json) => {
-                            let raw = json["response"].as_str().unwrap_or("").trim();
-                            if raw.is_empty() {
-                                None
-                            } else {
-                                // Strip <think>...</think> blocks
-                                let cleaned = if let Some(after) = raw.strip_prefix("<think>") {
-                                    after
-                                        .find("</think>")
-                                        .map(|end| after[end + 8..].trim())
-                                        .unwrap_or(raw)
-                                        .to_string()
-                                } else {
-                                    let re =
-                                        regex_lite::Regex::new(r"(?s)<think>.*?</think>").unwrap();
-                                    re.replace_all(raw, "").trim().to_string()
-                                };
-                                Some(cleaned)
-                            }
-                        }
-                        Err(e) => {
-                            warn!("Failed to parse Ollama response: {e}");
-                            None
-                        }
-                    }
-                }
-                Ok(resp) => {
-                    warn!(
-                        "Ollama returned {}: {}",
-                        resp.status(),
-                        resp.text().await.unwrap_or_default()
-                    );
-                    None
-                }
-                Err(e) => {
-                    warn!("Ollama request failed: {e}");
-                    None
-                }
+    let claude_status = claude_code::detect();
+    let try_claude = claude_status.available && claude_status.mcp_registered;
+
+    let (summary_text, model_used): (Option<String>, String) = if try_claude {
+        match claude_code::ask_claude_oneshot(
+            &prompt,
+            None,
+            std::time::Duration::from_secs(180),
+        )
+        .await
+        {
+            Ok(text) => (Some(text), "claude-code".to_string()),
+            Err(e) => {
+                warn!("claude one-shot failed, falling back to ollama: {e}");
+                (
+                    generate_summary_ollama(&prompt, &ollama_url, &ollama_model).await,
+                    ollama_model.clone(),
+                )
             }
         }
-        Err(e) => {
-            warn!("Failed to build HTTP client: {e}");
-            None
-        }
+    } else {
+        (
+            generate_summary_ollama(&prompt, &ollama_url, &ollama_model).await,
+            ollama_model.clone(),
+        )
     };
 
     let generated_at = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
 
-    // 5. Only cache if Ollama produced a summary — don't persist failures
+    // 5. Only cache if a backend produced a summary — don't persist failures
     if summary_text.is_some() {
         let app_breakdown_json = serde_json::to_string(&app_breakdown).unwrap_or_default();
         let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
@@ -610,7 +630,7 @@ async fn get_daily_summary(
             app_breakdown: app_breakdown_json,
             total_sessions: total_sessions as i64,
             time_range: format!("{start_time}-{end_time}"),
-            model_name: Some(ollama_model),
+            model_name: Some(model_used),
             generated_at: generated_at.clone(),
             screenshot_count,
         });

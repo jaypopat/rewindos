@@ -158,3 +158,50 @@ pub async fn ask_claude_stream_spawn(
         .spawn()
         .map_err(|e| format!("spawn claude: {e}"))
 }
+
+/// One-shot Claude invocation for pure text generation (summaries, captions).
+/// No MCP tools, no streaming, no resumable session — just prompt in, text out.
+pub async fn ask_claude_oneshot(
+    prompt: &str,
+    model: Option<&str>,
+    timeout: std::time::Duration,
+) -> Result<String, String> {
+    let binary = find_claude_binary().ok_or_else(|| "claude CLI not found".to_string())?;
+    let mut cmd = Command::new(&binary);
+    cmd.arg("-p")
+        .arg(prompt)
+        .arg("--output-format")
+        .arg("text")
+        // Summaries need no tools — disable MCP to keep it a single LLM call.
+        .arg("--disallowedTools")
+        .arg("*");
+    if let Some(m) = model {
+        cmd.arg("--model").arg(m);
+    }
+
+    let child = cmd
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|e| format!("spawn claude: {e}"))?;
+
+    let output = tokio::time::timeout(timeout, child.wait_with_output())
+        .await
+        .map_err(|_| format!("claude timed out after {}s", timeout.as_secs()))?
+        .map_err(|e| format!("claude wait: {e}"))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "claude exited {}: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+
+    let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if text.is_empty() {
+        return Err("claude returned empty output".to_string());
+    }
+    Ok(text)
+}
