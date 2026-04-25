@@ -29,7 +29,6 @@ import { toUIMessages } from "@/lib/chat-messages";
 import { getScreenshotsByIds, type ChatMessageRow } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import { decodeAttachments, stripMarker } from "@/lib/attachments";
-import type { ToolUIPart } from "ai";
 import { cn } from "@/lib/utils";
 import { parseTextWithRefs, collectRefs } from "@/lib/citations";
 import { CitationChip } from "./CitationChip";
@@ -90,7 +89,7 @@ export function AskMessages({ rows, onSelectScreenshot, onSelectSuggestion }: As
           const isLast = idx === messages.length - 1;
           return (
             <div key={m.id} className="animate-fade-in">
-              <RoleHeader role={m.role as "user" | "assistant"} />
+              <RoleHeader role={m.role} />
               <div
                 className={cn(
                   "pl-3.5 border-l space-y-2",
@@ -99,16 +98,13 @@ export function AskMessages({ rows, onSelectScreenshot, onSelectSuggestion }: As
               >
                 {m.parts.map((part, i) => {
                   const key = `${m.id}-${i}`;
-                  const anyPart = part as Record<string, unknown>;
-                  const type = anyPart.type;
 
-                  if (type === "text") {
-                    const text = (anyPart.text as string) ?? "";
+                  if (part.type === "text") {
                     if (isUser) {
                       return (
                         <UserTextWithAttachments
                           key={key}
-                          text={text}
+                          text={part.text}
                           onSelectScreenshot={onSelectScreenshot}
                         />
                       );
@@ -116,49 +112,40 @@ export function AskMessages({ rows, onSelectScreenshot, onSelectSuggestion }: As
                     return (
                       <AssistantTextWithCitations
                         key={key}
-                        text={text}
+                        text={part.text}
                         onSelectScreenshot={onSelectScreenshot}
                       />
                     );
                   }
 
-                  if (type === "reasoning") {
+                  if (part.type === "reasoning") {
                     return (
                       <Reasoning
                         key={key}
                         className="border border-border/30 bg-surface-raised/10 rounded-none"
                       >
                         <ReasoningTrigger />
-                        <ReasoningContent>
-                          {(anyPart.text as string) ?? ""}
-                        </ReasoningContent>
+                        <ReasoningContent>{part.text}</ReasoningContent>
                       </Reasoning>
                     );
                   }
 
-                  if (typeof type === "string" && type.startsWith("tool-")) {
-                    const toolType = type as ToolUIPart["type"];
-                    const state = anyPart.state as ToolUIPart["state"];
-                    const output = anyPart.output;
-                    const errorText = anyPart.errorText as string | undefined;
-                    return (
-                      <Tool
-                        key={key}
-                        defaultOpen={false}
-                        className="border border-border/40 bg-surface-raised/20 rounded-none"
-                      >
-                        <ToolHeader type={toolType} state={state} />
-                        <ToolContent>
-                          <ToolInput input={anyPart.input} />
-                          {output !== undefined && (
-                            <ToolOutput output={output} errorText={errorText} />
-                          )}
-                        </ToolContent>
-                      </Tool>
-                    );
-                  }
-
-                  return null;
+                  // Tool part — discriminated as `tool-${string}`
+                  return (
+                    <Tool
+                      key={key}
+                      defaultOpen={false}
+                      className="border border-border/40 bg-surface-raised/20 rounded-none"
+                    >
+                      <ToolHeader type={part.type} state={part.state} />
+                      <ToolContent>
+                        <ToolInput input={part.input} />
+                        {part.output !== undefined && (
+                          <ToolOutput output={part.output} errorText={part.errorText} />
+                        )}
+                      </ToolContent>
+                    </Tool>
+                  );
                 })}
               </div>
               {!isUser && isLast && (
@@ -166,12 +153,7 @@ export function AskMessages({ rows, onSelectScreenshot, onSelectSuggestion }: As
                   <MessageActions
                     onCopy={() => {
                       const allText = m.parts
-                        .map((p) => {
-                          const a = p as Record<string, unknown>;
-                          if (a.type === "text") return a.text as string;
-                          return "";
-                        })
-                        .filter(Boolean)
+                        .flatMap((p) => (p.type === "text" && p.text ? [p.text] : []))
                         .join("\n\n");
                       navigator.clipboard.writeText(stripMarker(allText));
                     }}

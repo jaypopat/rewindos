@@ -74,10 +74,12 @@ export function RewindView({ onSelectScreenshot, initialTimeRange, onClearInitia
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   // -- Reset current index when data changes --------------------------------
+  // React docs pattern: store previous value in state (not ref) so concurrent
+  // renders that get discarded don't leave the tracker half-updated.
   const dataResetKey = `${startTime}-${endTime}-${screenshots.length}`;
-  const prevDataResetKeyRef = useRef(dataResetKey);
-  if (prevDataResetKeyRef.current !== dataResetKey) {
-    prevDataResetKeyRef.current = dataResetKey;
+  const [prevDataResetKey, setPrevDataResetKey] = useState(dataResetKey);
+  if (prevDataResetKey !== dataResetKey) {
+    setPrevDataResetKey(dataResetKey);
     setCurrentIndex(screenshots.length > 0 ? screenshots.length - 1 : 0);
     setIsPlaying(false);
     setRangeSelection(null);

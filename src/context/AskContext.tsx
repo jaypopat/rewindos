@@ -31,15 +31,6 @@ import { queryKeys } from "@/lib/query-keys";
 import { decodeAttachments, encodeAttachments } from "@/lib/attachments";
 import { extractLastTurns, generateFollowups } from "@/lib/followups";
 
-export interface RootConfigShape {
-  chat: {
-    ollama_url: string;
-    model: string;
-    temperature: number;
-    max_history_messages: number;
-  };
-}
-
 interface AskContextValue {
   activeChatId: number | null;
   activeChat: Chat | null;
@@ -144,7 +135,7 @@ export function AskProvider({ children }: { children: ReactNode }) {
         // at call-time would be stale (useCallback closure captures the old value).
         const backendDefault = useClaude
           ? "sonnet"
-          : (appConfig as RootConfigShape | undefined)?.chat.model ?? "";
+          : appConfig?.chat.model ?? "";
         const effectiveModel =
           activeChat?.model ?? pendingModel ?? backendDefault;
 
@@ -175,7 +166,7 @@ export function AskProvider({ children }: { children: ReactNode }) {
           }
         } else {
           const ctx = await buildChatContext(text);
-          const config = (await getConfig()) as unknown as RootConfigShape;
+          const config = await getConfig();
 
           await persistUserMessage(chatId, storedText);
           qc.invalidateQueries({ queryKey: queryKeys.chatMessages(chatId) });
@@ -257,8 +248,8 @@ export function AskProvider({ children }: { children: ReactNode }) {
             const backend = activeChat?.backend ?? (useClaude ? "claude" : "ollama");
             const suggestions = await generateFollowups({
               backend,
-              ollamaUrl: (appConfig as RootConfigShape | undefined)?.chat.ollama_url,
-              ollamaModel: activeChat?.model ?? (appConfig as RootConfigShape | undefined)?.chat.model,
+              ollamaUrl: appConfig?.chat.ollama_url,
+              ollamaModel: activeChat?.model ?? appConfig?.chat.model,
               lastUserText,
               lastAssistantText,
             });

@@ -1,5 +1,7 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useHotkey } from "@tanstack/react-hotkeys";
+import type { JSONContent } from "@tiptap/core";
 import {
   getJournalEntry,
   upsertJournalEntry,
@@ -35,14 +37,13 @@ import { buildCarryForwardContent } from "../utils";
 
 function extractTextFromJson(content: string): string {
   try {
-    const doc = JSON.parse(content);
-    return walkText(doc);
+    return walkText(JSON.parse(content) as JSONContent);
   } catch {
     return content;
   }
 }
 
-function walkText(node: any): string {
+function walkText(node: JSONContent): string {
   if (node.type === "text") return node.text ?? "";
   if (Array.isArray(node.content)) {
     return node.content.map(walkText).join(" ");
@@ -105,7 +106,7 @@ export function useJournalEntry() {
   });
 
   const { data: taskBreakdown = [] } = useQuery({
-    queryKey: ["task-breakdown", dayStart, dayEnd],
+    queryKey: queryKeys.taskBreakdown(dayStart, dayEnd, 10),
     queryFn: () => getTaskBreakdown(dayStart, dayEnd, 10),
     staleTime: 60_000,
   });
@@ -124,11 +125,7 @@ export function useJournalEntry() {
   const { data: ollamaAvailable } = useQuery({
     queryKey: queryKeys.ollamaHealth(),
     queryFn: () =>
-      journalConfig
-        ? ollamaHealth(
-            (journalConfig as unknown as { chat: { ollama_url: string } }).chat.ollama_url,
-          )
-        : false,
+      journalConfig ? ollamaHealth(journalConfig.chat.ollama_url) : false,
     enabled: !!journalConfig,
     staleTime: 120_000,
   });
@@ -156,8 +153,7 @@ export function useJournalEntry() {
       setContent(carried);
       setContentKey((k) => k + 1);
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entryLoading, dateKey]);
+  }, [entryLoading, dateKey, entry, selectedDate]);
 
   // ── Prefetch adjacent days ──
 
@@ -190,13 +186,16 @@ export function useJournalEntry() {
     },
   });
 
+  // TanStack Query v5 `mutate` is stable across renders, so depending on it
+  // is safe (no render loop). entry?.content as the dep — not entry — avoids
+  // re-firing on object-identity changes when content is unchanged.
+  const saveMutate = saveMutation.mutate;
   useEffect(() => {
     const stored = entry?.content ?? "";
     if (debouncedContent !== stored && !entryLoading) {
-      saveMutation.mutate({ content: debouncedContent });
+      saveMutate({ content: debouncedContent });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedContent]);
+  }, [debouncedContent, entry?.content, entryLoading, saveMutate]);
 
   // ── Screenshot attach / detach ──
 
@@ -227,6 +226,14 @@ export function useJournalEntry() {
 
   const goToDate = useCallback(
     (d: Date) => {
+      // Flush any pending edit to the *current* date before navigating away,
+      // otherwise content typed inside the debounce window gets discarded
+      // when we reset content to the new date's cached value below.
+      const currentStored = entry?.content ?? "";
+      if (content !== currentStored && !entryLoading) {
+        saveMutate({ content });
+      }
+
       // Read cached entry content so the new editor mounts with the correct
       // content immediately, avoiding a stale-content → setContent cycle that
       // can corrupt task lists through markdown re-serialization.
@@ -239,7 +246,7 @@ export function useJournalEntry() {
       setShowScreenshotPicker(false);
       setShowSearch(false);
     },
-    [queryClient],
+    [queryClient, content, entry?.content, entryLoading, saveMutate],
   );
 
   const goToPrev = useCallback(() => {
@@ -256,20 +263,14 @@ export function useJournalEntry() {
 
   const isToday = isSameDay(selectedDate, new Date());
 
-  // Alt+Left/Right keyboard nav
-  useEffect(() => {
-    const handler = (e: globalThis.KeyboardEvent) => {
-      if (e.altKey && e.key === "ArrowLeft") {
-        e.preventDefault();
-        goToDate(subDays(selectedDate, 1));
-      } else if (e.altKey && e.key === "ArrowRight") {
-        e.preventDefault();
-        goToDate(addDays(selectedDate, 1));
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [selectedDate, goToDate]);
+  // Alt+Left/Right date nav — must fire inside the Tiptap editor (contentEditable),
+  // so override the lib's default of ignoring inputs for Alt-modified shortcuts.
+  useHotkey("Alt+ArrowLeft", () => goToDate(subDays(selectedDate, 1)), {
+    ignoreInputs: false,
+  });
+  useHotkey("Alt+ArrowRight", () => goToDate(addDays(selectedDate, 1)), {
+    ignoreInputs: false,
+  });
 
   // ── Writing stats ──
 

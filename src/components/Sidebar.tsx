@@ -14,45 +14,53 @@ interface SidebarProps {
   onViewChange: (view: View) => void;
 }
 
-const NAV_ITEMS: { view: View; label: string; icon: React.ReactNode }[] = [
+const NAV_ITEMS: { view: View; label: string; shortcut: string; icon: React.ReactNode }[] = [
   {
     view: "dashboard",
     label: "Today",
+    shortcut: "g d",
     icon: <LayoutGrid className="size-5" strokeWidth={1.8} />,
   },
   {
     view: "history",
     label: "History",
+    shortcut: "g h",
     icon: <CalendarDays className="size-5" strokeWidth={1.8} />,
   },
   {
     view: "rewind",
     label: "Rewind",
+    shortcut: "g r",
     icon: <Rewind className="size-5" strokeWidth={1.8} />,
   },
   {
     view: "search",
     label: "Search",
+    shortcut: "g s",
     icon: <Search className="size-5" strokeWidth={1.8} />,
   },
   {
     view: "saved",
     label: "Saved",
+    shortcut: "g v",
     icon: <Bookmark className="size-5" strokeWidth={1.8} />,
   },
   {
     view: "journal",
     label: "Journal",
+    shortcut: "g j",
     icon: <BookOpen className="size-5" strokeWidth={1.8} />,
   },
   {
     view: "ask",
     label: "Ask",
+    shortcut: "g a",
     icon: <Sparkles className="size-5" strokeWidth={1.8} />,
   },
   {
     view: "focus",
     label: "Focus",
+    shortcut: "g f",
     icon: <Clock className="size-5" strokeWidth={1.8} />,
   },
 ];
@@ -70,7 +78,7 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps) {
 
         {/* Nav items */}
         <nav className="flex flex-col gap-1">
-          {NAV_ITEMS.map(({ view, label, icon }) => (
+          {NAV_ITEMS.map(({ view, label, shortcut, icon }) => (
             <Tooltip key={view}>
               <TooltipTrigger asChild>
                 <button
@@ -93,7 +101,10 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps) {
                   {icon}
                 </button>
               </TooltipTrigger>
-              <TooltipContent side="right">{label}</TooltipContent>
+              <TooltipContent side="right" className="flex items-center gap-2">
+                <span>{label}</span>
+                <kbd className="font-mono text-[10px] text-text-muted">{shortcut}</kbd>
+              </TooltipContent>
             </Tooltip>
           ))}
         </nav>
@@ -119,7 +130,10 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps) {
               <Settings className="size-5" strokeWidth={1.8} />
             </button>
           </TooltipTrigger>
-          <TooltipContent side="right">Settings</TooltipContent>
+          <TooltipContent side="right" className="flex items-center gap-2">
+            <span>Settings</span>
+            <kbd className="font-mono text-[10px] text-text-muted">g ,</kbd>
+          </TooltipContent>
         </Tooltip>
       </aside>
     </TooltipProvider>

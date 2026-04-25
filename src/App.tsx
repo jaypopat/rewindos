@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { useHotkeySequences, type HotkeySequence } from "@tanstack/react-hotkeys";
 import type { SearchFilters } from "@/lib/api";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useGlobalKeyboard } from "@/hooks/useGlobalKeyboard";
@@ -69,6 +70,18 @@ const initialNavState: NavState = {
   rewindTimeRange: null,
   selectedCollectionId: null,
 };
+
+const VIEW_SHORTCUTS: { sequence: HotkeySequence; view: View }[] = [
+  { sequence: ["G", "D"], view: "dashboard" },
+  { sequence: ["G", "H"], view: "history" },
+  { sequence: ["G", "R"], view: "rewind" },
+  { sequence: ["G", "S"], view: "search" },
+  { sequence: ["G", "V"], view: "saved" },
+  { sequence: ["G", "J"], view: "journal" },
+  { sequence: ["G", "A"], view: "ask" },
+  { sequence: ["G", "F"], view: "focus" },
+  { sequence: ["G", ","], view: "settings" },
+];
 
 function App() {
   const [nav, dispatch] = useReducer(navReducer, initialNavState);
@@ -142,6 +155,14 @@ function App() {
     }, [handleViewChange]),
     onEscape: handleEscape,
   });
+
+  // Vim-style "go to view" shortcuts: g d / g h / g r / g s / g v / g j / g a / g f / g ,
+  useHotkeySequences(
+    VIEW_SHORTCUTS.map(({ sequence, view: v }) => ({
+      sequence,
+      callback: () => handleViewChange(v),
+    })),
+  );
 
   // Listen for global hotkey (Ctrl+Shift+Space)
   useEffect(() => {

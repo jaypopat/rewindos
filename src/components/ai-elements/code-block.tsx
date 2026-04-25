@@ -391,14 +391,11 @@ export const CodeBlockContent = ({
 
   // Async highlighting result (populated after shiki loads)
   const [asyncTokens, setAsyncTokens] = useState<TokenizedCode | null>(null);
-  const asyncKeyRef = useRef({ code, language });
-
-  // Invalidate stale async tokens synchronously during render
-  if (
-    asyncKeyRef.current.code !== code ||
-    asyncKeyRef.current.language !== language
-  ) {
-    asyncKeyRef.current = { code, language };
+  // React-docs pattern: previous-value tracker lives in state, not a ref, so
+  // a discarded concurrent render doesn't leave the tracker half-updated.
+  const [asyncKey, setAsyncKey] = useState({ code, language });
+  if (asyncKey.code !== code || asyncKey.language !== language) {
+    setAsyncKey({ code, language });
     setAsyncTokens(null);
   }
 
