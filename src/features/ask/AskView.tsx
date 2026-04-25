@@ -31,10 +31,6 @@ interface AskViewProps {
   onSelectScreenshot: (id: number) => void;
 }
 
-interface ChatUrlConfig {
-  chat: { ollama_url: string };
-}
-
 export function AskView({ onSelectScreenshot }: AskViewProps) {
   const { messages, isStreaming, error, sendMessage, cancelStream } = useAskChat();
   const [input, setInput] = useState("");
@@ -65,7 +61,7 @@ export function AskView({ onSelectScreenshot }: AskViewProps) {
     queryKey: queryKeys.ollamaHealth(),
     queryFn: () =>
       config
-        ? ollamaHealth((config as unknown as ChatUrlConfig).chat.ollama_url)
+        ? ollamaHealth(config.chat.ollama_url)
         : false,
     enabled: !!config,
     refetchInterval: 60_000,

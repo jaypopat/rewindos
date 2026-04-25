@@ -22,14 +22,14 @@ export function useHistoryData(start: number, end: number, mode: "apps" | "timel
 
   // Task breakdown
   const { data: taskStats = [] } = useQuery({
-    queryKey: ["taskBreakdown", start, end],
+    queryKey: queryKeys.taskBreakdown(start, end, 200),
     queryFn: () => getTaskBreakdown(start, end, 200),
     staleTime: 60_000,
   });
 
   // Active blocks (selected range -- for stats)
   const { data: activeBlocks = [] } = useQuery({
-    queryKey: ["activeBlocks", start, end],
+    queryKey: queryKeys.activeBlocks(start, end),
     queryFn: () => getActiveBlocks(start, end),
     staleTime: 60_000,
   });
@@ -46,7 +46,7 @@ export function useHistoryData(start: number, end: number, mode: "apps" | "timel
     return Math.floor(d.getTime() / 1000) + 86400;
   }, []);
   const { data: chartBlocks = [] } = useQuery({
-    queryKey: ["activeBlocks-chart", chartStart, chartEnd],
+    queryKey: queryKeys.activeBlocksChart(chartStart, chartEnd),
     queryFn: () => getActiveBlocks(chartStart, chartEnd),
     staleTime: 120_000,
   });

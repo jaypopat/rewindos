@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useHotkey } from "@tanstack/react-hotkeys";
 import { getScreenshot, getImageUrl } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import { Button } from "@/components/ui/button";
@@ -48,21 +49,16 @@ export function ScreenshotDetail({ screenshotId, onBack, searchQuery, screenshot
   const hasNext = currentIndex >= 0 && currentIndex < screenshotIds.length - 1;
   const canNavigate = !!onNavigate && screenshotIds.length > 1 && currentIndex >= 0;
 
-  useEffect(() => {
-    if (!canNavigate || !onNavigate) return;
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "ArrowRight" && hasNext) {
-        e.preventDefault();
-        onNavigate(screenshotIds[currentIndex + 1]);
-      }
-      if (e.key === "ArrowLeft" && hasPrev) {
-        e.preventDefault();
-        onNavigate(screenshotIds[currentIndex - 1]);
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [canNavigate, hasPrev, hasNext, currentIndex, screenshotIds, onNavigate]);
+  useHotkey(
+    "ArrowRight",
+    () => onNavigate?.(screenshotIds[currentIndex + 1]),
+    { enabled: canNavigate && hasNext },
+  );
+  useHotkey(
+    "ArrowLeft",
+    () => onNavigate?.(screenshotIds[currentIndex - 1]),
+    { enabled: canNavigate && hasPrev },
+  );
 
   const { data: detail, isLoading, isError } = useQuery({
     queryKey: queryKeys.screenshot(screenshotId),

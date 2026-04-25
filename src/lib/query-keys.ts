@@ -35,8 +35,8 @@ export const queryKeys = {
     ["journal-search", query] as const,
   journalSummary: (periodType: string, periodKey: string) =>
     ["journal-summary", periodType, periodKey] as const,
-  taskBreakdown: (start: number, end: number) =>
-    ["taskBreakdown", start, end] as const,
+  taskBreakdown: (start: number, end: number, limit: number) =>
+    ["taskBreakdown", start, end, limit] as const,
   activeBlocks: (start: number, end: number) =>
     ["activeBlocks", start, end] as const,
   activeBlocksChart: (start: number, end: number) =>

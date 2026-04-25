@@ -1,19 +1,20 @@
+import type { JSONContent } from "@tiptap/core";
+
 /**
  * Extract unchecked todo texts from Tiptap JSON content.
  * Walks the document tree for `taskItem` nodes with `attrs.checked === false`.
  */
 export function extractUncheckedTodos(content: string): string[] {
   try {
-    const doc = JSON.parse(content);
     const todos: string[] = [];
-    walkForUnchecked(doc, todos);
+    walkForUnchecked(JSON.parse(content) as JSONContent, todos);
     return todos;
   } catch {
     return [];
   }
 }
 
-function walkForUnchecked(node: any, out: string[]): void {
+function walkForUnchecked(node: JSONContent, out: string[]): void {
   if (node.type === "taskItem" && node.attrs?.checked === false) {
     const text = collectText(node).trim();
     if (text) out.push(text);
@@ -26,7 +27,7 @@ function walkForUnchecked(node: any, out: string[]): void {
   }
 }
 
-function collectText(node: any): string {
+function collectText(node: JSONContent): string {
   if (node.type === "text") return node.text ?? "";
   if (Array.isArray(node.content)) {
     return node.content.map(collectText).join("");

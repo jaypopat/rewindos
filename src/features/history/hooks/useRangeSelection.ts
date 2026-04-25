@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useRef } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { createCollection } from "@/lib/api";
 import { hourKeyToTimestamp } from "../history-utils";
@@ -13,11 +13,13 @@ export function useRangeSelection(mode: string, start: number, end: number) {
 
   const queryClient = useQueryClient();
 
-  // Clear range selection when switching modes or changing date range
+  // Clear range selection when switching modes or changing date range.
+  // React-docs pattern: store the previous tracker in state (not a ref) so
+  // discarded concurrent renders don't leave it half-updated.
   const rangeResetKey = `${mode}-${start}-${end}`;
-  const prevRangeResetKeyRef = useRef(rangeResetKey);
-  if (prevRangeResetKeyRef.current !== rangeResetKey) {
-    prevRangeResetKeyRef.current = rangeResetKey;
+  const [prevRangeResetKey, setPrevRangeResetKey] = useState(rangeResetKey);
+  if (prevRangeResetKey !== rangeResetKey) {
+    setPrevRangeResetKey(rangeResetKey);
     setRangeSelectMode(false);
     setRangeStart(null);
     setRangeEnd(null);

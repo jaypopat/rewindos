@@ -1,4 +1,5 @@
 import { invoke, convertFileSrc, Channel } from "@tauri-apps/api/core";
+import type { AppConfig } from "./config";
 
 export interface SearchFilters {
   start_time?: number;
@@ -593,7 +594,7 @@ export async function exportJournal(
 
 // -- Settings --
 
-export async function getConfig(): Promise<Record<string, unknown>> {
+export async function getConfig(): Promise<AppConfig> {
   return invoke("get_config");
 }
 

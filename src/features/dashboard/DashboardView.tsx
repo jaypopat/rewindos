@@ -67,19 +67,19 @@ export function DashboardView({ onSelectScreenshot }: DashboardViewProps) {
   });
 
   const { data: taskStats = [] } = useQuery({
-    queryKey: ["taskBreakdown", todayStart, todayEnd],
+    queryKey: queryKeys.taskBreakdown(todayStart, todayEnd, 200),
     queryFn: () => getTaskBreakdown(todayStart, todayEnd, 200),
     staleTime: 30_000,
   });
 
   const { data: activeBlocks = [] } = useQuery({
-    queryKey: ["activeBlocks", todayStart, todayEnd],
+    queryKey: queryKeys.activeBlocks(todayStart, todayEnd),
     queryFn: () => getActiveBlocks(todayStart, todayEnd),
     staleTime: 30_000,
   });
 
   const { data: yesterdayActiveBlocks = [] } = useQuery({
-    queryKey: ["activeBlocks", yesterdayStart, yesterdayEnd],
+    queryKey: queryKeys.activeBlocks(yesterdayStart, yesterdayEnd),
     queryFn: () => getActiveBlocks(yesterdayStart, yesterdayEnd),
     staleTime: 60_000,
     refetchOnWindowFocus: false,

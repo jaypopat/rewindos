@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useHotkey } from "@tanstack/react-hotkeys";
 import { searchJournal } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import { useDebounce } from "@/hooks/useDebounce";
@@ -35,13 +36,7 @@ export function JournalSearchPanel({ onNavigate, onClose }: JournalSearchPanelPr
     inputRef.current?.focus();
   }, []);
 
-  useEffect(() => {
-    const handler = (e: globalThis.KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [onClose]);
+  useHotkey("Escape", () => onClose());
 
   return (
     <div className="border-b border-border/50 bg-surface-raised/50">
