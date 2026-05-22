@@ -62,6 +62,22 @@ fn claude_cli_config_path() -> Option<PathBuf> {
     dirs::home_dir().map(|h| h.join(".claude.json"))
 }
 
+/// Stable cwd for spawned `claude` processes. Claude scopes session storage
+/// per project directory (`~/.claude/projects/<encoded-cwd>/`), so without a
+/// pinned cwd, `--resume` fails whenever the Tauri app is launched from a
+/// different directory than last time. Memoized so we don't `stat` the dir
+/// on every spawn.
+fn pinned_claude_cwd() -> Option<&'static PathBuf> {
+    use std::sync::OnceLock;
+    static DIR: OnceLock<Option<PathBuf>> = OnceLock::new();
+    DIR.get_or_init(|| {
+        let dir = dirs::home_dir()?.join(".rewindos");
+        std::fs::create_dir_all(&dir).ok()?;
+        Some(dir)
+    })
+    .as_ref()
+}
+
 fn is_mcp_registered() -> bool {
     let Some(path) = claude_cli_config_path() else {
         return false;
@@ -150,6 +166,10 @@ pub async fn ask_claude_stream_spawn(
         } else {
             cmd.arg("--session-id").arg(sid);
         }
+    }
+
+    if let Some(cwd) = pinned_claude_cwd() {
+        cmd.current_dir(cwd);
     }
 
     cmd.stdout(Stdio::piped())

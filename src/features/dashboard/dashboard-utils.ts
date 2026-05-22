@@ -1,5 +1,5 @@
 import { parseWindowTitle } from "@/lib/window-title";
-import type { TaskUsageStat, TimelineEntry } from "@/lib/api";
+import type { ActiveBlock, TaskUsageStat, TimelineEntry } from "@/lib/api";
 
 export function formatHour(hour: number): string {
   if (hour === 0) return "12a";
@@ -11,6 +11,34 @@ export function formatHour(hour: number): string {
 export function computeTrend(today: number, yesterday: number): number {
   if (yesterday <= 0) return 0;
   return Math.round(((today - yesterday) / yesterday) * 100);
+}
+
+// Prefer same-weekday comparison (screen time is weekly-periodic); fall back to
+// any-day average, then yesterday, when there isn't enough history yet.
+// `baselineStart` must be exactly 28 days (4 weeks) before today so indices
+// 0/7/14/21 align with today's weekday.
+export function computeBaselineAverage(
+  blocks: ActiveBlock[],
+  baselineStart: number,
+): { average: number; label: string } {
+  const perDay = new Map<number, number>();
+  for (const b of blocks) {
+    const dayIdx = Math.floor((b.start_time - baselineStart) / 86400);
+    perDay.set(dayIdx, (perDay.get(dayIdx) ?? 0) + b.duration_secs);
+  }
+  const sameWeekday = [0, 7, 14, 21]
+    .map((i) => perDay.get(i) ?? 0)
+    .filter((s) => s > 0);
+  if (sameWeekday.length >= 2) {
+    const avg = sameWeekday.reduce((s, v) => s + v, 0) / sameWeekday.length;
+    return { average: avg, label: `vs ${sameWeekday.length}-wk avg` };
+  }
+  const activeDays = [...perDay.values()].filter((s) => s > 0);
+  if (activeDays.length >= 2) {
+    const avg = activeDays.reduce((s, v) => s + v, 0) / activeDays.length;
+    return { average: avg, label: `vs ${activeDays.length}d avg` };
+  }
+  return { average: perDay.get(27) ?? 0, label: "vs yesterday" };
 }
 
 // Build colored app spans from screenshot data

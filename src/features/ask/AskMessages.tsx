@@ -34,13 +34,11 @@ import { parseTextWithRefs, collectRefs } from "@/lib/citations";
 import { CitationChip } from "./CitationChip";
 import { CitationSources } from "./CitationSources";
 import { MessageActions } from "./MessageActions";
-import { FollowupSuggestions } from "./FollowupSuggestions";
 import { useAskChat } from "@/context/AskContext";
 
 interface AskMessagesProps {
   rows: ChatMessageRow[];
   onSelectScreenshot?: (id: number) => void;
-  onSelectSuggestion?: (text: string) => void;
 }
 
 function RoleHeader({ role }: { role: "user" | "assistant" }) {
@@ -77,9 +75,9 @@ const ASSISTANT_PROSE =
   "[&_strong]:text-text-primary [&_strong]:font-semibold " +
   "[&_ul]:list-disc [&_ul]:list-inside [&_ol]:list-decimal [&_ol]:list-inside [&_li]:text-text-secondary";
 
-export function AskMessages({ rows, onSelectScreenshot, onSelectSuggestion }: AskMessagesProps) {
+export function AskMessages({ rows, onSelectScreenshot }: AskMessagesProps) {
   const messages = toUIMessages(rows);
-  const { followups, regenerate, isStreaming } = useAskChat();
+  const { regenerate, isStreaming } = useAskChat();
 
   return (
     <Conversation className="flex-1 min-h-0">
@@ -159,10 +157,6 @@ export function AskMessages({ rows, onSelectScreenshot, onSelectSuggestion }: As
                     }}
                     onRegenerate={() => void regenerate()}
                     disabled={isStreaming}
-                  />
-                  <FollowupSuggestions
-                    suggestions={followups}
-                    onSelect={(t) => onSelectSuggestion?.(t)}
                   />
                 </div>
               )}

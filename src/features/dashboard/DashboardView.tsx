@@ -22,7 +22,12 @@ const AppDonutChart = lazy(() =>
 import { CapturesCarousel } from "./CapturesCarousel";
 import { TopTasksList } from "./TopTasksList";
 import { CategoriesBreakdown } from "./CategoriesBreakdown";
-import { buildAppSpans, computeTrend, getTopTasks } from "./dashboard-utils";
+import {
+  buildAppSpans,
+  computeBaselineAverage,
+  computeTrend,
+  getTopTasks,
+} from "./dashboard-utils";
 
 export interface DashboardViewProps {
   onSelectScreenshot: (id: number, siblingIds?: number[]) => void;
@@ -47,9 +52,9 @@ export function DashboardView({ onSelectScreenshot }: DashboardViewProps) {
     return { todayStart: start, todayEnd: start + 86400 };
   }, []);
 
-  // Yesterday's time range
-  const { yesterdayStart, yesterdayEnd } = useMemo(() => {
-    return { yesterdayStart: todayStart - 86400, yesterdayEnd: todayStart };
+  // Last 28 days before today — covers 4 prior same-weekdays for the baseline
+  const { baselineStart, baselineEnd } = useMemo(() => {
+    return { baselineStart: todayStart - 86400 * 28, baselineEnd: todayStart };
   }, [todayStart]);
 
   // ---- Data fetching ----
@@ -78,9 +83,9 @@ export function DashboardView({ onSelectScreenshot }: DashboardViewProps) {
     staleTime: 30_000,
   });
 
-  const { data: yesterdayActiveBlocks = [] } = useQuery({
-    queryKey: queryKeys.activeBlocks(yesterdayStart, yesterdayEnd),
-    queryFn: () => getActiveBlocks(yesterdayStart, yesterdayEnd),
+  const { data: baselineActiveBlocks = [] } = useQuery({
+    queryKey: queryKeys.activeBlocks(baselineStart, baselineEnd),
+    queryFn: () => getActiveBlocks(baselineStart, baselineEnd),
     staleTime: 60_000,
     refetchOnWindowFocus: false,
   });
@@ -97,12 +102,12 @@ export function DashboardView({ onSelectScreenshot }: DashboardViewProps) {
     [activeBlocks],
   );
 
-  const yesterdayActiveTime = useMemo(
-    () => yesterdayActiveBlocks.reduce((sum, b) => sum + b.duration_secs, 0),
-    [yesterdayActiveBlocks],
+  const { average: baselineAverage, label: baselineLabel } = useMemo(
+    () => computeBaselineAverage(baselineActiveBlocks, baselineStart),
+    [baselineActiveBlocks, baselineStart],
   );
 
-  const activeTimeTrend = computeTrend(totalActiveTime, yesterdayActiveTime);
+  const activeTimeTrend = computeTrend(totalActiveTime, baselineAverage);
 
   const appSpans = useMemo(() => buildAppSpans(screenshots), [screenshots]);
 
@@ -157,7 +162,7 @@ export function DashboardView({ onSelectScreenshot }: DashboardViewProps) {
           label="Screen Time"
           value={screenshotsLoading ? "\u2014" : formatDuration(totalActiveTime)}
           trend={activeTimeTrend}
-          trendLabel="vs yesterday"
+          trendLabel={baselineLabel}
           accentColor="#22d3ee"
         />
         <StatCard

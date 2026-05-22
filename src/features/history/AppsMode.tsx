@@ -75,7 +75,7 @@ export function AppsMode({
         <StatCard
           label="Captures"
           value={formatNumber(totalCaptures)}
-          detail="View in timeline \u2192"
+          detail="View in timeline →"
           accentColor="#a78bfa"
           onClick={onSwitchToTimeline}
         />

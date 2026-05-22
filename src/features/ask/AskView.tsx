@@ -129,7 +129,6 @@ export function AskView({ onSelectScreenshot }: AskViewProps) {
           <AskMessages
             rows={messages}
             onSelectScreenshot={onSelectScreenshot}
-            onSelectSuggestion={submit}
           />
         )}
 

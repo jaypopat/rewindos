@@ -25,11 +25,12 @@ import {
   type AskStreamEvent,
   type Chat,
   type ChatMessageRow,
+  type ChatRole,
 } from "@/lib/api";
+import { invoke } from "@tauri-apps/api/core";
 import { ollamaChat, type OllamaMessage } from "@/lib/ollama-chat";
 import { queryKeys } from "@/lib/query-keys";
 import { decodeAttachments, encodeAttachments } from "@/lib/attachments";
-import { extractLastTurns, generateFollowups } from "@/lib/followups";
 
 interface AskContextValue {
   activeChatId: number | null;
@@ -43,7 +44,6 @@ interface AskContextValue {
   startNewChat: () => void;
   pendingModel: string | null;
   setPendingModel: (model: string | null) => void;
-  followups: string[];
   regenerate: () => Promise<void>;
 }
 
@@ -81,31 +81,17 @@ export function AskProvider({ children }: { children: ReactNode }) {
     queryFn: getConfig,
   });
 
-  const [pendingModel, setPendingModelState] = useState<string | null>(null);
-  const setPendingModel = useCallback((m: string | null) => {
-    setPendingModelState(m);
-  }, []);
-
-  const [followups, setFollowups] = useState<string[]>([]);
-
-  // Keep a fresh ref so the finally-block IIFE can check whether the user
-  // switched chats during follow-up generation without closure staleness.
-  const activeChatIdRef = useRef<number | null>(activeChatId);
-  useEffect(() => {
-    activeChatIdRef.current = activeChatId;
-  }, [activeChatId]);
+  const [pendingModel, setPendingModel] = useState<string | null>(null);
 
   const selectChat = useCallback((id: number | null) => {
     setActiveChatId(id);
     setError(null);
-    setFollowups([]);
     abortRef.current?.abort();
   }, []);
 
   const startNewChat = useCallback(() => {
     setActiveChatId(null);
     setError(null);
-    setFollowups([]);
     abortRef.current?.abort();
   }, []);
 
@@ -113,11 +99,8 @@ export function AskProvider({ children }: { children: ReactNode }) {
     async (text: string, attachedIds: number[] = []) => {
       if (isStreaming || !text.trim()) return;
       setError(null);
-      setFollowups([]);
       setIsStreaming(true);
 
-      // Hoisted so the `finally` block can reference the id actually used for this send.
-      // Reading `activeChatId` again in finally could be stale if the user navigated.
       let chatId: number | null = activeChatId;
       let useClaude = false;
       try {
@@ -146,7 +129,7 @@ export function AskProvider({ children }: { children: ReactNode }) {
           if (effectiveModel) {
             await setModel(chatId, effectiveModel);
           }
-          setPendingModelState(null);
+          setPendingModel(null);
           qc.invalidateQueries({ queryKey: queryKeys.chats() });
           qc.invalidateQueries({ queryKey: ["chat", chatId] as const });
         }
@@ -165,10 +148,12 @@ export function AskProvider({ children }: { children: ReactNode }) {
             );
           }
         } else {
-          const ctx = await buildChatContext(text);
-          const config = await getConfig();
+          const [ctx, config] = await Promise.all([
+            buildChatContext(text),
+            getConfig(),
+          ]);
 
-          await persistUserMessage(chatId, storedText);
+          await persistTextMessage(chatId, "user", storedText);
           qc.invalidateQueries({ queryKey: queryKeys.chatMessages(chatId) });
 
           const prevMessages = messages
@@ -226,7 +211,7 @@ export function AskProvider({ children }: { children: ReactNode }) {
             },
           });
 
-          await persistAssistantText(chatId, accumulated);
+          await persistTextMessage(chatId, "assistant", accumulated);
           qc.invalidateQueries({ queryKey: queryKeys.chatMessages(chatId) });
         }
       } catch (e) {
@@ -238,28 +223,6 @@ export function AskProvider({ children }: { children: ReactNode }) {
       } finally {
         setIsStreaming(false);
         abortRef.current = null;
-
-        if (chatId != null) {
-          void (async () => {
-            const chatIdSnapshot = chatId!;
-            const rows = await getChatMessages(chatIdSnapshot);
-            const { lastUserText, lastAssistantText } = extractLastTurns(rows);
-            if (!lastAssistantText) return;
-            const backend = activeChat?.backend ?? (useClaude ? "claude" : "ollama");
-            const suggestions = await generateFollowups({
-              backend,
-              ollamaUrl: appConfig?.chat.ollama_url,
-              ollamaModel: activeChat?.model ?? appConfig?.chat.model,
-              lastUserText,
-              lastAssistantText,
-            });
-            // Prevent cross-chat bleed: if the user switched chats during
-            // follow-up generation, drop these suggestions on the floor.
-            if (activeChatIdRef.current === chatIdSnapshot) {
-              setFollowups(suggestions);
-            }
-          })();
-        }
       }
     },
     [activeChatId, activeChat, messages, isStreaming, pendingModel, appConfig, qc],
@@ -328,7 +291,6 @@ export function AskProvider({ children }: { children: ReactNode }) {
       startNewChat,
       pendingModel,
       setPendingModel,
-      followups,
       regenerate,
     }),
     [
@@ -343,7 +305,6 @@ export function AskProvider({ children }: { children: ReactNode }) {
       startNewChat,
       pendingModel,
       setPendingModel,
-      followups,
       regenerate,
     ],
   );
@@ -374,22 +335,14 @@ function parseBlockText(content_json: string, kind: ChatMessageRow["block_type"]
   }
 }
 
-async function persistUserMessage(chatId: number, text: string): Promise<void> {
-  const { invoke } = await import("@tauri-apps/api/core");
+async function persistTextMessage(
+  chatId: number,
+  role: ChatRole,
+  text: string,
+): Promise<void> {
   await invoke("append_chat_message", {
     chatId,
-    role: "user",
-    blockType: "text",
-    contentJson: JSON.stringify({ text }),
-    isPartial: false,
-  });
-}
-
-async function persistAssistantText(chatId: number, text: string): Promise<void> {
-  const { invoke } = await import("@tauri-apps/api/core");
-  await invoke("append_chat_message", {
-    chatId,
-    role: "assistant",
+    role,
     blockType: "text",
     contentJson: JSON.stringify({ text }),
     isPartial: false,

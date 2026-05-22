@@ -759,9 +759,18 @@ async fn ask_claude(
     }
 
     if !status.success() {
-        let _ = on_event.send(ask_stream::AskStreamEvent::Error {
-            message: format!("claude exited with {status}"),
-        });
+        use tokio::io::AsyncReadExt;
+        let mut stderr_text = String::new();
+        if let Some(s) = child.stderr.take() {
+            let _ = s.take(8192).read_to_string(&mut stderr_text).await;
+        }
+        let trimmed = stderr_text.trim();
+        let message = if trimmed.is_empty() {
+            format!("claude exited with {status}")
+        } else {
+            format!("claude exited with {status}: {trimmed}")
+        };
+        let _ = on_event.send(ask_stream::AskStreamEvent::Error { message });
     }
     Ok(())
 }
