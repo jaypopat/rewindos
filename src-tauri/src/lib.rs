@@ -1504,9 +1504,18 @@ pub fn run() {
                 .build()
                 .expect("failed to build tray menu");
 
-            let tray_icon =
-                tauri::image::Image::from_bytes(include_bytes!("../icons/tray-icon.png"))
-                    .expect("failed to load tray icon");
+            // Two icon variants: a green "live" dot when capturing, a dimmed
+            // glyph when paused. Swapped via tray.set_icon() wherever the
+            // tooltip is updated. (Static swap — Linux trays render animated
+            // icons unreliably.)
+            let icon_active =
+                tauri::image::Image::from_bytes(include_bytes!("../icons/tray-icon-active.png"))
+                    .expect("failed to load active tray icon");
+            let icon_paused =
+                tauri::image::Image::from_bytes(include_bytes!("../icons/tray-icon-paused.png"))
+                    .expect("failed to load paused tray icon");
+            // Initial icon assumes capturing; the startup probe corrects it if paused.
+            let tray_icon = icon_active.clone();
 
             // If launched with --minimized, hide the window (autostart mode)
             let start_minimized = std::env::args().any(|a| a == "--minimized");
@@ -1527,6 +1536,8 @@ pub fn run() {
             }
 
             let toggle_item_clone = toggle_item.clone();
+            let icon_active_toggle = icon_active.clone();
+            let icon_paused_toggle = icon_paused.clone();
 
             let _tray = TrayIconBuilder::with_id("main-tray")
                 .icon(tray_icon)
@@ -1538,6 +1549,8 @@ pub fn run() {
                             // Toggle pause/resume via D-Bus
                             let app = app.clone();
                             let toggle_item = toggle_item_clone.clone();
+                            let icon_active = icon_active_toggle.clone();
+                            let icon_paused = icon_paused_toggle.clone();
                             tauri::async_runtime::spawn(async move {
                                 let state = app.state::<AppState>();
                                 // Check current status
@@ -1578,15 +1591,18 @@ pub fn run() {
                                                     )
                                                     .await;
                                                 if result.is_ok() {
+                                                    // is_capturing reflects the state *before* the toggle.
                                                     if is_capturing {
                                                         let _ = toggle_item.set_text("Resume Capture");
                                                         if let Some(tray) = app.tray_by_id("main-tray") {
                                                             let _ = tray.set_tooltip(Some("RewindOS - Paused"));
+                                                            let _ = tray.set_icon(Some(icon_paused.clone()));
                                                         }
                                                     } else {
                                                         let _ = toggle_item.set_text("Pause Capture");
                                                         if let Some(tray) = app.tray_by_id("main-tray") {
                                                             let _ = tray.set_tooltip(Some("RewindOS - Capturing"));
+                                                            let _ = tray.set_icon(Some(icon_active.clone()));
                                                         }
                                                     }
                                                 }
@@ -1615,9 +1631,10 @@ pub fn run() {
                 .build(app)
                 .expect("failed to build tray icon");
 
-            // Probe daemon state at startup to set correct tray text
+            // Probe daemon state at startup to set correct tray text and icon
             let app_handle = app.handle().clone();
             let startup_toggle = toggle_item.clone();
+            let icon_paused_startup = icon_paused.clone();
             tauri::async_runtime::spawn(async move {
                 let state = app_handle.state::<AppState>();
                 let reply = state
@@ -1641,6 +1658,7 @@ pub fn run() {
                                 let _ = startup_toggle.set_text("Resume Capture");
                                 if let Some(tray) = app_handle.tray_by_id("main-tray") {
                                     let _ = tray.set_tooltip(Some("RewindOS - Paused"));
+                                    let _ = tray.set_icon(Some(icon_paused_startup.clone()));
                                 }
                             }
                         }
