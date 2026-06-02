@@ -637,7 +637,10 @@ async fn run_daemon() -> anyhow::Result<()> {
         ollama_client,
         kwin_window_info: kwin_window_info.clone(),
         capture_backend_name,
-        window_info_provider_name: window_info.load_full().name().to_string(),
+        window_info: window_info.clone(),
+        recheck_conn: dbus_conn.clone(),
+        desktop: desktop.clone(),
+        session: session.clone(),
         desktop_name: desktop.to_string(),
         session_name: session.to_string(),
     };

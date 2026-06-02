@@ -9,8 +9,11 @@ use rewindos_core::schema::{DaemonStatus, QueueDepths, SearchFilters};
 use tracing::{info, warn};
 use zbus::interface;
 
+use crate::detect::{create_window_info_provider, DesktopEnvironment, SessionType};
 use crate::pipeline::PipelineMetrics;
 use crate::window_info::kwin::KwinWindowInfo;
+use crate::window_info::SharedProvider;
+use zbus::Connection;
 
 /// D-Bus service object for `com.rewindos.Daemon`.
 pub struct DaemonService {
@@ -22,7 +25,10 @@ pub struct DaemonService {
     pub ollama_client: Option<Arc<OllamaClient>>,
     pub kwin_window_info: Option<Arc<KwinWindowInfo>>,
     pub capture_backend_name: String,
-    pub window_info_provider_name: String,
+    pub window_info: SharedProvider,
+    pub recheck_conn: Connection,
+    pub desktop: DesktopEnvironment,
+    pub session: SessionType,
     pub desktop_name: String,
     pub session_name: String,
 }
@@ -91,7 +97,7 @@ impl DaemonService {
             capture_interval,
             last_capture_timestamp: None,
             capture_backend: Some(self.capture_backend_name.clone()),
-            window_info_provider: Some(self.window_info_provider_name.clone()),
+            window_info_provider: Some(self.window_info.load_full().name().to_string()),
             desktop: Some(self.desktop_name.clone()),
             session: Some(self.session_name.clone()),
         };
@@ -171,6 +177,36 @@ impl DaemonService {
                 resource_name.to_string(),
             );
         }
+    }
+
+    /// Re-run window-info provider selection and hot-swap the active provider.
+    /// Used after the user installs the Window Calls Extended GNOME extension,
+    /// so tracking activates without a daemon restart. Returns the new provider
+    /// name. Note: KWin callback wiring is established at startup only; recheck
+    /// targets the GNOME extension case where no KWin callback is involved.
+    async fn recheck_window_info(&self) -> zbus::fdo::Result<String> {
+        info!("recheck window info requested via D-Bus");
+
+        let (new_provider, _kwin) =
+            create_window_info_provider(&self.desktop, &self.session, &self.recheck_conn).await;
+        let new_name = new_provider.name().to_string();
+
+        let old = self.window_info.load_full();
+        if old.name() == new_provider.name() {
+            return Ok(new_name);
+        }
+
+        if let Err(e) = new_provider.start().await {
+            return Err(zbus::fdo::Error::Failed(format!(
+                "failed to start new provider: {e}"
+            )));
+        }
+        self.window_info
+            .store(crate::window_info::into_shared_inner(new_provider));
+        let _ = old.stop().await;
+
+        info!(provider = %new_name, "window info provider hot-swapped");
+        Ok(new_name)
     }
 
     #[zbus(property)]

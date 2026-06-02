@@ -41,17 +41,26 @@ impl WindowInfoProvider for ArcProviderWrapper {
     }
 }
 
-/// Convert an `Arc<dyn WindowInfoProvider>` into a `SharedProvider`.
+/// Convert an `Arc<dyn WindowInfoProvider>` into the inner
+/// `Arc<Box<dyn WindowInfoProvider>>` suitable for use with
+/// `ArcSwapAny::store`.
 ///
 /// `arc_swap` cannot store `Arc<dyn Trait>` directly (the `dyn Trait` base
 /// would become the target of an `AtomicPtr`, but `AtomicPtr<T>` requires
 /// `T: Sized`). This function wraps the pointer in a thin delegating struct so
 /// the resulting `Box<dyn WindowInfoProvider>` is `Sized`.
+pub fn into_shared_inner(
+    provider: std::sync::Arc<dyn WindowInfoProvider>,
+) -> std::sync::Arc<Box<dyn WindowInfoProvider>> {
+    let boxed: Box<dyn WindowInfoProvider> = Box::new(ArcProviderWrapper(provider));
+    std::sync::Arc::new(boxed)
+}
+
+/// Convert an `Arc<dyn WindowInfoProvider>` into a `SharedProvider`.
 pub fn into_shared(
     provider: std::sync::Arc<dyn WindowInfoProvider>,
 ) -> SharedProvider {
-    let boxed: Box<dyn WindowInfoProvider> = Box::new(ArcProviderWrapper(provider));
-    std::sync::Arc::new(arc_swap::ArcSwapAny::new(std::sync::Arc::new(boxed)))
+    std::sync::Arc::new(arc_swap::ArcSwapAny::new(into_shared_inner(provider)))
 }
 
 /// Metadata about the currently active window.
