@@ -7,6 +7,7 @@ use zbus::Connection;
 use crate::capture::{self, CaptureBackend, CaptureError};
 use crate::window_info::gnome_shell::GnomeShellWindowInfo;
 use crate::window_info::kwin::KwinWindowInfo;
+use crate::window_info::window_calls_ext::WindowCallsExtProvider;
 use crate::window_info::noop::NoopWindowInfo;
 use crate::window_info::wlr_foreign_toplevel::WlrForeignToplevelProvider;
 use crate::window_info::WindowInfoProvider;
@@ -162,7 +163,7 @@ pub async fn create_capture_backend(
 /// (needed for D-Bus callback forwarding in the service).
 ///
 /// For GNOME, uses a probe-based fallback chain:
-///   wlr-foreign-toplevel (GNOME 45+) → GNOME Shell D-Bus Eval → Noop
+///   Window Calls Extended → GNOME Shell Eval (legacy opt-in) → Noop
 ///
 /// For KDE, uses a probe-based fallback chain:
 ///   KWin script (primary) → wlr-foreign-toplevel (KWin 6.x) → Noop
@@ -197,20 +198,23 @@ pub async fn create_window_info_provider(
             )
         }
         DesktopEnvironment::Gnome if *session == SessionType::Wayland => {
-            // Probe-based fallback: wlr-foreign-toplevel → GNOME Shell D-Bus → Noop
-            let wlr = WlrForeignToplevelProvider::new();
-            if wlr.probe().await {
-                info!("GNOME: using wlr-foreign-toplevel window info provider (GNOME 45+)");
-                return (Arc::new(wlr) as Arc<dyn WindowInfoProvider>, None);
+            // Mutter does NOT implement wlr-foreign-toplevel-management, and
+            // GNOME Shell Eval is disabled by default. The supported path is the
+            // Window Calls Extended extension. Chain:
+            //   Window Calls Extended → GNOME Shell Eval (legacy opt-in) → Noop
+            let wc = WindowCallsExtProvider::new(conn.clone());
+            if wc.probe().await {
+                info!("GNOME: using Window Calls Extended window info provider");
+                return (Arc::new(wc) as Arc<dyn WindowInfoProvider>, None);
             }
 
             let gnome_shell = GnomeShellWindowInfo::new(conn.clone());
             if gnome_shell.probe().await {
-                info!("GNOME: using gnome-shell-dbus window info provider");
+                info!("GNOME: using gnome-shell-dbus (Eval) window info provider");
                 return (Arc::new(gnome_shell) as Arc<dyn WindowInfoProvider>, None);
             }
 
-            warn!("GNOME: no window info provider available, using noop");
+            warn!("GNOME: no window info provider available (install Window Calls Extended), using noop");
             (
                 Arc::new(NoopWindowInfo) as Arc<dyn WindowInfoProvider>,
                 None,
@@ -279,7 +283,7 @@ pub fn log_environment_diagnostic(desktop: &DesktopEnvironment, session: &Sessio
     match desktop {
         DesktopEnvironment::Gnome => {
             info!("GNOME notes: system tray requires gnome-shell-extension-appindicator; \
-                   window tracking uses wlr-foreign-toplevel on GNOME 45+ or GNOME Shell Eval on older versions");
+                   window tracking requires the 'Window Calls Extended' GNOME extension");
         }
         DesktopEnvironment::X11 => {
             warn!("X11 session detected — screen capture is not supported on X11. \
