@@ -60,6 +60,8 @@ export interface DaemonStatus {
   uptime_seconds: number;
   disk_usage_bytes: number;
   last_capture_timestamp: number | null;
+  window_info_provider?: string | null;
+  desktop?: string | null;
 }
 
 export async function search(
@@ -104,6 +106,22 @@ export async function pauseCapture(): Promise<void> {
 
 export async function resumeCapture(): Promise<void> {
   return invoke("resume_capture");
+}
+
+export interface ExtensionStatus {
+  installed: boolean;
+}
+
+export async function gnomeExtensionStatus(): Promise<ExtensionStatus> {
+  return invoke("gnome_extension_status");
+}
+
+export async function recheckWindowInfo(): Promise<string> {
+  return invoke("recheck_window_info");
+}
+
+export async function openExtensionPage(): Promise<void> {
+  return invoke("open_extension_page");
 }
 
 export async function getAppNames(): Promise<string[]> {
