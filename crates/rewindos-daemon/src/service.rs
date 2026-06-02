@@ -184,7 +184,7 @@ impl DaemonService {
     /// so tracking activates without a daemon restart. Returns the new provider
     /// name. Note: KWin callback wiring is established at startup only; recheck
     /// targets the GNOME extension case where no KWin callback is involved.
-    async fn recheck_window_info(&self) -> zbus::fdo::Result<String> {
+    async fn recheck_window_info(&mut self) -> zbus::fdo::Result<String> {
         info!("recheck window info requested via D-Bus");
 
         let (new_provider, _kwin) =
@@ -192,7 +192,8 @@ impl DaemonService {
         let new_name = new_provider.name().to_string();
 
         let old = self.window_info.load_full();
-        if old.name() == new_provider.name() {
+        let old_name = old.name();
+        if old_name == new_provider.name() {
             return Ok(new_name);
         }
 
@@ -205,7 +206,7 @@ impl DaemonService {
             .store(crate::window_info::into_shared_inner(new_provider));
         let _ = old.stop().await;
 
-        info!(provider = %new_name, "window info provider hot-swapped");
+        info!(from = old_name, to = %new_name, "window info provider hot-swapped");
         Ok(new_name)
     }
 
