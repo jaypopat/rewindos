@@ -10,7 +10,7 @@ use rewindos_core::config::{CaptureConfig, PrivacyConfig};
 use rewindos_core::schema::RawFrame;
 use tracing::{debug, info, warn};
 
-use crate::window_info::{self, WindowInfoProvider};
+use crate::window_info::{self, SharedProvider};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CaptureError {
@@ -54,7 +54,7 @@ pub trait CaptureBackend: Send + Sync + 'static {
 /// Orchestrates screen capture with window info enrichment and privacy filtering.
 pub struct CaptureManager {
     backend: Box<dyn CaptureBackend>,
-    window_info: Arc<dyn WindowInfoProvider>,
+    window_info: SharedProvider,
     interval: Duration,
     excluded_apps: Vec<String>,
     excluded_title_patterns: Vec<String>,
@@ -66,7 +66,7 @@ impl CaptureManager {
         config: &CaptureConfig,
         privacy_config: &PrivacyConfig,
         mut backend: Box<dyn CaptureBackend>,
-        window_info: Arc<dyn WindowInfoProvider>,
+        window_info: SharedProvider,
         is_capturing: Arc<AtomicBool>,
     ) -> Result<Self, CaptureError> {
         let interval = Duration::from_secs(config.interval_seconds.into());
@@ -114,7 +114,7 @@ impl CaptureManager {
                 }
             };
 
-            let window = self.window_info.current();
+            let window = self.window_info.load_full().current();
 
             if window_info::is_excluded(&window, &self.excluded_apps, &self.excluded_title_patterns)
             {

@@ -13,7 +13,7 @@ use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 
 use crate::capture::{CaptureBackend, CaptureError, CaptureManager};
-use crate::window_info::WindowInfoProvider;
+use crate::window_info::SharedProvider;
 
 /// Shared pipeline metrics, accessible from D-Bus GetStatus.
 pub struct PipelineMetrics {
@@ -78,7 +78,7 @@ pub async fn start_pipeline(
     config: &AppConfig,
     db: Arc<Mutex<Database>>,
     capture_backend: Box<dyn CaptureBackend>,
-    window_info: Arc<dyn WindowInfoProvider>,
+    window_info: SharedProvider,
 ) -> Result<PipelineHandle, CaptureError> {
     let metrics = Arc::new(PipelineMetrics::new());
     let is_capturing = Arc::new(AtomicBool::new(true));
