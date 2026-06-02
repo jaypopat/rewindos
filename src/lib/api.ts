@@ -202,6 +202,11 @@ export function getImageUrl(path: string): string {
   return convertFileSrc(path);
 }
 
+/** Open a screenshot in the system's default image viewer. */
+export async function openInViewer(filePath: string): Promise<void> {
+  return invoke("open_in_viewer", { filePath });
+}
+
 // -- Task breakdown / Active blocks --
 
 export interface TaskUsageStat {

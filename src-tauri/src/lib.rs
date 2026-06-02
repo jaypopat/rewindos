@@ -1094,6 +1094,17 @@ fn get_carry_forward_todos(
 }
 
 #[tauri::command]
+fn open_in_viewer(app: tauri::AppHandle, file_path: String) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    if !std::path::Path::new(&file_path).is_file() {
+        return Err(format!("file not found: {file_path}"));
+    }
+    app.opener()
+        .open_path(file_path, None::<&str>)
+        .map_err(|e| format!("failed to open image: {e}"))
+}
+
+#[tauri::command]
 fn add_journal_screenshot(
     state: State<'_, AppState>,
     journal_entry_id: i64,
@@ -1685,6 +1696,7 @@ pub fn run() {
             get_journal_streak,
             get_open_todos,
             get_carry_forward_todos,
+            open_in_viewer,
             add_journal_screenshot,
             remove_journal_screenshot,
             get_journal_screenshots,
