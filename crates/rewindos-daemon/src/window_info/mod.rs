@@ -1,6 +1,7 @@
 pub mod gnome_shell;
 pub mod kwin;
 pub mod noop;
+pub mod window_calls_ext;
 pub mod wlr_foreign_toplevel;
 
 use async_trait::async_trait;
