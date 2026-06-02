@@ -559,8 +559,9 @@ async fn run_daemon() -> anyhow::Result<()> {
     detect::log_environment_diagnostic(&desktop, &session);
 
     // Create window info provider
-    let (window_info, kwin_window_info) =
+    let (initial_provider, kwin_window_info) =
         detect::create_window_info_provider(&desktop, &session, &dbus_conn).await;
+    let window_info = crate::window_info::into_shared(initial_provider);
 
     // Create capture backend
     let capture_backend = detect::create_capture_backend(&desktop, &session, &dbus_conn).await?;
@@ -636,7 +637,10 @@ async fn run_daemon() -> anyhow::Result<()> {
         ollama_client,
         kwin_window_info: kwin_window_info.clone(),
         capture_backend_name,
-        window_info_provider_name: window_info.name().to_string(),
+        window_info: window_info.clone(),
+        recheck_conn: dbus_conn.clone(),
+        desktop: desktop.clone(),
+        session: session.clone(),
         desktop_name: desktop.to_string(),
         session_name: session.to_string(),
     };
@@ -651,7 +655,7 @@ async fn run_daemon() -> anyhow::Result<()> {
 
     // Start window info provider (must be after D-Bus service registration
     // so KWin script can call back to us)
-    if let Err(e) = window_info.start().await {
+    if let Err(e) = window_info.load_full().start().await {
         warn!(error = %e, "failed to start window info provider");
     }
 
@@ -668,7 +672,7 @@ async fn run_daemon() -> anyhow::Result<()> {
     }
 
     // Graceful shutdown
-    if let Err(e) = window_info.stop().await {
+    if let Err(e) = window_info.load_full().stop().await {
         warn!(error = %e, "failed to stop window info provider");
     }
     pipeline_handle.shutdown().await;

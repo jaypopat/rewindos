@@ -7,11 +7,11 @@ use zbus::Connection;
 
 use super::{non_empty, WindowInfo, WindowInfoError, WindowInfoProvider};
 
-/// GNOME Shell D-Bus window info provider.
+/// GNOME Shell D-Bus window info provider (legacy).
 ///
-/// Uses GNOME Shell's built-in `Eval` interface to query the focused window.
-/// This is the fallback for GNOME desktops that don't support
-/// `wlr-foreign-toplevel-management` (i.e. GNOME < 45).
+/// Uses GNOME Shell's `Eval` interface, which is disabled by default
+/// (`development-tools = false`) since GNOME 41. Only used when a user has
+/// deliberately enabled it; the supported provider is Window Calls Extended.
 pub struct GnomeShellWindowInfo {
     cached: Arc<Mutex<WindowInfo>>,
     conn: Connection,

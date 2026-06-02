@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useConfig } from "./hooks/useConfig";
+import { getDaemonStatus } from "@/lib/api";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Settings } from "lucide-react";
 import { GeneralTab } from "./tabs/GeneralTab";
@@ -26,6 +27,13 @@ export function SettingsView() {
   const [tab, setTab] = useState<Tab>("general");
   const { config, saving, saved, error, handleSave, update } = useConfig();
 
+  const [desktop, setDesktop] = useState<string | null>(null);
+  useEffect(() => {
+    getDaemonStatus()
+      .then((s) => setDesktop(s.desktop ?? null))
+      .catch(() => setDesktop(null));
+  }, []);
+
   if (!config) {
     return (
       <div className="flex-1 flex items-center justify-center">
@@ -38,7 +46,7 @@ export function SettingsView() {
 
   const tabContent = {
     general: <GeneralTab config={config} update={update} />,
-    capture: <CaptureTab config={config} update={update} />,
+    capture: <CaptureTab config={config} update={update} desktop={desktop} />,
     privacy: <PrivacyTab config={config} update={update} />,
     ai: <AITab config={config} update={update} />,
     focus: <FocusTab config={config} update={update} />,

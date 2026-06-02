@@ -53,6 +53,10 @@ struct DaemonStatusResponse {
     uptime_seconds: u64,
     disk_usage_bytes: u64,
     last_capture_timestamp: Option<i64>,
+    #[serde(default)]
+    window_info_provider: Option<String>,
+    #[serde(default)]
+    desktop: Option<String>,
 }
 
 /// Filters received from the frontend (no `query` field — it's a separate param).
@@ -152,6 +156,63 @@ async fn resume_capture(state: State<'_, AppState>) -> Result<(), String> {
         .map_err(|e| format!("dbus call: {e}"))?;
 
     Ok(())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ExtensionStatus {
+    installed: bool,
+}
+
+/// Probe the Window Calls Extended extension directly from the app process,
+/// independent of the daemon's currently active provider. Drives the Settings
+/// card's red/green state instantly after the user installs the extension.
+#[tauri::command]
+async fn gnome_extension_status(state: State<'_, AppState>) -> Result<ExtensionStatus, String> {
+    let installed = state
+        .dbus
+        .call_method(
+            Some("org.gnome.Shell"),
+            "/org/gnome/Shell/Extensions/Windows",
+            Some("org.gnome.Shell.Extensions.WindowsExt"),
+            "FocusClass",
+            &(),
+        )
+        .await
+        .is_ok();
+    Ok(ExtensionStatus { installed })
+}
+
+/// Ask the daemon to re-run provider selection and hot-swap. Returns the new
+/// provider name (e.g. "window-calls-ext" once the extension is active).
+#[tauri::command]
+async fn recheck_window_info(state: State<'_, AppState>) -> Result<String, String> {
+    let reply = state
+        .dbus
+        .call_method(
+            Some("com.rewindos.Daemon"),
+            "/com/rewindos/Daemon",
+            Some("com.rewindos.Daemon"),
+            "RecheckWindowInfo",
+            &(),
+        )
+        .await
+        .map_err(|e| format!("dbus call: {e}"))?;
+    reply
+        .body()
+        .deserialize::<String>()
+        .map_err(|e| format!("dbus deserialize: {e}"))
+}
+
+/// Open the Window Calls Extended page on extensions.gnome.org.
+#[tauri::command]
+fn open_extension_page(app: tauri::AppHandle) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    app.opener()
+        .open_url(
+            "https://extensions.gnome.org/extension/4974/window-calls-extended/",
+            None::<&str>,
+        )
+        .map_err(|e| format!("failed to open browser: {e}"))
 }
 
 #[tauri::command]
@@ -1680,6 +1741,9 @@ pub fn run() {
             get_daemon_status,
             pause_capture,
             resume_capture,
+            gnome_extension_status,
+            recheck_window_info,
+            open_extension_page,
             get_screenshot,
             get_screenshots_by_ids,
             get_app_names,

@@ -8,6 +8,7 @@ import { Sidebar, type View } from "@/components/Sidebar";
 import { SearchBar, DATE_PRESETS } from "@/components/SearchBar";
 import { SearchResults } from "@/components/SearchResults";
 import { DaemonPanel } from "@/components/DaemonPanel";
+import { GnomeExtensionBanner } from "@/components/GnomeExtensionBanner";
 import {
   DashboardView,
   HistoryView,
@@ -185,6 +186,7 @@ function App() {
       <Sidebar activeView={view} onViewChange={handleViewChange} />
 
       <div className="flex-1 flex flex-col min-w-0 min-h-0">
+        <GnomeExtensionBanner />
         <header className="flex items-center justify-end gap-2 px-5 py-2 border-b border-border/50 bg-surface/80 backdrop-blur-sm shrink-0">
           <button
             onClick={() => setShowSaveMoment(true)}

@@ -1,10 +1,67 @@
 pub mod gnome_shell;
 pub mod kwin;
 pub mod noop;
+pub mod window_calls_ext;
 pub mod wlr_foreign_toplevel;
 
 use async_trait::async_trait;
 use tracing::debug;
+
+/// A hot-swappable handle to the active window info provider. The capture loop
+/// reads the current provider each tick; a D-Bus recheck can swap it in place.
+///
+/// The inner `Arc<Box<dyn WindowInfoProvider>>` is used (rather than
+/// `Arc<dyn WindowInfoProvider>`) because `arc_swap::ArcSwapAny` requires its
+/// type parameter to implement `RefCnt`, which in turn requires `T: Sized` (the
+/// base type of `AtomicPtr<T::Base>` must be `Sized`). `Box<dyn Trait>` is
+/// `Sized`, so `Arc<Box<dyn WindowInfoProvider>>` satisfies the bound.
+pub type SharedProvider =
+    std::sync::Arc<arc_swap::ArcSwapAny<std::sync::Arc<Box<dyn WindowInfoProvider>>>>;
+
+/// Thin wrapper so that an `Arc<dyn WindowInfoProvider>` can be placed inside
+/// a `Box<dyn WindowInfoProvider>` (which is `Sized`) for use with `arc_swap`.
+struct ArcProviderWrapper(std::sync::Arc<dyn WindowInfoProvider>);
+
+#[async_trait::async_trait]
+impl WindowInfoProvider for ArcProviderWrapper {
+    fn name(&self) -> &'static str {
+        self.0.name()
+    }
+    async fn probe(&self) -> bool {
+        self.0.probe().await
+    }
+    async fn start(&self) -> Result<(), WindowInfoError> {
+        self.0.start().await
+    }
+    fn current(&self) -> WindowInfo {
+        self.0.current()
+    }
+    async fn stop(&self) -> Result<(), WindowInfoError> {
+        self.0.stop().await
+    }
+}
+
+/// Convert an `Arc<dyn WindowInfoProvider>` into the inner
+/// `Arc<Box<dyn WindowInfoProvider>>` suitable for use with
+/// `ArcSwapAny::store`.
+///
+/// `arc_swap` cannot store `Arc<dyn Trait>` directly (the `dyn Trait` base
+/// would become the target of an `AtomicPtr`, but `AtomicPtr<T>` requires
+/// `T: Sized`). This function wraps the pointer in a thin delegating struct so
+/// the resulting `Box<dyn WindowInfoProvider>` is `Sized`.
+pub fn into_shared_inner(
+    provider: std::sync::Arc<dyn WindowInfoProvider>,
+) -> std::sync::Arc<Box<dyn WindowInfoProvider>> {
+    let boxed: Box<dyn WindowInfoProvider> = Box::new(ArcProviderWrapper(provider));
+    std::sync::Arc::new(boxed)
+}
+
+/// Convert an `Arc<dyn WindowInfoProvider>` into a `SharedProvider`.
+pub fn into_shared(
+    provider: std::sync::Arc<dyn WindowInfoProvider>,
+) -> SharedProvider {
+    std::sync::Arc::new(arc_swap::ArcSwapAny::new(into_shared_inner(provider)))
+}
 
 /// Metadata about the currently active window.
 #[derive(Debug, Clone, Default)]

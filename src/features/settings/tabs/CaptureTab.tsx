@@ -3,15 +3,19 @@ import { SectionTitle } from "../primitives/SectionTitle";
 import { Field } from "../primitives/Field";
 import { NumberInput } from "../primitives/NumberInput";
 import { Toggle } from "../primitives/Toggle";
+import { GnomeTrackingCard } from "../GnomeTrackingCard";
 
 interface TabProps {
   config: AppConfig;
   update: <S extends keyof AppConfig, K extends keyof AppConfig[S]>(
     section: S, key: K, value: AppConfig[S][K],
   ) => void;
+  desktop?: string | null;
 }
 
-export function CaptureTab({ config, update }: TabProps) {
+export function CaptureTab({ config, update, desktop }: TabProps) {
+  const isGnome = (desktop ?? "").toLowerCase().includes("gnome");
+
   return (
     <>
       <SectionTitle>Screen Capture</SectionTitle>
@@ -37,6 +41,7 @@ export function CaptureTab({ config, update }: TabProps) {
           onChange={(v) => update("capture", "change_threshold", v)}
         />
       </Field>
+      {isGnome && <GnomeTrackingCard />}
     </>
   );
 }
