@@ -79,13 +79,16 @@ impl WindowInfoProvider for WindowCallsExtProvider {
                     break;
                 }
 
-                let title = call_str(&conn, "FocusTitle").await.unwrap_or_default();
-                let class = call_str(&conn, "FocusClass").await.unwrap_or_default();
-                let info = build_window_info(title, class);
-
-                debug!(app = ?info.app_name, title = ?info.window_title,
-                    "active window updated via Window Calls Extended");
-                *cached.lock().unwrap() = info;
+                let (title_opt, class_opt) = tokio::join!(
+                    call_str(&conn, "FocusTitle"),
+                    call_str(&conn, "FocusClass"),
+                );
+                if let (Some(title), Some(class)) = (title_opt, class_opt) {
+                    let info = build_window_info(title, class);
+                    debug!(app = ?info.app_name, title = ?info.window_title,
+                        "active window updated via Window Calls Extended");
+                    *cached.lock().unwrap() = info;
+                }
 
                 tokio::time::sleep(std::time::Duration::from_millis(500)).await;
             }
