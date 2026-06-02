@@ -50,6 +50,11 @@ The capture daemon exposes a D-Bus service on the **session bus** for control by
       <arg name="deleted_count" type="t" direction="out"/>
     </method>
 
+    <!-- Re-run window info provider selection and hot-swap -->
+    <method name="RecheckWindowInfo">
+      <arg name="provider_name" type="s" direction="out"/>
+    </method>
+
     <!-- Emitted when capture state changes -->
     <signal name="CaptureStateChanged">
       <arg name="is_capturing" type="b"/>
@@ -169,6 +174,18 @@ Also deletes WebP files from disk.
 **Response:**
 - `deleted_count` (u64): Number of screenshots deleted
 
+### RecheckWindowInfo() → String
+
+Re-runs window-info provider selection and hot-swaps the active provider
+without restarting the daemon. Returns the new provider name (e.g.
+`window-calls-ext`). Used after the user installs the Window Calls Extended
+GNOME extension so app/window tracking activates immediately. If selection
+resolves to the same provider already active, it is left running untouched and
+its name is returned.
+
+**Response:**
+- `provider_name` (String): Name of the now-active window info provider
+
 ## Properties
 
 ### IsCapturing (bool, read-only)
@@ -203,6 +220,7 @@ impl DaemonService {
     async fn get_status(&self) -> zbus::fdo::Result<String>;
     async fn search(&self, query: &str, filters_json: &str) -> zbus::fdo::Result<String>;
     async fn delete_range(&self, start: i64, end: i64) -> zbus::fdo::Result<u64>;
+    async fn recheck_window_info(&mut self) -> zbus::fdo::Result<String>;
 
     #[zbus(signal)]
     async fn capture_state_changed(ctxt: &SignalEmitter<'_>, is_capturing: bool) -> zbus::Result<()>;
