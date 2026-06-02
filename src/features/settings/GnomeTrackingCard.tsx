@@ -46,7 +46,9 @@ export function GnomeTrackingCard() {
       ? "bg-green-500"
       : state.kind === "installed-inactive"
         ? "bg-amber-500"
-        : "bg-red-500";
+        : state.kind === "loading"
+          ? "bg-border"
+          : "bg-red-500";
 
   return (
     <div className="mt-4 border border-border/60 rounded-md p-3 bg-surface/50">

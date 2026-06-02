@@ -40,6 +40,7 @@ export function GnomeExtensionBanner() {
         }}
         className="text-text-muted hover:text-text-primary transition-colors"
         title="Dismiss"
+        aria-label="Dismiss"
       >
         <X className="size-3.5" />
       </button>
