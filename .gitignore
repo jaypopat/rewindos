@@ -48,3 +48,7 @@ Thumbs.db
 
 # Personal / non-project files
 interview-answers.txt
+
+# build/test artifacts — never commit
+*.tar.gz
+rewindos-test-bundle.tar.gz
