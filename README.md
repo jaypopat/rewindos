@@ -35,6 +35,34 @@ Timer (5s) → Screen Capture → Hash & Dedupe → OCR → SQLite FTS5
 
 Linux (Wayland) — KDE Plasma 6+, GNOME, Hyprland, Sway.
 
+## Install
+
+RewindOS is local-first and privacy-focused, so the recommended install is **download, read, then run**:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jaypopat/rewindos/master/install.sh -o install.sh
+less install.sh          # read what it does
+bash install.sh
+```
+
+Prefer a one-liner? (Same script, run directly.)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jaypopat/rewindos/master/install.sh | bash
+```
+
+The installer detects your distro, installs the system dependencies (Tesseract, PipeWire, the webview, and the right desktop portal), downloads and **checksum-verifies** the latest release, and enables the capture daemon as a systemd user service.
+
+**Options**
+
+```bash
+bash install.sh --with-paddleocr   # higher-accuracy OCR (heavier Python deps)
+bash install.sh --update           # update to the latest release
+bash install.sh --uninstall        # remove RewindOS (asks before deleting your data)
+```
+
+**Requirements:** x86_64, a modern Wayland desktop (KDE, GNOME, Hyprland, Sway), and a current distro. The prebuilt binary targets recent glibc + `webkit2gtk-4.1`; on older distros, build from source.
+
 ## Prerequisites
 
 ```bash
@@ -50,7 +78,7 @@ Optional:
 - [Ollama](https://ollama.com) for local AI features (semantic search, chat, journal summaries).
 - Claude Code CLI for higher-quality chat — once installed and registered with MCP, the Ask view's model picker exposes its tiers (opus / sonnet / haiku).
 
-## Build & install
+## Build from source
 
 ```bash
 make install
