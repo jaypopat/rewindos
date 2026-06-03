@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useHotkey } from "@tanstack/react-hotkeys";
 import {
   getDaemonStatus,
   openExtensionPage,
@@ -18,8 +19,17 @@ import { FinishStep } from "./steps/FinishStep";
 
 const STEPS = ["welcome", "capture", "privacy", "finish"] as const;
 
+// Thin gate: WizardBody only mounts while open, so its step state resets
+// naturally on reopen (no manual reset needed), and its status poll stops
+// when closed (the body unmounts → query observer is torn down).
 export function FirstRunWizard() {
-  const { isOpen, complete } = useOnboarding();
+  const { isOpen } = useOnboarding();
+  if (!isOpen) return null;
+  return <WizardBody />;
+}
+
+function WizardBody() {
+  const { complete } = useOnboarding();
   const [stepIndex, setStepIndex] = useState(0);
   const [busy, setBusy] = useState(false);
   const qc = useQueryClient();
@@ -29,7 +39,6 @@ export function FirstRunWizard() {
     queryFn: getDaemonStatus,
     refetchInterval: 2000,
     retry: false,
-    enabled: isOpen,
   });
 
   const verdict = deriveCaptureVerdict(status, isError);
@@ -59,17 +68,10 @@ export function FirstRunWizard() {
   }, [isLast, complete]);
   const onBack = useCallback(() => setStepIndex((i) => Math.max(0, i - 1)), []);
 
-  useEffect(() => {
-    if (!isOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") complete();
-      else if (e.key === "Enter") onNext();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [isOpen, complete, onNext]);
-
-  if (!isOpen) return null;
+  // Esc skips — matches the app's overlay convention (ConfirmDialog,
+  // JournalSearchPanel). Enter advances only via the focused Next button's own
+  // click (no global Enter binding) so a step is never double-advanced.
+  useHotkey("Escape", () => complete());
 
   const step = STEPS[stepIndex];
   const nextLabel =

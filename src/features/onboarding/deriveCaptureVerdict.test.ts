@@ -48,6 +48,13 @@ describe("deriveCaptureVerdict", () => {
     expect(v.level).toBe("red");
   });
 
+  it("STALE GUARD: capturing but frame older than threshold → red/stalled, not unknown", () => {
+    const v = deriveCaptureVerdict(
+      s({ capture_state: "capturing", frames_captured_today: 7, seconds_since_last_frame: 200 }), false);
+    expect(v.code).toBe("stalled");
+    expect(v.level).toBe("red");
+  });
+
   it("OVERRIDE GUARD: unfiltered_capture while capturing → amber/unfiltered, NEVER green", () => {
     const v = deriveCaptureVerdict(
       s({ unfiltered_capture: true, frames_captured_today: 10, seconds_since_last_frame: 3 }), false);

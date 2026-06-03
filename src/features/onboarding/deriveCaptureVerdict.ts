@@ -105,7 +105,10 @@ export function deriveCaptureVerdict(
       actions: [], framesToday: frames,
     };
   }
-  if (cs === "stalled") {
+  // Stalled = the daemon's own signal, OR capturing-but-the-frame-is-ancient
+  // (a brief window before the daemon flips state). Either way capture isn't
+  // working right now, so it reads red rather than falling through to "unknown".
+  if (cs === "stalled" || (cs === "capturing" && secs !== null && secs > STALL_THRESHOLD_SECONDS)) {
     return {
       code: "stalled", level: "red",
       headline: "Capture started, but no frames are arriving.",
