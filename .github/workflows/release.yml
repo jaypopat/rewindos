@@ -17,10 +17,13 @@ concurrency:
 
 jobs:
   release:
-    # ubuntu-22.04 (jammy) is the compat floor: broader glibc reach than 24.04,
-    # and it ships libwebkit2gtk-4.1-dev (Tauri v2 supported). Prebuilt binaries
-    # target jammy-era-and-newer glibc + webkit2gtk-4.1.
-    runs-on: ubuntu-22.04
+    # ubuntu-24.04 is the compat floor. jammy (22.04) was tried for broader glibc
+    # reach, but its libpipewire-0.3/libspa is too old for the daemon —
+    # `spa_video_info_raw` has no `flags` field there (E0560). 24.04's PipeWire
+    # has it. Trade-off: the prebuilt binary targets 24.04-era glibc (2.39) and
+    # newer; older distros build from source (the install smoke-check detects a
+    # won't-run binary and says so).
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
 
