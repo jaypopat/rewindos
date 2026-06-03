@@ -34,8 +34,8 @@ export function GnomeExtensionBanner() {
         Install
       </button>
       <button
-        onClick={() => {
-          void setUnfilteredCapture(true);
+        onClick={async () => {
+          await setUnfilteredCapture(true);
           setShow(false);
         }}
         className="px-2 py-0.5 font-mono text-[11px] uppercase tracking-wider text-text-muted border border-border/60 hover:bg-surface transition-all"
