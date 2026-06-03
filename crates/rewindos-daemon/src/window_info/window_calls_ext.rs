@@ -7,10 +7,12 @@ use zbus::Connection;
 
 use super::{non_empty, WindowInfo, WindowInfoError, WindowInfoProvider};
 
-// Window Calls Extended D-Bus addressing. Verify against an installed copy
-// (see Task 1, Step 1) — these are the documented values for the extension.
+// Window Calls Extended D-Bus addressing. Verified against an installed copy on
+// GNOME 48 (busctl): "Window Calls Extended" exposes its methods at
+// /org/gnome/Shell/Extensions/WindowsExt — the bare ".../Windows" path belongs to
+// the original "Window Calls" extension and does NOT exist for WCE.
 const WC_BUS: &str = "org.gnome.Shell";
-const WC_PATH: &str = "/org/gnome/Shell/Extensions/Windows";
+const WC_PATH: &str = "/org/gnome/Shell/Extensions/WindowsExt";
 const WC_IFACE: &str = "org.gnome.Shell.Extensions.WindowsExt";
 
 /// GNOME window info provider backed by the "Window Calls Extended" extension.
