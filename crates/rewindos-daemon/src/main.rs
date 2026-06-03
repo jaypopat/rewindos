@@ -1,5 +1,6 @@
 mod capture;
 mod detect;
+mod lock_watcher;
 mod mcp_server;
 mod pipeline;
 mod service;
@@ -581,6 +582,14 @@ async fn run_daemon() -> anyhow::Result<()> {
             &config.privacy,
             unfiltered_override.load(std::sync::atomic::Ordering::SeqCst),
         );
+    }
+
+    // Lock watcher needs the system bus for logind; session bus for screensaver.
+    match zbus::Connection::system().await {
+        Ok(system_conn) => {
+            lock_watcher::spawn_lock_watcher(gate.clone(), system_conn, dbus_conn.clone());
+        }
+        Err(e) => warn!(error = %e, "no system bus; lock auto-pause disabled"),
     }
 
     // Create capture backend
