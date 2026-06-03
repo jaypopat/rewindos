@@ -1,3 +1,4 @@
+pub mod gate;
 pub mod kwin;
 pub mod portal;
 
