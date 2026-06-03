@@ -39,6 +39,9 @@ impl WindowInfoProvider for ArcProviderWrapper {
     async fn stop(&self) -> Result<(), WindowInfoError> {
         self.0.stop().await
     }
+    fn provides_reliable_metadata(&self) -> bool {
+        self.0.provides_reliable_metadata()
+    }
 }
 
 /// Convert an `Arc<dyn WindowInfoProvider>` into the inner
@@ -100,6 +103,19 @@ pub trait WindowInfoProvider: Send + Sync + 'static {
 
     /// Stop tracking and clean up resources.
     async fn stop(&self) -> Result<(), WindowInfoError>;
+
+    /// Whether this provider affirmatively produces real window metadata usable
+    /// for privacy exclusion matching.
+    ///
+    /// Default is `false` (FAIL-CLOSED): any provider that does not explicitly
+    /// opt in is treated as unreliable, so the privacy gate blocks capture when
+    /// exclusions are set rather than risk capturing unfiltered. This default
+    /// MUST stay `false`. It is the OPPOSITE of the lock watcher's "can't tell"
+    /// default by design — see the Asymmetry Principle in the capture-integrity
+    /// spec. Do not "fix" one to match the other.
+    fn provides_reliable_metadata(&self) -> bool {
+        false
+    }
 }
 
 /// Check if the active window should be excluded from capture.
@@ -229,5 +245,49 @@ mod tests {
         let excluded_apps = vec!["keepassxc".to_string()];
 
         assert!(!is_excluded(&info, &excluded_apps, &[]));
+    }
+
+    #[test]
+    fn noop_provider_is_not_reliable() {
+        use crate::window_info::noop::NoopWindowInfo;
+        assert!(!NoopWindowInfo.provides_reliable_metadata());
+    }
+
+    #[test]
+    fn wlr_provider_is_reliable() {
+        use crate::window_info::wlr_foreign_toplevel::WlrForeignToplevelProvider;
+        assert!(WlrForeignToplevelProvider::new().provides_reliable_metadata());
+    }
+
+    #[test]
+    fn trait_default_reliability_is_false() {
+        // A provider that does not override the method must be treated as
+        // unreliable (fail-closed default).
+        struct Bare;
+        #[async_trait]
+        impl WindowInfoProvider for Bare {
+            fn name(&self) -> &'static str { "bare" }
+            async fn probe(&self) -> bool { false }
+            async fn start(&self) -> Result<(), WindowInfoError> { Ok(()) }
+            fn current(&self) -> WindowInfo { WindowInfo::default() }
+            async fn stop(&self) -> Result<(), WindowInfoError> { Ok(()) }
+        }
+        assert!(!Bare.provides_reliable_metadata());
+    }
+
+    #[test]
+    fn arc_wrapper_delegates_reliability() {
+        struct Reliable;
+        #[async_trait]
+        impl WindowInfoProvider for Reliable {
+            fn name(&self) -> &'static str { "reliable" }
+            async fn probe(&self) -> bool { true }
+            async fn start(&self) -> Result<(), WindowInfoError> { Ok(()) }
+            fn current(&self) -> WindowInfo { WindowInfo::default() }
+            async fn stop(&self) -> Result<(), WindowInfoError> { Ok(()) }
+            fn provides_reliable_metadata(&self) -> bool { true }
+        }
+        let shared = into_shared(std::sync::Arc::new(Reliable));
+        assert!(shared.load_full().provides_reliable_metadata());
     }
 }

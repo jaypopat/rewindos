@@ -177,4 +177,8 @@ impl WindowInfoProvider for KwinWindowInfo {
         self.unload_kwin_script().await;
         Ok(())
     }
+
+    fn provides_reliable_metadata(&self) -> bool {
+        true
+    }
 }

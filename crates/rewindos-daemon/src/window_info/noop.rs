@@ -29,4 +29,9 @@ impl WindowInfoProvider for NoopWindowInfo {
     async fn stop(&self) -> Result<(), WindowInfoError> {
         Ok(())
     }
+
+    fn provides_reliable_metadata(&self) -> bool {
+        // Noop returns empty WindowInfo — exclusions cannot be enforced.
+        false
+    }
 }
