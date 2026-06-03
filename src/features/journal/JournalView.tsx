@@ -46,17 +46,23 @@ export function JournalView({ onSelectScreenshot }: JournalViewProps) {
       <div className="flex-1 flex flex-col min-w-0 border-r border-border/50">
         {/* Date nav + search */}
         <div className="flex items-center gap-2 px-5 py-3 border-b border-border/50 shrink-0">
-          <button onClick={j.goToPrev} className="p-1 text-text-muted hover:text-text-secondary transition-colors">
+          <button
+            onClick={j.goToPrev}
+            title="Previous day (Alt+←)"
+            className="p-1 text-text-muted hover:text-text-secondary transition-colors"
+          >
             <ChevronLeft className="size-4" strokeWidth={2} />
           </button>
           <button
             onClick={j.goToToday}
+            title="Jump to today"
             className="text-sm font-medium text-text-primary hover:text-accent transition-colors min-w-[140px] text-center"
           >
             {j.formattedDate}
           </button>
           <button
             onClick={j.goToNext}
+            title="Next day (Alt+→)"
             className="p-1 text-text-muted hover:text-text-secondary transition-colors"
           >
             <ChevronRight className="size-4" strokeWidth={2} />
