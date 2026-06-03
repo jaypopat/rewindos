@@ -2,6 +2,8 @@ import { type AppConfig } from "@/lib/config";
 import { SectionTitle } from "../primitives/SectionTitle";
 import { Field } from "../primitives/Field";
 import { TextInput } from "../primitives/TextInput";
+import { Button } from "@/components/ui/button";
+import { useOnboarding } from "@/features/onboarding/OnboardingContext";
 
 interface TabProps {
   config: AppConfig;
@@ -11,6 +13,7 @@ interface TabProps {
 }
 
 export function GeneralTab({ config, update }: TabProps) {
+  const { open } = useOnboarding();
   return (
     <>
       <SectionTitle>General</SectionTitle>
@@ -19,6 +22,11 @@ export function GeneralTab({ config, update }: TabProps) {
           value={config.ui.global_hotkey}
           onChange={(v) => update("ui", "global_hotkey", v)}
         />
+      </Field>
+      <Field label="Setup">
+        <Button variant="outline" size="xs" onClick={open}>
+          Run setup again
+        </Button>
       </Field>
     </>
   );
