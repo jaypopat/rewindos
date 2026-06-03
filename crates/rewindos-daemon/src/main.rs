@@ -21,7 +21,11 @@ use rewindos_core::schema::OcrStatus;
 use tracing::{info, warn};
 
 #[derive(Parser)]
-#[command(name = "rewindos-daemon", about = "RewindOS capture daemon")]
+#[command(
+    name = "rewindos-daemon",
+    about = "RewindOS capture daemon",
+    version = option_env!("REWINDOS_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"))
+)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
