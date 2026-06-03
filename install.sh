@@ -154,6 +154,9 @@ place_files() {
   mkdir -p "$BIN_DIR" "$APP_DIR" "$UNIT_DIR" "$AUTOSTART_DIR" "$DATA_DIR"
   install -m755 "$src/rewindos"        "$BIN_DIR/rewindos"
   install -m755 "$src/rewindos-daemon" "$BIN_DIR/rewindos-daemon"
+  # Stash the PaddleOCR worker (NOT activated unless the user opts in via --with-paddleocr)
+  mkdir -p "$(dirname "$BIN_DIR")/share/rewindos"
+  install -m644 "$src/paddleocr_worker.py" "$(dirname "$BIN_DIR")/share/rewindos/paddleocr_worker.py"
 
   # systemd unit (uses %h, no rewrite needed)
   install -m644 "$src/rewindos-daemon.service" "$UNIT_DIR/rewindos-daemon.service"
@@ -224,8 +227,53 @@ do_install() { # do_install <with_paddleocr:0|1>
   log "On GNOME, install the 'Window Calls Extended' extension for app/window tracking."
 }
 
-do_paddleocr()         { die "do_paddleocr implemented in Task 6"; }
-maybe_prompt_paddleocr() { :; }
+python_pkgs_for() { # python_pkgs_for <pkg_mgr>
+  case "$1" in
+    apt)    echo "python3 python3-pip" ;;
+    dnf)    echo "python3 python3-pip" ;;
+    pacman) echo "python python-pip" ;;
+    *)      echo "" ;;
+  esac
+}
+
+do_paddleocr() {
+  local pm; pm="$(detect_pkg_mgr)"
+  local pypkgs; pypkgs="$(python_pkgs_for "$pm")"
+  log "Setting up PaddleOCR (downloads several hundred MB of Python deps)..."
+
+  if [[ -n "$pypkgs" ]]; then
+    # shellcheck disable=SC2086
+    run_pkg_install "$pm" $pypkgs || { warn "Could not install $pypkgs; staying on Tesseract."; return 0; }
+  fi
+
+  if ! python3 -m pip install --user paddleocr paddlepaddle; then
+    warn "pip install of paddleocr/paddlepaddle failed — staying on Tesseract (no config change)."
+    return 0
+  fi
+
+  # Get the worker into ~/.rewindos (where find_worker_script() looks first).
+  # place_files stashed it under ~/.local/share/rewindos; if that's
+  # missing, fall back to fetching it from the repo. It is only activated here,
+  # on explicit opt-in — a default Tesseract install never places it.
+  if [[ -f "$DATA_DIR/paddleocr_worker.py" ]]; then
+    : # already present
+  elif [[ -f "$(dirname "$BIN_DIR")/share/rewindos/paddleocr_worker.py" ]]; then
+    install -m644 "$(dirname "$BIN_DIR")/share/rewindos/paddleocr_worker.py" "$DATA_DIR/paddleocr_worker.py"
+  else
+    curl -fsSL "https://raw.githubusercontent.com/$REPO/master/scripts/paddleocr_worker.py" \
+      -o "$DATA_DIR/paddleocr_worker.py" || { warn "Could not fetch the worker script — staying on Tesseract."; return 0; }
+  fi
+
+  set_config_engine "$DATA_DIR/config.toml" paddleocr
+  systemctl --user restart rewindos-daemon.service 2>/dev/null || true
+  log "PaddleOCR enabled."
+}
+
+maybe_prompt_paddleocr() {
+  if prompt_yes_no "Enable higher-accuracy PaddleOCR? Downloads ~hundreds of MB of Python deps."; then
+    do_paddleocr
+  fi
+}
 # prompt_yes_no <question> -> 0 if yes. Reads /dev/tty so it works under curl|bash.
 # Non-interactive (no tty) -> default No.
 prompt_yes_no() {
@@ -274,6 +322,7 @@ do_uninstall() {
   rm -f "$APP_DIR/$APP_ID.desktop" "$APP_DIR/com.rewindos.Daemon.desktop"
   rm -f "$AUTOSTART_DIR/rewindos.desktop"
   rm -f "$DATA_DIR/paddleocr_worker.py" "$VERSION_FILE"
+  rm -rf "$(dirname "$BIN_DIR")/share/rewindos"
   local s
   for s in 32x32 128x128 256x256 512x512; do
     rm -f "$ICON_BASE/$s/apps/$APP_ID.png"
