@@ -472,6 +472,45 @@ const SPA_FORMAT_VIDEO_FORMAT: u32 = 0x00020001;
 const SPA_FORMAT_VIDEO_SIZE: u32 = 0x00020003;
 const SPA_FORMAT_VIDEO_FRAMERATE: u32 = 0x00020004;
 
+/// Extract the concrete/default value from a possibly Choice-wrapped pod value.
+fn choice_default<T: Clone + pipewire::spa::pod::CanonicalFixedSizedPod>(
+    choice: &pipewire::spa::utils::Choice<T>,
+) -> T {
+    use pipewire::spa::utils::ChoiceEnum;
+    match &choice.1 {
+        ChoiceEnum::None(v) => v.clone(),
+        ChoiceEnum::Range { default, .. } => default.clone(),
+        ChoiceEnum::Step { default, .. } => default.clone(),
+        ChoiceEnum::Enum { default, .. } => default.clone(),
+        ChoiceEnum::Flags { default, .. } => default.clone(),
+    }
+}
+
+/// Read a Rectangle from a pod value, whether it is bare or wrapped in a Choice.
+/// Mutter (GNOME) fixates negotiated format params as `SPA_CHOICE_None` choices
+/// rather than bare values, so a `Value::Rectangle`-only match never matches and
+/// size parsing fails with "missing size in format".
+fn extract_rectangle(
+    value: &pipewire::spa::pod::Value,
+) -> Option<pipewire::spa::utils::Rectangle> {
+    use pipewire::spa::pod::{ChoiceValue, Value};
+    match value {
+        Value::Rectangle(r) => Some(*r),
+        Value::Choice(ChoiceValue::Rectangle(c)) => Some(choice_default(c)),
+        _ => None,
+    }
+}
+
+/// Read an Id (u32) from a pod value, whether bare or Choice-wrapped.
+fn extract_id(value: &pipewire::spa::pod::Value) -> Option<u32> {
+    use pipewire::spa::pod::{ChoiceValue, Value};
+    match value {
+        Value::Id(id) => Some(id.0),
+        Value::Choice(ChoiceValue::Id(c)) => Some(choice_default(c).0),
+        _ => None,
+    }
+}
+
 /// Parse the negotiated video format from a SPA pod.
 fn parse_video_format(param: &pipewire::spa::pod::Pod) -> Result<VideoFormat, String> {
     use pipewire::spa::pod::deserialize::PodDeserializer;
@@ -491,12 +530,12 @@ fn parse_video_format(param: &pipewire::spa::pod::Pod) -> Result<VideoFormat, St
     for prop in &obj.properties {
         match prop.key {
             SPA_FORMAT_VIDEO_FORMAT => {
-                if let Value::Id(id) = &prop.value {
-                    format_id = id.0;
+                if let Some(id) = extract_id(&prop.value) {
+                    format_id = id;
                 }
             }
             SPA_FORMAT_VIDEO_SIZE => {
-                if let Value::Rectangle(rect) = &prop.value {
+                if let Some(rect) = extract_rectangle(&prop.value) {
                     width = rect.width;
                     height = rect.height;
                 }
@@ -506,7 +545,8 @@ fn parse_video_format(param: &pipewire::spa::pod::Pod) -> Result<VideoFormat, St
     }
 
     if width == 0 || height == 0 {
-        return Err("missing size in format".into());
+        let keys: Vec<u32> = obj.properties.iter().map(|p| p.key).collect();
+        return Err(format!("missing size in format (property keys: {keys:x?})"));
     }
 
     let spa_format = match format_id {
