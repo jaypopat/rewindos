@@ -76,7 +76,26 @@ export function DaemonPanel() {
     );
   }
 
-  const isCapturing = status.is_capturing;
+  const isCapturing = status.is_capturing; // user intent — drives the toggle action
+
+  // Display reflects EFFECTIVE state (capture_state), which may differ from intent
+  // (e.g. auto-paused while locked, or stalled). Falls back to intent for old daemons.
+  const captureState = status.capture_state
+    ?? (isCapturing ? "capturing" : "paused_user");
+
+  const display = {
+    capturing:      { color: "bg-signal-active",  label: "capturing", ping: true },
+    stalled:        { color: "bg-signal-stalled", label: "stalled",   ping: false },
+    paused_user:    { color: "bg-signal-paused",  label: "paused",    ping: false },
+    paused_locked:  { color: "bg-signal-paused",  label: "paused — locked",  ping: false },
+    paused_privacy: { color: "bg-signal-paused",  label: "paused — privacy", ping: false },
+  }[captureState] ?? { color: "bg-signal-paused", label: captureState, ping: false };
+
+  const toggleHint = isCapturing ? "Click to pause" : "Click to resume";
+  const reasonHint =
+    captureState === "paused_locked" ? " (screen locked)" :
+    captureState === "paused_privacy" ? " (exclusions can't be enforced)" :
+    captureState === "stalled" ? " (no frames arriving)" : "";
 
   return (
     <TooltipProvider>
@@ -90,15 +109,15 @@ export function DaemonPanel() {
               className="flex items-center gap-1.5 text-text-secondary hover:text-text-primary transition-colors disabled:opacity-50"
             >
               <span className="relative flex h-2 w-2">
-                {isCapturing && (
+                {display.ping && (
                   <span className="absolute inline-flex h-full w-full animate-ping bg-signal-active opacity-75" />
                 )}
-                <span className={`relative inline-flex h-2 w-2 ${isCapturing ? "bg-signal-active" : "bg-signal-paused"}`} />
+                <span className={`relative inline-flex h-2 w-2 ${display.color}`} />
               </span>
-              {isCapturing ? "capturing" : "paused"}
+              {display.label}
             </button>
           </TooltipTrigger>
-          <TooltipContent>{isCapturing ? "Click to pause" : "Click to resume"}</TooltipContent>
+          <TooltipContent>{toggleHint}{reasonHint}</TooltipContent>
         </Tooltip>
 
         <span className="text-border">|</span>

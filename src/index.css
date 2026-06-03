@@ -20,6 +20,7 @@
   --color-signal-active: #34d399;
   --color-signal-paused: #fbbf24;
   --color-signal-error: #f87171;
+  --color-signal-stalled: #fb923c;
 
   /* Text */
   --color-text-primary: #fafafa;
