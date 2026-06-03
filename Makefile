@@ -24,7 +24,9 @@ dev:
 	bun run tauri dev
 
 build:
-	bun run tauri build
+	@# --no-bundle: we distribute a tarball (see install.sh / release.yml), not
+	@# deb/rpm, and `install` only needs target/release/rewindos.
+	bun run tauri build --no-bundle
 
 install: build install-daemon
 	@echo "==> Installing RewindOS UI app"
@@ -35,18 +37,18 @@ install: build install-daemon
 	rm -f ~/.local/share/applications/com.rewindos.RewindOS.desktop
 	@# Desktop entry (app launcher) — filename must match Wayland app_id
 	mkdir -p ~/.local/share/applications
-	cp systemd/rewindos.desktop ~/.local/share/applications/com.jay.rewindos.desktop
-	sed -i "s|^Exec=.*|Exec=$(HOME)/.local/bin/rewindos|" ~/.local/share/applications/com.jay.rewindos.desktop
+	cp systemd/rewindos.desktop ~/.local/share/applications/io.github.jaypopat.rewindos.desktop
+	sed -i "s|^Exec=.*|Exec=$(HOME)/.local/bin/rewindos|" ~/.local/share/applications/io.github.jaypopat.rewindos.desktop
 	update-desktop-database ~/.local/share/applications/ 2>/dev/null || true
 	@# Install icons to hicolor theme
 	mkdir -p ~/.local/share/icons/hicolor/32x32/apps
 	mkdir -p ~/.local/share/icons/hicolor/128x128/apps
 	mkdir -p ~/.local/share/icons/hicolor/256x256/apps
 	mkdir -p ~/.local/share/icons/hicolor/512x512/apps
-	cp src-tauri/icons/32x32.png ~/.local/share/icons/hicolor/32x32/apps/com.jay.rewindos.png
-	cp src-tauri/icons/128x128.png ~/.local/share/icons/hicolor/128x128/apps/com.jay.rewindos.png
-	cp src-tauri/icons/128x128@2x.png ~/.local/share/icons/hicolor/256x256/apps/com.jay.rewindos.png
-	cp src-tauri/icons/icon.png ~/.local/share/icons/hicolor/512x512/apps/com.jay.rewindos.png
+	cp src-tauri/icons/32x32.png ~/.local/share/icons/hicolor/32x32/apps/io.github.jaypopat.rewindos.png
+	cp src-tauri/icons/128x128.png ~/.local/share/icons/hicolor/128x128/apps/io.github.jaypopat.rewindos.png
+	cp src-tauri/icons/128x128@2x.png ~/.local/share/icons/hicolor/256x256/apps/io.github.jaypopat.rewindos.png
+	cp src-tauri/icons/icon.png ~/.local/share/icons/hicolor/512x512/apps/io.github.jaypopat.rewindos.png
 	gtk-update-icon-cache ~/.local/share/icons/hicolor/ 2>/dev/null || true
 	@# Autostart on login (starts minimized in tray)
 	mkdir -p ~/.config/autostart
@@ -75,14 +77,14 @@ uninstall:
 	systemctl --user disable rewindos-daemon 2>/dev/null || true
 	rm -f ~/.config/systemd/user/rewindos-daemon.service
 	rm -f ~/.config/autostart/rewindos.desktop
-	rm -f ~/.local/share/applications/com.jay.rewindos.desktop
+	rm -f ~/.local/share/applications/io.github.jaypopat.rewindos.desktop
 	rm -f ~/.local/share/applications/com.rewindos.RewindOS.desktop
 	rm -f ~/.local/share/applications/com.rewindos.Daemon.desktop
 	rm -f ~/.local/bin/rewindos
-	rm -f ~/.local/share/icons/hicolor/32x32/apps/com.jay.rewindos.png
-	rm -f ~/.local/share/icons/hicolor/128x128/apps/com.jay.rewindos.png
-	rm -f ~/.local/share/icons/hicolor/256x256/apps/com.jay.rewindos.png
-	rm -f ~/.local/share/icons/hicolor/512x512/apps/com.jay.rewindos.png
+	rm -f ~/.local/share/icons/hicolor/32x32/apps/io.github.jaypopat.rewindos.png
+	rm -f ~/.local/share/icons/hicolor/128x128/apps/io.github.jaypopat.rewindos.png
+	rm -f ~/.local/share/icons/hicolor/256x256/apps/io.github.jaypopat.rewindos.png
+	rm -f ~/.local/share/icons/hicolor/512x512/apps/io.github.jaypopat.rewindos.png
 	gtk-update-icon-cache ~/.local/share/icons/hicolor/ 2>/dev/null || true
 	systemctl --user daemon-reload
 	update-desktop-database ~/.local/share/applications/ 2>/dev/null || true

@@ -5,7 +5,7 @@ set -euo pipefail
 
 REPO="jaypopat/rewindos"
 ASSET="rewindos-linux-x86_64.tar.gz"
-APP_ID="com.jay.rewindos"
+APP_ID="io.github.jaypopat.rewindos"
 
 BIN_DIR="$HOME/.local/bin"
 APP_DIR="$HOME/.local/share/applications"

@@ -2,7 +2,7 @@
 Name=RewindOS
 Comment=Privacy-first screen capture and search
 Exec=rewindos --minimized
-Icon=com.jay.rewindos
+Icon=io.github.jaypopat.rewindos
 Type=Application
 Categories=Utility;
 StartupWMClass=rewindos

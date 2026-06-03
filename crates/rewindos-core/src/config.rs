@@ -169,8 +169,10 @@ impl Default for PrivacyConfig {
     fn default() -> Self {
         Self {
             excluded_apps: vec![
+                // "rewindos" is a substring of every form the providers report
+                // (bare app_id, the bundle identifier, "RewindOS"), so one entry
+                // self-excludes regardless of desktop/identifier.
                 "rewindos".to_string(),
-                "com.jay.rewindos".to_string(),
                 "keepassxc".to_string(),
                 "1password".to_string(),
                 "bitwarden".to_string(),

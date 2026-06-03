@@ -231,9 +231,9 @@ mod tests {
 
     #[test]
     fn is_excluded_should_match_substring_app_id() {
-        // Tauri apps report identifier like "com.jay.rewindos" while
-        // excluded_apps may contain just "rewindos"
-        let info = make_info("com.jay.rewindos", "RewindOS", "com.jay.rewindos");
+        // Tauri apps report an identifier like "io.github.jaypopat.rewindos"
+        // while excluded_apps may contain just "rewindos"
+        let info = make_info("io.github.jaypopat.rewindos", "RewindOS", "io.github.jaypopat.rewindos");
         let excluded_apps = vec!["rewindos".to_string()];
 
         assert!(is_excluded(&info, &excluded_apps, &[]));
