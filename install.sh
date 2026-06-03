@@ -377,7 +377,10 @@ main() {
   esac
 }
 
-# Only run when executed, not when sourced by tests.
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+# Run when executed as a file (BASH_SOURCE[0] == $0) OR piped via stdin
+# (curl|bash — BASH_SOURCE is empty), but NOT when sourced by tests (where
+# BASH_SOURCE[0] is this file's path and differs from $0). The ":-" defaults
+# keep this safe under `set -u`, which is what broke the naked ${BASH_SOURCE[0]}.
+if [[ "${BASH_SOURCE[0]:-}" == "${0}" || -z "${BASH_SOURCE[0]:-}" ]]; then
   main "$@"
 fi
