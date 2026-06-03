@@ -5,5 +5,5 @@ Exec=rewindos --minimized
 Icon=com.jay.rewindos
 Type=Application
 Categories=Utility;
-StartupWMClass=com.jay.rewindos
+StartupWMClass=rewindos
 X-GNOME-Autostart-enabled=true
