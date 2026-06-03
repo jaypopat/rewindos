@@ -23,6 +23,7 @@ import {
   ViewSuspense,
 } from "@/app/routes";
 import { SaveMomentDialog } from "@/features/saved/SaveMomentDialog";
+import { FirstRunWizard } from "@/features/onboarding/FirstRunWizard";
 import { Clock } from "lucide-react";
 
 type SubView = "list" | "detail";
@@ -291,6 +292,7 @@ function App() {
       </div>
 
       {showSaveMoment && <SaveMomentDialog onClose={() => setShowSaveMoment(false)} />}
+      <FirstRunWizard />
     </main>
   );
 }
