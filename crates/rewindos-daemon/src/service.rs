@@ -83,6 +83,16 @@ impl DaemonService {
         .await
         .unwrap_or(0);
 
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        let capture_state = Some(self.gate.capture_state(now_ms, capture_interval).as_str().to_string());
+        let seconds_since_last_frame = self.gate.seconds_since_last_frame(now_ms);
+        let last_frame = self.gate.last_frame_at();
+        let last_capture_timestamp = if last_frame == 0 { None } else { Some(last_frame as i64) };
+        let unfiltered_capture = self.unfiltered_override.load(Ordering::SeqCst);
+
         let status = DaemonStatus {
             is_capturing,
             frames_captured_today,
@@ -97,11 +107,14 @@ impl DaemonService {
             uptime_seconds: uptime,
             disk_usage_bytes,
             capture_interval,
-            last_capture_timestamp: None,
+            last_capture_timestamp,
             capture_backend: Some(self.capture_backend_name.clone()),
             window_info_provider: Some(self.window_info.load_full().name().to_string()),
             desktop: Some(self.desktop_name.clone()),
             session: Some(self.session_name.clone()),
+            capture_state,
+            seconds_since_last_frame,
+            unfiltered_capture,
         };
 
         serde_json::to_string(&status)
@@ -220,6 +233,17 @@ impl DaemonService {
 
         info!(from = old_name, to = %new_name, "window info provider hot-swapped");
         Ok(new_name)
+    }
+
+    /// Toggle the privacy escape hatch: capture even when window metadata can't
+    /// enforce exclusions. In-memory (per-session). Recomputes the privacy gate
+    /// immediately so the change takes effect without restart.
+    async fn set_unfiltered_capture(&mut self, enabled: bool) -> zbus::fdo::Result<()> {
+        info!(enabled, "set unfiltered capture via D-Bus");
+        self.unfiltered_override.store(enabled, Ordering::SeqCst);
+        let p = self.window_info.load_full();
+        recompute_privacy_gate(&self.gate, &**p, &self.config.privacy, enabled);
+        Ok(())
     }
 
     #[zbus(property)]
