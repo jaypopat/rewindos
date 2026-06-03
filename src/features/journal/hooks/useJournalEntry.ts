@@ -35,6 +35,11 @@ import {
 } from "date-fns";
 import { buildCarryForwardContent } from "../utils";
 
+// How long a journal entry stays "fresh" in cache. Long enough that the
+// adjacent-day prefetch and back-navigation reuse our optimistic cache writes
+// instead of re-reading a row that may still be mid-save.
+const JOURNAL_ENTRY_STALE_MS = 30_000;
+
 function extractTextFromJson(content: string): string {
   try {
     return walkText(JSON.parse(content) as JSONContent);
@@ -69,6 +74,11 @@ export function useJournalEntry() {
   const { data: entry, isLoading: entryLoading } = useQuery({
     queryKey: queryKeys.journalEntry(dateKey),
     queryFn: () => getJournalEntry(dateKey),
+    // Keep edited days fresh in cache so the adjacent-day prefetch (and
+    // navigating back) doesn't re-read a still-being-saved row and clobber
+    // the text we just optimistically wrote. We keep this cache authoritative
+    // via setQueryData on every save (see cacheEntryContent).
+    staleTime: JOURNAL_ENTRY_STALE_MS,
   });
 
   const { data: streak } = useQuery({
@@ -163,21 +173,55 @@ export function useJournalEntry() {
     queryClient.prefetchQuery({
       queryKey: queryKeys.journalEntry(prevKey),
       queryFn: () => getJournalEntry(prevKey),
+      staleTime: JOURNAL_ENTRY_STALE_MS,
     });
     queryClient.prefetchQuery({
       queryKey: queryKeys.journalEntry(nextKey),
       queryFn: () => getJournalEntry(nextKey),
+      staleTime: JOURNAL_ENTRY_STALE_MS,
     });
   }, [selectedDate, queryClient]);
 
   // ── Auto-save with debounce ──
 
-  const debouncedContent = useDebounce(content, 800);
+  // Optimistically keep the journalEntry cache in sync with the latest text
+  // for a date. goToDate() seeds the editor synchronously from this cache, so
+  // it must reflect unsaved/just-saved content — otherwise switching away and
+  // back shows stale/empty text even though the DB has it.
+  const cacheEntryContent = useCallback(
+    (date: string, value: string, id?: number) => {
+      queryClient.setQueryData<JournalEntry | null>(
+        queryKeys.journalEntry(date),
+        (old) =>
+          old
+            ? { ...old, content: value }
+            : {
+                id: id ?? 0,
+                date,
+                content: value,
+                mood: null,
+                energy: null,
+                word_count: 0,
+                created_at: "",
+                updated_at: "",
+              },
+      );
+    },
+    [queryClient],
+  );
+
+  // Debounce the (date, content) pair together so a pending save is always
+  // bound to the date the text was typed on — never the date we've since
+  // navigated to. Without this, the lagging debounce can stamp the previous
+  // day's text onto the day we just switched to.
+  const editState = useMemo(() => ({ date: dateKey, content }), [dateKey, content]);
+  const debouncedEdit = useDebounce(editState, 800);
 
   const saveMutation = useMutation({
-    mutationFn: (data: { content: string }) =>
-      upsertJournalEntry({ date: dateKey, content: data.content }),
-    onSuccess: () => {
+    mutationFn: (data: { date: string; content: string }) =>
+      upsertJournalEntry(data).then((id) => ({ id, ...data })),
+    onSuccess: ({ id, date, content: saved }) => {
+      cacheEntryContent(date, saved, id);
       queryClient.invalidateQueries({ queryKey: queryKeys.journalStreak() });
       queryClient.invalidateQueries({
         queryKey: queryKeys.journalDates(calendarStart, calendarEnd),
@@ -191,11 +235,19 @@ export function useJournalEntry() {
   // re-firing on object-identity changes when content is unchanged.
   const saveMutate = saveMutation.mutate;
   useEffect(() => {
+    if (entryLoading) return;
+    // Only auto-save when the debounced snapshot still matches the LIVE editor
+    // state. A debounce that hasn't caught up (e.g. you typed then switched
+    // away before 800ms, then came back) holds a stale (date, content) pair —
+    // persisting it would clobber the real text. Matching against live state
+    // also covers the cross-date case: after a switch the snapshot's date no
+    // longer equals dateKey, so we never stamp one day's text onto another.
+    if (debouncedEdit.date !== dateKey || debouncedEdit.content !== content) return;
     const stored = entry?.content ?? "";
-    if (debouncedContent !== stored && !entryLoading) {
-      saveMutate({ content: debouncedContent });
+    if (debouncedEdit.content !== stored) {
+      saveMutate({ date: debouncedEdit.date, content: debouncedEdit.content });
     }
-  }, [debouncedContent, entry?.content, entryLoading, saveMutate]);
+  }, [debouncedEdit, dateKey, content, entry?.content, entryLoading, saveMutate]);
 
   // ── Screenshot attach / detach ──
 
@@ -231,7 +283,10 @@ export function useJournalEntry() {
       // when we reset content to the new date's cached value below.
       const currentStored = entry?.content ?? "";
       if (content !== currentStored && !entryLoading) {
-        saveMutate({ content });
+        // Write to cache synchronously *before* navigating so the adjacent-day
+        // prefetch sees a fresh row and skips re-reading the still-saving day.
+        cacheEntryContent(dateKey, content, entry?.id);
+        saveMutate({ date: dateKey, content });
       }
 
       // Read cached entry content so the new editor mounts with the correct
@@ -246,7 +301,7 @@ export function useJournalEntry() {
       setShowScreenshotPicker(false);
       setShowSearch(false);
     },
-    [queryClient, content, entry?.content, entryLoading, saveMutate],
+    [queryClient, dateKey, content, entry?.content, entry?.id, entryLoading, saveMutate, cacheEntryContent],
   );
 
   const goToPrev = useCallback(() => {
