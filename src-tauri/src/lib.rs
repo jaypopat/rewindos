@@ -57,6 +57,12 @@ struct DaemonStatusResponse {
     window_info_provider: Option<String>,
     #[serde(default)]
     desktop: Option<String>,
+    #[serde(default)]
+    capture_state: Option<String>,
+    #[serde(default)]
+    seconds_since_last_frame: Option<u64>,
+    #[serde(default)]
+    unfiltered_capture: bool,
 }
 
 /// Filters received from the frontend (no `query` field — it's a separate param).
@@ -201,6 +207,24 @@ async fn recheck_window_info(state: State<'_, AppState>) -> Result<String, Strin
         .body()
         .deserialize::<String>()
         .map_err(|e| format!("dbus deserialize: {e}"))
+}
+
+/// Toggle the privacy escape hatch on the daemon (capture without exclusion
+/// enforcement). Used by the "Capture anyway" control on GNOME.
+#[tauri::command]
+async fn set_unfiltered_capture(state: State<'_, AppState>, enabled: bool) -> Result<(), String> {
+    state
+        .dbus
+        .call_method(
+            Some("com.rewindos.Daemon"),
+            "/com/rewindos/Daemon",
+            Some("com.rewindos.Daemon"),
+            "SetUnfilteredCapture",
+            &(enabled),
+        )
+        .await
+        .map_err(|e| format!("dbus call: {e}"))?;
+    Ok(())
 }
 
 /// Open the Window Calls Extended page on extensions.gnome.org.
@@ -1744,6 +1768,7 @@ pub fn run() {
             gnome_extension_status,
             recheck_window_info,
             open_extension_page,
+            set_unfiltered_capture,
             get_screenshot,
             get_screenshots_by_ids,
             get_app_names,

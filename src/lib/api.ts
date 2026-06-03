@@ -62,6 +62,9 @@ export interface DaemonStatus {
   last_capture_timestamp: number | null;
   window_info_provider?: string | null;
   desktop?: string | null;
+  capture_state?: string | null;
+  seconds_since_last_frame?: number | null;
+  unfiltered_capture?: boolean;
 }
 
 export async function search(
@@ -122,6 +125,10 @@ export async function recheckWindowInfo(): Promise<string> {
 
 export async function openExtensionPage(): Promise<void> {
   return invoke("open_extension_page");
+}
+
+export async function setUnfilteredCapture(enabled: boolean): Promise<void> {
+  return invoke("set_unfiltered_capture", { enabled });
 }
 
 export async function getAppNames(): Promise<string[]> {
