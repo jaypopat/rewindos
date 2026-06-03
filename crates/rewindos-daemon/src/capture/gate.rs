@@ -1,3 +1,7 @@
+// All items below are consumed once the gate is wired into the pipeline and
+// D-Bus service in Task 4. Until then they are intentionally unused.
+#![allow(dead_code)]
+
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use rewindos_core::config::PrivacyConfig;
@@ -101,6 +105,9 @@ impl CaptureGate {
     }
     pub fn set_lock_blocked(&self, v: bool) {
         self.lock_blocked.store(v, Ordering::SeqCst);
+    }
+    pub fn lock_blocked(&self) -> bool {
+        self.lock_blocked.load(Ordering::SeqCst)
     }
     pub fn last_frame_at(&self) -> u64 {
         self.last_frame_at.load(Ordering::Relaxed)
