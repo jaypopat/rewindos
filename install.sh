@@ -226,9 +226,83 @@ do_install() { # do_install <with_paddleocr:0|1>
 
 do_paddleocr()         { die "do_paddleocr implemented in Task 6"; }
 maybe_prompt_paddleocr() { :; }
-do_update()            { die "do_update implemented in Task 5"; }
-do_uninstall()         { die "do_uninstall implemented in Task 5"; }
-print_help()           { echo "usage: install.sh [--update|--uninstall|--with-paddleocr|--help]"; }
+# prompt_yes_no <question> -> 0 if yes. Reads /dev/tty so it works under curl|bash.
+# Non-interactive (no tty) -> default No.
+prompt_yes_no() {
+  local q="$1" ans=""
+  if [[ -r /dev/tty ]]; then
+    printf '%s [y/N] ' "$q" > /dev/tty
+    read -r ans < /dev/tty || ans=""
+  else
+    ans=""   # non-interactive: safe default (No)
+  fi
+  [[ "$ans" == "y" || "$ans" == "Y" ]]
+}
+
+installed_version() {
+  if [[ -x "$BIN_DIR/rewindos-daemon" ]]; then
+    "$BIN_DIR/rewindos-daemon" --version 2>/dev/null | awk '{print $NF}'
+  elif [[ -f "$VERSION_FILE" ]]; then
+    cat "$VERSION_FILE"
+  fi
+}
+
+do_update() {
+  [[ -x "$BIN_DIR/rewindos-daemon" ]] || die "RewindOS is not installed. Run install.sh first."
+  local cur latest; cur="$(installed_version)"
+  read -r latest _ < <(latest_asset_url) || die "Could not reach the releases API."
+  if [[ -n "$cur" ]] && ! version_gt "$latest" "$cur"; then
+    log "Already up to date ($cur)."
+    return 0
+  fi
+  log "Updating ${cur:-?} -> $latest..."
+  local stage tag; stage="$(mktemp -d)"; trap 'rm -rf "$stage"' RETURN
+  tag="$(download_and_extract "$stage")"
+  place_files "$stage/rewindos-linux-x86_64"
+  smoke_check
+  echo "$tag" > "$VERSION_FILE"
+  systemctl --user restart rewindos-daemon.service 2>/dev/null || true
+  log "Updated to $tag."
+}
+
+do_uninstall() {
+  systemctl --user disable --now rewindos-daemon.service 2>/dev/null || true
+
+  # Our install artifacts (always removed; NOT the user's captured data)
+  rm -f "$BIN_DIR/rewindos" "$BIN_DIR/rewindos-daemon"
+  rm -f "$UNIT_DIR/rewindos-daemon.service"
+  rm -f "$APP_DIR/$APP_ID.desktop" "$APP_DIR/com.rewindos.Daemon.desktop"
+  rm -f "$AUTOSTART_DIR/rewindos.desktop"
+  rm -f "$DATA_DIR/paddleocr_worker.py" "$VERSION_FILE"
+  local s
+  for s in 32x32 128x128 256x256 512x512; do
+    rm -f "$ICON_BASE/$s/apps/$APP_ID.png"
+  done
+  systemctl --user daemon-reload 2>/dev/null || true
+  update-desktop-database "$APP_DIR" 2>/dev/null || true
+  gtk-update-icon-cache "$ICON_BASE" 2>/dev/null || true
+  log "RewindOS removed."
+
+  # The user's captured data — never wiped without explicit interactive consent.
+  if [[ -d "$DATA_DIR" ]] && prompt_yes_no "Also delete your captured data in $DATA_DIR (screenshots + database)?"; then
+    rm -rf "$DATA_DIR"
+    log "Captured data deleted."
+  else
+    log "Captured data kept at $DATA_DIR."
+  fi
+}
+
+print_help() {
+  cat <<EOF
+RewindOS installer
+
+  install.sh                 install (or update binaries if already installed)
+  install.sh --with-paddleocr install and enable higher-accuracy PaddleOCR
+  install.sh --update        update to the latest release
+  install.sh --uninstall     remove RewindOS (prompts before deleting your data)
+  install.sh --help          this help
+EOF
+}
 
 main() {
   local mode="install" with_paddle=0 arg
