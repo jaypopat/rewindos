@@ -113,6 +113,10 @@ impl WindowInfoProvider for WindowCallsExtProvider {
         info!("Window Calls Extended window tracking stopped");
         Ok(())
     }
+
+    fn provides_reliable_metadata(&self) -> bool {
+        true
+    }
 }
 
 #[cfg(test)]

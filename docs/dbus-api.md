@@ -55,6 +55,11 @@ The capture daemon exposes a D-Bus service on the **session bus** for control by
       <arg name="provider_name" type="s" direction="out"/>
     </method>
 
+    <!-- Toggle the privacy escape hatch (capture without exclusion enforcement) -->
+    <method name="SetUnfilteredCapture">
+      <arg name="enabled" type="b" direction="in"/>
+    </method>
+
     <!-- Emitted when capture state changes -->
     <signal name="CaptureStateChanged">
       <arg name="is_capturing" type="b"/>
@@ -114,6 +119,15 @@ Returns current daemon status as JSON.
   "last_capture_timestamp": 1706140800
 }
 ```
+
+**Capture-integrity fields:**
+- `capture_state` (string): one of `"capturing"`, `"stalled"`, `"paused_user"`,
+  `"paused_privacy"`, `"paused_locked"`. The effective state (may differ from
+  `is_capturing`, which reflects user intent only).
+- `seconds_since_last_frame` (int|null): seconds since the last genuine frame;
+  `null` if no frame has arrived yet.
+- `unfiltered_capture` (bool): the privacy escape hatch is active — capture is
+  running without enforcing exclusions.
 
 ### Search(query, filters_json) → String
 
@@ -186,6 +200,20 @@ its name is returned.
 **Response:**
 - `provider_name` (String): Name of the now-active window info provider
 
+### SetUnfilteredCapture(enabled)
+
+Toggles the privacy escape hatch. When `enabled` is true, capture proceeds even
+when the active window-info provider cannot produce reliable metadata to enforce
+the exclusion lists (the privacy gate would otherwise pause capture). In-memory
+and per-session — re-defaults to fail-closed on daemon restart unless
+`privacy.capture_without_exclusion_enforcement = true` is set in `config.toml`.
+Recomputes the privacy gate immediately.
+
+**Request:**
+- `enabled` (bool)
+
+**Response:** (none)
+
 ## Properties
 
 ### IsCapturing (bool, read-only)
@@ -221,6 +249,7 @@ impl DaemonService {
     async fn search(&self, query: &str, filters_json: &str) -> zbus::fdo::Result<String>;
     async fn delete_range(&self, start: i64, end: i64) -> zbus::fdo::Result<u64>;
     async fn recheck_window_info(&mut self) -> zbus::fdo::Result<String>;
+    async fn set_unfiltered_capture(&mut self, enabled: bool) -> zbus::fdo::Result<()>;
 
     #[zbus(signal)]
     async fn capture_state_changed(ctxt: &SignalEmitter<'_>, is_capturing: bool) -> zbus::Result<()>;

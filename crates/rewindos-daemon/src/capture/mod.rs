@@ -1,7 +1,7 @@
+pub mod gate;
 pub mod kwin;
 pub mod portal;
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -10,6 +10,7 @@ use rewindos_core::config::{CaptureConfig, PrivacyConfig};
 use rewindos_core::schema::RawFrame;
 use tracing::{debug, info, warn};
 
+use crate::capture::gate::CaptureGate;
 use crate::window_info::{self, SharedProvider};
 
 #[derive(Debug, thiserror::Error)]
@@ -58,7 +59,7 @@ pub struct CaptureManager {
     interval: Duration,
     excluded_apps: Vec<String>,
     excluded_title_patterns: Vec<String>,
-    is_capturing: Arc<AtomicBool>,
+    gate: Arc<CaptureGate>,
 }
 
 impl CaptureManager {
@@ -67,7 +68,7 @@ impl CaptureManager {
         privacy_config: &PrivacyConfig,
         mut backend: Box<dyn CaptureBackend>,
         window_info: SharedProvider,
-        is_capturing: Arc<AtomicBool>,
+        gate: Arc<CaptureGate>,
     ) -> Result<Self, CaptureError> {
         let interval = Duration::from_secs(config.interval_seconds.into());
 
@@ -85,7 +86,7 @@ impl CaptureManager {
             interval,
             excluded_apps: privacy_config.excluded_apps.clone(),
             excluded_title_patterns: privacy_config.excluded_title_patterns.clone(),
-            is_capturing,
+            gate,
         })
     }
 
@@ -96,8 +97,8 @@ impl CaptureManager {
         loop {
             tokio::time::sleep(self.interval).await;
 
-            if !self.is_capturing.load(Ordering::SeqCst) {
-                debug!("capture paused, waiting...");
+            if !self.gate.should_capture() {
+                debug!("capture paused/blocked, waiting...");
                 tokio::time::sleep(Duration::from_millis(500)).await;
                 continue;
             }

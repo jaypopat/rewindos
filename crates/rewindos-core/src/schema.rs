@@ -122,6 +122,12 @@ pub struct DaemonStatus {
     pub desktop: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session: Option<String>,
+    #[serde(default)]
+    pub capture_state: Option<String>,
+    #[serde(default)]
+    pub seconds_since_last_frame: Option<u64>,
+    #[serde(default)]
+    pub unfiltered_capture: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -492,4 +498,41 @@ pub struct ChatMessageRow {
     pub content_json: String,
     pub is_partial: bool,
     pub created_at: i64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn daemon_status_roundtrips_new_fields() {
+        let s = DaemonStatus {
+            is_capturing: true,
+            frames_captured_today: 0,
+            frames_deduplicated_today: 0,
+            frames_ocr_pending: 0,
+            queue_depths: QueueDepths { capture: 0, hash: 0, ocr: 0, index: 0 },
+            uptime_seconds: 0,
+            disk_usage_bytes: 0,
+            capture_interval: 5,
+            last_capture_timestamp: None,
+            capture_backend: None,
+            window_info_provider: None,
+            desktop: None,
+            session: None,
+            capture_state: Some("paused_privacy".to_string()),
+            seconds_since_last_frame: None,
+            unfiltered_capture: false,
+        };
+        let json = serde_json::to_string(&s).unwrap();
+        let back: DaemonStatus = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.capture_state.as_deref(), Some("paused_privacy"));
+        assert!(!back.unfiltered_capture);
+
+        // Old payloads without the new fields still deserialize.
+        let old = r#"{"is_capturing":true,"frames_captured_today":0,"frames_deduplicated_today":0,"frames_ocr_pending":0,"queue_depths":{"capture":0,"hash":0,"ocr":0,"index":0},"uptime_seconds":0,"disk_usage_bytes":0,"capture_interval":5,"last_capture_timestamp":null}"#;
+        let parsed: DaemonStatus = serde_json::from_str(old).unwrap();
+        assert_eq!(parsed.capture_state, None);
+        assert!(!parsed.unfiltered_capture);
+    }
 }

@@ -4,6 +4,7 @@ import {
   recheckWindowInfo,
   openExtensionPage,
   getDaemonStatus,
+  setUnfilteredCapture,
 } from "@/lib/api";
 
 type State =
@@ -84,6 +85,16 @@ export function GnomeTrackingCard() {
               className="px-3 py-1 font-mono text-[11px] uppercase tracking-wider text-text-muted border border-border/60 hover:bg-surface transition-all disabled:opacity-50"
             >
               {busy ? "Checking…" : "Re-check"}
+            </button>
+            <button
+              onClick={async () => {
+                await setUnfilteredCapture(true);
+                await refresh();
+              }}
+              className="px-3 py-1 font-mono text-[11px] uppercase tracking-wider text-text-muted border border-border/60 hover:bg-surface transition-all"
+              title="Capture without enforcing app/incognito exclusions"
+            >
+              Capture anyway
             </button>
           </div>
         </div>

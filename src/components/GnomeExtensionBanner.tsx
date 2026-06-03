@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { X } from "lucide-react";
-import { getDaemonStatus, openExtensionPage } from "@/lib/api";
+import { getDaemonStatus, openExtensionPage, setUnfilteredCapture } from "@/lib/api";
 
 const DISMISS_KEY = "gnome-extension-banner-dismissed";
 
@@ -32,6 +32,16 @@ export function GnomeExtensionBanner() {
         className="px-2 py-0.5 font-mono text-[11px] uppercase tracking-wider bg-accent/10 border border-accent/30 hover:bg-accent/20 transition-all"
       >
         Install
+      </button>
+      <button
+        onClick={async () => {
+          await setUnfilteredCapture(true);
+          setShow(false);
+        }}
+        className="px-2 py-0.5 font-mono text-[11px] uppercase tracking-wider text-text-muted border border-border/60 hover:bg-surface transition-all"
+        title="Capture without enforcing app/incognito exclusions"
+      >
+        Capture anyway
       </button>
       <button
         onClick={() => {

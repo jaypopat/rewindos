@@ -105,6 +105,10 @@ impl WindowInfoProvider for WlrForeignToplevelProvider {
         info!("wlr-foreign-toplevel window tracking stopped");
         Ok(())
     }
+
+    fn provides_reliable_metadata(&self) -> bool {
+        true
+    }
 }
 
 /// Dispatch state for the Wayland event loop thread.

@@ -41,6 +41,12 @@ pub struct StorageConfig {
 pub struct PrivacyConfig {
     pub excluded_apps: Vec<String>,
     pub excluded_title_patterns: Vec<String>,
+    /// Opt-in escape hatch: capture even when window metadata can't enforce the
+    /// exclusion lists (the privacy gate would otherwise pause capture). Default
+    /// false (fail-closed). In-memory at runtime via D-Bus `SetUnfilteredCapture`;
+    /// set here to make the risk-acceptance durable across restarts.
+    #[serde(default)]
+    pub capture_without_exclusion_enforcement: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -176,6 +182,7 @@ impl Default for PrivacyConfig {
                 "Lock Screen".to_string(),
                 "Screen Locker".to_string(),
             ],
+            capture_without_exclusion_enforcement: false,
         }
     }
 }
@@ -318,6 +325,12 @@ mod tests {
     use super::*;
     use std::io::Write;
     use tempfile::NamedTempFile;
+
+    #[test]
+    fn privacy_override_defaults_to_false() {
+        let p = PrivacyConfig::default();
+        assert!(!p.capture_without_exclusion_enforcement);
+    }
 
     #[test]
     fn test_default_config() {

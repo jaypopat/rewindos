@@ -157,4 +157,8 @@ impl WindowInfoProvider for GnomeShellWindowInfo {
         info!("GNOME Shell D-Bus window tracking stopped");
         Ok(())
     }
+
+    fn provides_reliable_metadata(&self) -> bool {
+        true
+    }
 }
