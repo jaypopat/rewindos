@@ -15,6 +15,11 @@ AUTOSTART_DIR="$HOME/.config/autostart"
 DATA_DIR="$HOME/.rewindos"
 VERSION_FILE="$DATA_DIR/INSTALLED_VERSION"
 
+# Staging dir for downloads; cleaned up on exit (normal OR die) via the EXIT trap.
+STAGING_DIR=""
+cleanup_staging() { [[ -n "$STAGING_DIR" ]] && rm -rf "$STAGING_DIR"; true; }
+trap cleanup_staging EXIT
+
 log()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33mwarning:\033[0m %s\n' "$*" >&2; }
 err()  { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; }
@@ -208,7 +213,7 @@ do_install() { # do_install <with_paddleocr:0|1>
 
   install_deps "$(detect_pkg_mgr)" "${XDG_CURRENT_DESKTOP:-}"
 
-  local stage tag; stage="$(mktemp -d)"; trap 'rm -rf "$stage"' RETURN
+  local stage tag; STAGING_DIR="$(mktemp -d)"; stage="$STAGING_DIR"
   tag="$(download_and_extract "$stage")"
   place_files "$stage/rewindos-linux-x86_64"
   smoke_check
@@ -304,7 +309,7 @@ do_update() {
     return 0
   fi
   log "Updating ${cur:-?} -> $latest..."
-  local stage tag; stage="$(mktemp -d)"; trap 'rm -rf "$stage"' RETURN
+  local stage tag; STAGING_DIR="$(mktemp -d)"; stage="$STAGING_DIR"
   tag="$(download_and_extract "$stage")"
   place_files "$stage/rewindos-linux-x86_64"
   smoke_check
