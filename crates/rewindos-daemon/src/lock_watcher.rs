@@ -19,6 +19,9 @@ pub fn combine_lock_state(logind_locked: bool, screensaver_active: bool) -> bool
 )]
 trait LoginManager {
     fn get_session_by_pid(&self, pid: u32) -> zbus::Result<zbus::zvariant::OwnedObjectPath>;
+    /// `start == true` just before sleeping, `false` just after resuming.
+    #[zbus(signal)]
+    fn prepare_for_sleep(&self, start: bool) -> zbus::Result<()>;
 }
 
 #[zbus::proxy(
@@ -89,6 +92,9 @@ async fn run(
     let mut locked_changes = session.receive_locked_hint_changed().await;
     let mut lock_stream = session.receive_lock().await?;
     let mut unlock_stream = session.receive_unlock().await?;
+    // Resume hook: rebuild the capture stream after the machine wakes, since the
+    // compositor tears down the screencast on suspend. Best-effort.
+    let mut sleep_stream = mgr.receive_prepare_for_sleep().await?;
     let mut ss_stream = match &screensaver {
         Some(p) => Some(p.receive_active_changed().await?),
         None => None,
@@ -101,6 +107,14 @@ async fn run(
             }
             Some(_) = lock_stream.next() => { logind_locked = true; }
             Some(_) = unlock_stream.next() => { logind_locked = false; }
+            Some(sig) = sleep_stream.next() => {
+                if let Ok(args) = sig.args() {
+                    if !args.start {
+                        info!("resumed from sleep; requesting capture stream reconnect");
+                        gate.request_reconnect();
+                    }
+                }
+            }
             Some(sig) = async { match ss_stream.as_mut() { Some(s) => s.next().await, None => None } } => {
                 if let Ok(args) = sig.args() { ss_active = args.active; }
             }

@@ -73,6 +73,11 @@ pub struct CaptureGate {
     privacy_blocked: AtomicBool,
     lock_blocked: AtomicBool,
     last_frame_at: AtomicU64,
+    // One-shot request to rebuild the capture stream (e.g. after resume from
+    // suspend). Set by the lock watcher's PrepareForSleep hook; consumed by the
+    // capture loop. The gate is already shared with both, so it doubles as the
+    // cross-module channel without extra plumbing.
+    reconnect_requested: AtomicBool,
 }
 
 impl CaptureGate {
@@ -82,7 +87,18 @@ impl CaptureGate {
             privacy_blocked: AtomicBool::new(false),
             lock_blocked: AtomicBool::new(false),
             last_frame_at: AtomicU64::new(0),
+            reconnect_requested: AtomicBool::new(false),
         }
+    }
+
+    /// Request a capture-stream reconnect (proactive, e.g. on resume).
+    pub fn request_reconnect(&self) {
+        self.reconnect_requested.store(true, Ordering::SeqCst);
+    }
+
+    /// Take the pending reconnect request, clearing it. True if one was set.
+    pub fn take_reconnect_request(&self) -> bool {
+        self.reconnect_requested.swap(false, Ordering::SeqCst)
     }
 
     pub fn should_capture(&self) -> bool {
@@ -244,6 +260,15 @@ mod tests {
         assert_eq!(g.seconds_since_last_frame(1_000_000), None);
         g.stamp_frame(1_000_000);
         assert_eq!(g.seconds_since_last_frame(1_005_000), Some(5));
+    }
+
+    #[test]
+    fn reconnect_request_is_one_shot() {
+        let g = CaptureGate::new(true);
+        assert!(!g.take_reconnect_request()); // nothing pending
+        g.request_reconnect();
+        assert!(g.take_reconnect_request()); // consumed once
+        assert!(!g.take_reconnect_request()); // and only once
     }
 
     // ---- recompute_privacy_gate: reliability x exclusions x override ----

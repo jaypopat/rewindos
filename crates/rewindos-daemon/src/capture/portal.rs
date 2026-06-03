@@ -62,6 +62,10 @@ struct FrameData {
 struct SharedState {
     frame: Mutex<Option<FrameData>>,
     ready: AtomicBool,
+    /// Set by the stream's state_changed callback when it transitions to
+    /// Error/Unconnected — the signal that the stream died (suspend, lock,
+    /// monitor-off) and the capture loop should rebuild it.
+    dead: AtomicBool,
 }
 
 /// xdg-desktop-portal + PipeWire capture backend.
@@ -80,6 +84,7 @@ impl PortalCaptureBackend {
             shared: Arc::new(SharedState {
                 frame: Mutex::new(None),
                 ready: AtomicBool::new(false),
+                dead: AtomicBool::new(false),
             }),
             pw_thread: None,
             should_stop: Arc::new(AtomicBool::new(false)),
@@ -237,6 +242,34 @@ impl super::CaptureBackend for PortalCaptureBackend {
         }
     }
 
+    fn needs_reconnect(&self) -> bool {
+        self.shared.dead.load(Ordering::Acquire)
+    }
+
+    async fn reconnect(&mut self) -> Result<(), CaptureError> {
+        info!("rebuilding PipeWire screencast stream");
+
+        // Tear down the old PipeWire thread.
+        self.should_stop.store(true, Ordering::Release);
+        if let Some(handle) = self.pw_thread.take() {
+            let _ = tokio::task::spawn_blocking(move || {
+                let _ = handle.join();
+            })
+            .await;
+        }
+
+        // Reset shared state for the fresh stream. Done AFTER the old thread is
+        // joined, so a late state_changed(Unconnected) emitted during teardown
+        // can't flip `dead` back to true behind the new stream.
+        self.should_stop.store(false, Ordering::Release);
+        *self.shared.frame.lock().unwrap() = None;
+        self.shared.ready.store(false, Ordering::Release);
+        self.shared.dead.store(false, Ordering::Release);
+
+        // Rebuild using the saved restore token so this never prompts the user.
+        self.setup_portal_session(load_restore_token()).await
+    }
+
     async fn shutdown(&mut self) -> Result<(), CaptureError> {
         info!("shutting down PipeWire capture");
         self.should_stop.store(true, Ordering::Release);
@@ -265,7 +298,7 @@ fn run_pipewire_loop(
 ) -> Result<(), String> {
     use pipewire as pw;
     use pw::spa;
-    use pw::stream::{StreamBox, StreamFlags};
+    use pw::stream::{StreamBox, StreamFlags, StreamState};
 
     let mainloop = pw::main_loop::MainLoopBox::new(None)
         .map_err(|e| format!("failed to create PipeWire main loop: {e}"))?;
@@ -293,9 +326,26 @@ fn run_pipewire_loop(
     let format_info: Arc<Mutex<Option<VideoFormat>>> = Arc::new(Mutex::new(None));
     let format_info_process = format_info.clone();
     let shared_process = shared.clone();
+    let shared_state = shared.clone();
 
     let _listener = stream
         .add_local_listener_with_user_data(())
+        .state_changed(move |_, _, old, new| {
+            // The compositor pauses/kills the stream on suspend, lock, or
+            // monitor-off. Flag a death so the capture loop rebuilds it; clear
+            // the flag once it's streaming again.
+            match &new {
+                StreamState::Error(_) | StreamState::Unconnected => {
+                    warn!(?old, ?new, "PipeWire stream died");
+                    shared_state.dead.store(true, Ordering::Release);
+                }
+                StreamState::Streaming => {
+                    debug!(?old, ?new, "PipeWire stream streaming");
+                    shared_state.dead.store(false, Ordering::Release);
+                }
+                _ => debug!(?old, ?new, "PipeWire stream state changed"),
+            }
+        })
         .param_changed(move |_, _, id, param| {
             let Some(param) = param else { return };
             if id != spa::param::ParamType::Format.as_raw() {
