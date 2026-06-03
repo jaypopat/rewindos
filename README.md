@@ -1,6 +1,10 @@
 # RewindOS
 
-Privacy-first, local-only screen capture and search for Linux. Continuously captures your screen, extracts text via OCR, and lets you instantly search through everything you've seen. All data stays on your machine.
+**Search everything you've ever seen on your screen — and keep it 100% on your machine.**
+
+RewindOS continuously captures your screen, reads the text on it with OCR, and indexes it for instant full-text (and optional semantic) search. A private, local "rewind" for Linux: **no cloud, no account, no telemetry — it runs entirely offline.**
+
+<!-- TODO: drop a short demo GIF here (searching for something you saw last week). A GIF converts far better than a static shot. -->
 
 <img width="2876" height="1650" alt="image" src="https://github.com/user-attachments/assets/210ae7b4-6995-4190-b64d-d9961583433e" />
 
@@ -31,9 +35,17 @@ Timer (5s) → Screen Capture → Hash & Dedupe → OCR → SQLite FTS5
 - **Global hotkey** — `Ctrl+Shift+Space` to instantly open search
 - **System tray** — runs quietly in the background
 
-## Target platform
+## Platform support
 
-Linux (Wayland) — KDE Plasma 6+, GNOME, Hyprland, Sway.
+Linux on **Wayland**. Capture uses `xdg-desktop-portal` + PipeWire, so it works on any compositor that implements the ScreenCast portal.
+
+| Desktop | Status |
+|---|---|
+| KDE Plasma 6+ | ✅ Tested |
+| GNOME 46+ | ✅ Tested — install the "Window Calls Extended" extension for app/window names |
+| Hyprland · Sway · other wlroots | ⚠️ Should work via the portal — not yet verified |
+
+x86_64 only for prebuilt binaries. X11-only sessions aren't supported.
 
 ## Install
 
@@ -63,7 +75,16 @@ bash install.sh --uninstall        # remove RewindOS (asks before deleting your 
 
 **Requirements:** x86_64, a modern Wayland desktop (KDE, GNOME, Hyprland, Sway), and a current distro. The prebuilt binary targets recent glibc + `webkit2gtk-4.1`; on older distros, build from source.
 
-## Prerequisites
+## Optional: AI features
+
+These are off by default; RewindOS works fully without them.
+
+- [Ollama](https://ollama.com) — local semantic search, chat, and journal summaries (everything stays on-device).
+- Claude Code CLI — higher-quality chat; once installed and registered with MCP, the Ask view's model picker exposes its tiers (opus / sonnet / haiku).
+
+## Build from source
+
+The `install.sh` path above installs system dependencies for you — this section is only if you'd rather build it yourself.
 
 ```bash
 sudo apt install \
@@ -73,20 +94,13 @@ sudo apt install \
   libdbus-1-dev pkg-config build-essential
 ```
 
-Optional:
-
-- [Ollama](https://ollama.com) for local AI features (semantic search, chat, journal summaries).
-- Claude Code CLI for higher-quality chat — once installed and registered with MCP, the Ask view's model picker exposes its tiers (opus / sonnet / haiku).
-
-## Build from source
-
 ```bash
 make install
 ```
 
 This builds the Rust workspace and frontend, installs the daemon as a systemd user service, and sets up the desktop app to autostart minimized to tray on login.
 
-### Manual build
+### Manual / dev build
 
 ```bash
 cargo build --workspace       # Rust crates
