@@ -9,6 +9,7 @@ use rewindos_core::schema::{DaemonStatus, QueueDepths, SearchFilters};
 use tracing::{info, warn};
 use zbus::interface;
 
+use crate::capture::gate::{recompute_privacy_gate, CaptureGate};
 use crate::detect::{create_window_info_provider, DesktopEnvironment, SessionType};
 use crate::pipeline::PipelineMetrics;
 use crate::window_info::kwin::KwinWindowInfo;
@@ -20,7 +21,8 @@ pub struct DaemonService {
     pub db: Arc<Mutex<Database>>,
     pub config: Arc<AppConfig>,
     pub metrics: Arc<PipelineMetrics>,
-    pub is_capturing: Arc<std::sync::atomic::AtomicBool>,
+    pub gate: Arc<CaptureGate>,
+    pub unfiltered_override: Arc<std::sync::atomic::AtomicBool>,
     pub start_time: Instant,
     pub ollama_client: Option<Arc<OllamaClient>>,
     pub kwin_window_info: Option<Arc<KwinWindowInfo>>,
@@ -44,30 +46,30 @@ fn lock_db(db: &Mutex<Database>) -> std::sync::MutexGuard<'_, Database> {
 #[interface(name = "com.rewindos.Daemon")]
 impl DaemonService {
     async fn pause(&mut self) -> zbus::fdo::Result<()> {
-        if !self.is_capturing.load(Ordering::SeqCst) {
+        if !self.gate.wants_capture() {
             return Err(zbus::fdo::Error::Failed("not capturing".into()));
         }
 
         info!("pause requested via D-Bus");
-        self.is_capturing.store(false, Ordering::SeqCst);
+        self.gate.set_wants_capture(false);
 
         Ok(())
     }
 
     async fn resume(&mut self) -> zbus::fdo::Result<()> {
-        if self.is_capturing.load(Ordering::SeqCst) {
+        if self.gate.wants_capture() {
             return Err(zbus::fdo::Error::Failed("already capturing".into()));
         }
 
         info!("resume requested via D-Bus");
-        self.is_capturing.store(true, Ordering::SeqCst);
+        self.gate.set_wants_capture(true);
 
         Ok(())
     }
 
     async fn get_status(&self) -> zbus::fdo::Result<String> {
         let uptime = self.start_time.elapsed().as_secs();
-        let is_capturing = self.is_capturing.load(Ordering::SeqCst);
+        let is_capturing = self.gate.wants_capture();
         let frames_captured_today = self.metrics.frames_captured.load(Ordering::Relaxed);
         let frames_deduplicated_today = self.metrics.frames_deduplicated.load(Ordering::Relaxed);
         let frames_ocr_pending = self.metrics.frames_ocr_pending.load(Ordering::Relaxed);
@@ -206,13 +208,23 @@ impl DaemonService {
             .store(crate::window_info::into_shared_inner(new_provider));
         let _ = old.stop().await;
 
+        // The provider may have changed reliability (e.g. Noop -> window-calls-ext);
+        // re-evaluate the privacy veto so capture un-blocks immediately.
+        let p = self.window_info.load_full();
+        recompute_privacy_gate(
+            &self.gate,
+            &**p,
+            &self.config.privacy,
+            self.unfiltered_override.load(Ordering::SeqCst),
+        );
+
         info!(from = old_name, to = %new_name, "window info provider hot-swapped");
         Ok(new_name)
     }
 
     #[zbus(property)]
     fn is_capturing(&self) -> bool {
-        self.is_capturing.load(Ordering::SeqCst)
+        self.gate.wants_capture()
     }
 
     #[zbus(property)]

@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use rewindos_core::config::AppConfig;
@@ -12,6 +12,7 @@ use rewindos_core::schema::{EmbedRequest, NewScreenshot, OcrStatus, ProcessedFra
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 
+use crate::capture::gate::CaptureGate;
 use crate::capture::{CaptureBackend, CaptureError, CaptureManager};
 use crate::window_info::SharedProvider;
 
@@ -37,7 +38,7 @@ impl PipelineMetrics {
 /// Handle to the running pipeline, used for shutdown.
 pub struct PipelineHandle {
     pub metrics: Arc<PipelineMetrics>,
-    pub is_capturing: Arc<AtomicBool>,
+    pub gate: Arc<CaptureGate>,
     capture_task: tokio::task::JoinHandle<()>,
     hash_task: tokio::task::JoinHandle<()>,
     ocr_task: tokio::task::JoinHandle<()>,
@@ -50,7 +51,7 @@ impl PipelineHandle {
     /// Waits up to 30 seconds for pending work to flush.
     pub async fn shutdown(self) {
         info!("shutting down pipeline");
-        self.is_capturing.store(false, Ordering::SeqCst);
+        self.gate.set_wants_capture(false);
 
         // Abort the capture task first — it's the source.
         // Other tasks will drain once their channels close.
@@ -79,9 +80,9 @@ pub async fn start_pipeline(
     db: Arc<Mutex<Database>>,
     capture_backend: Box<dyn CaptureBackend>,
     window_info: SharedProvider,
+    gate: Arc<CaptureGate>,
 ) -> Result<PipelineHandle, CaptureError> {
     let metrics = Arc::new(PipelineMetrics::new());
-    let is_capturing = Arc::new(AtomicBool::new(true));
 
     let screenshots_dir = config
         .screenshots_dir()
@@ -99,16 +100,16 @@ pub async fn start_pipeline(
         &config.privacy,
         capture_backend,
         window_info,
-        is_capturing.clone(),
+        gate.clone(),
     )
     .await?;
 
     // Stage 1: Capture → RawFrame
     let capture_task = {
         let metrics = metrics.clone();
-        let is_capturing = is_capturing.clone();
+        let gate = gate.clone();
         tokio::spawn(async move {
-            run_capture_stage(capture, raw_tx, metrics, is_capturing).await;
+            run_capture_stage(capture, raw_tx, metrics, gate).await;
         })
     };
 
@@ -154,7 +155,7 @@ pub async fn start_pipeline(
 
     Ok(PipelineHandle {
         metrics,
-        is_capturing,
+        gate,
         capture_task,
         hash_task,
         ocr_task,
@@ -169,13 +170,14 @@ async fn run_capture_stage(
     mut capture: CaptureManager,
     raw_tx: mpsc::Sender<RawFrame>,
     metrics: Arc<PipelineMetrics>,
-    is_capturing: Arc<AtomicBool>,
+    gate: Arc<CaptureGate>,
 ) {
     info!("capture stage started");
 
-    while is_capturing.load(Ordering::SeqCst) {
+    while gate.wants_capture() {
         match capture.next_frame().await {
             Some(frame) => {
+                gate.stamp_frame(frame.timestamp as u64);
                 metrics.frames_captured.fetch_add(1, Ordering::Relaxed);
                 if raw_tx.send(frame).await.is_err() {
                     debug!("hash stage channel closed, stopping capture");

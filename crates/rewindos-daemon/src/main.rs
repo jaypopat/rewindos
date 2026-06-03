@@ -563,13 +563,39 @@ async fn run_daemon() -> anyhow::Result<()> {
         detect::create_window_info_provider(&desktop, &session, &dbus_conn).await;
     let window_info = crate::window_info::into_shared(initial_provider);
 
+    // Capture gate: the single source of truth for whether/why capture runs.
+    let gate = std::sync::Arc::new(crate::capture::gate::CaptureGate::new(true));
+
+    // In-memory override (per-session). Seeded from config; durable opt-in lives
+    // in config.toml. Re-defaults to fail-closed on restart by design.
+    let unfiltered_override = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
+        config.privacy.capture_without_exclusion_enforcement,
+    ));
+
+    // Initial privacy veto evaluation against the detected provider.
+    {
+        let p = window_info.load_full();
+        crate::capture::gate::recompute_privacy_gate(
+            &gate,
+            &**p,
+            &config.privacy,
+            unfiltered_override.load(std::sync::atomic::Ordering::SeqCst),
+        );
+    }
+
     // Create capture backend
     let capture_backend = detect::create_capture_backend(&desktop, &session, &dbus_conn).await?;
     let capture_backend_name = capture_backend.name().to_string();
 
     // Start the capture pipeline
-    let pipeline_handle =
-        pipeline::start_pipeline(&config, db.clone(), capture_backend, window_info.clone()).await?;
+    let pipeline_handle = pipeline::start_pipeline(
+        &config,
+        db.clone(),
+        capture_backend,
+        window_info.clone(),
+        gate.clone(),
+    )
+    .await?;
 
     info!("capture pipeline started");
 
@@ -632,7 +658,8 @@ async fn run_daemon() -> anyhow::Result<()> {
         db: db.clone(),
         config: Arc::new(config.clone()),
         metrics: pipeline_handle.metrics.clone(),
-        is_capturing: pipeline_handle.is_capturing.clone(),
+        gate: gate.clone(),
+        unfiltered_override: unfiltered_override.clone(),
         start_time: Instant::now(),
         ollama_client,
         kwin_window_info: kwin_window_info.clone(),
