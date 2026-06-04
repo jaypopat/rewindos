@@ -1,0 +1,66 @@
+name: "📷 Capture isn't working"
+description: RewindOS isn't capturing your screen (no new frames, paused, or stalled)
+labels: ["capture", "bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Capture relies on your compositor's screen-share portal, so behaviour varies by desktop. A few quick things first:
+        - **Restart the daemon:** `systemctl --user restart rewindos-daemon`
+        - **GNOME users:** install the **"Window Calls Extended"** extension (without it, capture pauses to protect your app-exclusions).
+        - **Check status:** `rewindos-daemon status` — note the `capture_state` and `window_info_provider`.
+  - type: dropdown
+    id: desktop
+    attributes:
+      label: Desktop environment
+      options:
+        - KDE Plasma
+        - GNOME
+        - Hyprland
+        - Sway
+        - Other wlroots (labwc, river, …)
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: session
+    attributes:
+      label: Session type
+      description: "Run `echo $XDG_SESSION_TYPE` if unsure. RewindOS targets Wayland."
+      options:
+        - Wayland
+        - X11
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: symptom
+    attributes:
+      label: What's happening?
+      description: e.g. "stuck on paused_privacy", "frames_captured_today stays 0", "stopped after suspend", "white screen".
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: "Paste the output of the block below. It's all local — nothing is uploaded except what you paste here."
+      render: shell
+      value: |
+        # Run this and paste the output:
+        rewindos-daemon --version
+        echo "Desktop: $XDG_CURRENT_DESKTOP | Session: $XDG_SESSION_TYPE"
+        grep PRETTY_NAME /etc/os-release
+        rewindos-daemon status
+        journalctl --user -u rewindos-daemon --since "15 min ago" --no-pager | tail -40
+    validations:
+      required: true
+  - type: checkboxes
+    id: tried
+    attributes:
+      label: Before filing
+      options:
+        - label: I restarted the daemon and it still doesn't capture
+          required: true
+        - label: "(GNOME only) the 'Window Calls Extended' extension is installed and enabled"
+          required: false

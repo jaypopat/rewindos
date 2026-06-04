@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 💬 Questions, setups & ideas
+    url: https://github.com/jaypopat/rewindos/discussions
+    about: Ask questions, share your setup, or float ideas in Discussions — not every thread needs to be an issue.
+  - name: 📖 Install & usage docs
+    url: https://github.com/jaypopat/rewindos#install
+    about: Check the README install/usage notes first — many "it won't start" cases are covered there.

@@ -1,0 +1,68 @@
+name: "🐛 Bug report"
+description: Something other than capture isn't working right (search, UI, install, daemon, etc.)
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. RewindOS ships **no telemetry**, so the detail you provide here is the only signal I get — the more specific, the faster the fix.
+
+        > If your screen isn't being **captured**, please use the "Capture isn't working" template instead.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you expect, and what actually happened?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. …
+        2. …
+        3. …
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which area?
+      options:
+        - Search
+        - History / Rewind
+        - Dashboard
+        - Ask (AI chat)
+        - Journal
+        - Saved / Collections
+        - Focus
+        - Settings
+        - Install / update script
+        - Daemon / pipeline
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: "Paste the output of the block below."
+      render: shell
+      value: |
+        rewindos-daemon --version
+        echo "Desktop: $XDG_CURRENT_DESKTOP | Session: $XDG_SESSION_TYPE"
+        grep PRETTY_NAME /etc/os-release
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs (optional)
+      description: "If it's daemon-related: `journalctl --user -u rewindos-daemon --since '15 min ago' --no-pager | tail -40`. For UI issues, the terminal output of `rewindos` helps."
+      render: shell
+  - type: input
+    id: install
+    attributes:
+      label: How did you install?
+      placeholder: "install.sh | install.sh --with-paddleocr | built from source | --update from vX.Y.Z"

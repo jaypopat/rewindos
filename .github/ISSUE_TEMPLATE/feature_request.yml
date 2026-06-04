@@ -1,0 +1,28 @@
+name: "✨ Feature request"
+description: Suggest an improvement or new capability
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        RewindOS is **local-first and privacy-focused** — requests are weighed against that (no cloud dependencies, no telemetry, works offline). Ideas that fit that ethos get priority.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      description: Describe the need, not just the feature. "I want X" is less useful than "I can't do Y because…".
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like to see?
+    validations:
+      required: true
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy fit
+      options:
+        - label: This can work fully locally (no cloud service or account required)
+          required: false
