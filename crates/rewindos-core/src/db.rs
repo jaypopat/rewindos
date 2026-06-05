@@ -6,7 +6,7 @@ use crate::schema::{
     JournalSearchResponse, JournalSearchResult, JournalStreakInfo, JournalSummary, JournalTag,
     JournalTemplate, NewBoundingBox, NewCollection, NewScreenshot, NewTranscriptSegment, OcrStatus,
     OpenTodo, Screenshot, SearchFilters, SearchResponse, SearchResult, TaskUsageStat,
-    UpdateCollection, UpsertJournalEntry,
+    TranscriptSearchResult, UpdateCollection, UpsertJournalEntry,
 };
 use rusqlite::{ffi::sqlite3_auto_extension, params, Connection};
 use std::path::Path;
@@ -1380,6 +1380,80 @@ impl Database {
             total_count: deduped_total,
             search_mode: Some("hybrid".to_string()),
         })
+    }
+
+    /// Search transcript segments via FTS5 (+ optional vector KNN), fused with RRF.
+    /// Returns up to `limit` results ranked by fused score.
+    pub fn search_transcripts(
+        &self,
+        query: &str,
+        query_embedding: Option<&[f32]>,
+        limit: i64,
+    ) -> Result<Vec<TranscriptSearchResult>> {
+        use std::collections::HashMap;
+        const RRF_K: f64 = 60.0;
+        const FUSION_LIMIT: i64 = 300;
+
+        let mut scores: HashMap<i64, f64> = HashMap::new();
+
+        // FTS ranked by bm25 (fts5 `rank`).
+        {
+            let mut stmt = self.conn.prepare(
+                "SELECT segment_id FROM transcript_fts
+                 WHERE transcript_fts MATCH ?1
+                 ORDER BY rank
+                 LIMIT ?2",
+            )?;
+            let rows = stmt.query_map(params![query, FUSION_LIMIT], |row| row.get::<_, i64>(0))?;
+            for (rank, id) in rows.enumerate() {
+                let id = id?;
+                *scores.entry(id).or_default() += 1.0 / (RRF_K + rank as f64 + 1.0);
+            }
+        }
+
+        // Optional vector KNN.
+        if let Some(emb) = query_embedding {
+            let blob: Vec<u8> = emb.iter().flat_map(|f| f.to_le_bytes()).collect();
+            let mut stmt = self.conn.prepare(
+                "SELECT segment_id FROM transcript_embeddings
+                 WHERE embedding MATCH ?1
+                 ORDER BY distance
+                 LIMIT ?2",
+            )?;
+            let rows = stmt.query_map(params![blob, FUSION_LIMIT], |row| row.get::<_, i64>(0))?;
+            for (rank, id) in rows.enumerate() {
+                let id = id?;
+                *scores.entry(id).or_default() += 1.0 / (RRF_K + rank as f64 + 1.0);
+            }
+        }
+
+        let mut ranked: Vec<(i64, f64)> = scores.into_iter().collect();
+        ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        ranked.truncate(limit as usize);
+
+        let mut out = Vec::new();
+        for (segment_id, score) in ranked {
+            let row = self.conn.query_row(
+                "SELECT id, meeting_id, start_ms, end_ms, speaker_label, text
+                 FROM transcript_segments WHERE id = ?1",
+                params![segment_id],
+                |row| {
+                    Ok(TranscriptSearchResult {
+                        segment_id: row.get(0)?,
+                        meeting_id: row.get(1)?,
+                        start_ms: row.get(2)?,
+                        end_ms: row.get(3)?,
+                        speaker_label: row.get(4)?,
+                        text: row.get(5)?,
+                        rank: score,
+                    })
+                },
+            );
+            if let Ok(r) = row {
+                out.push(r);
+            }
+        }
+        Ok(out)
     }
 
     /// Get task-level breakdown: app + window title with estimated time.
@@ -3417,5 +3491,29 @@ mod tests {
             )
             .unwrap();
         assert_eq!(hit, sid);
+    }
+
+    #[test]
+    fn search_transcripts_keyword_only() {
+        let db = make_test_db();
+        let mid = db.insert_meeting(1000, Some("Sync"), None).unwrap();
+        for (i, text) in ["deploy the worker", "lunch plans", "deploy rollback steps"]
+            .iter()
+            .enumerate()
+        {
+            let seg = crate::schema::NewTranscriptSegment {
+                start_ms: i as i64 * 1000,
+                end_ms: i as i64 * 1000 + 500,
+                source: "mic".into(),
+                speaker_label: "You".into(),
+                text: (*text).into(),
+            };
+            db.insert_transcript_segment(mid, &seg).unwrap();
+        }
+
+        let results = db.search_transcripts("deploy", None, 10).unwrap();
+        assert_eq!(results.len(), 2);
+        assert!(results.iter().all(|r| r.text.contains("deploy")));
+        assert!(results.iter().all(|r| r.meeting_id == mid));
     }
 }
