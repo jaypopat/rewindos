@@ -1,6 +1,7 @@
 mod capture;
 mod detect;
 mod lock_watcher;
+mod meeting;
 mod mcp_server;
 mod pipeline;
 mod service;
