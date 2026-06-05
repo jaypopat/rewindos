@@ -25,7 +25,8 @@ CREATE INDEX idx_segments_time ON transcript_segments(start_ms);
 
 CREATE VIRTUAL TABLE transcript_fts USING fts5(
     text,
-    segment_id UNINDEXED
+    segment_id UNINDEXED,
+    tokenize='unicode61 remove_diacritics 2'
 );
 
 CREATE VIRTUAL TABLE transcript_embeddings USING vec0(
