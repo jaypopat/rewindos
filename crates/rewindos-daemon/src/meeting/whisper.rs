@@ -185,4 +185,32 @@ mod tests {
         let err = ensure_model_available(&config).unwrap_err();
         assert!(matches!(err, TranscribeError::ModelNotFound(_)));
     }
+
+    /// End-to-end FFI smoke test against a real GGUF model. Ignored by default so
+    /// CI without a model stays green. Run with a model present:
+    ///   RWOS_TEST_WHISPER_MODEL=/path/to/ggml-base.en.bin \
+    ///     cargo test -p rewindos-daemon -- --ignored --test-threads=1 \
+    ///     whisper_transcribes_silence_without_error
+    #[test]
+    #[ignore]
+    fn whisper_transcribes_silence_without_error() {
+        let model = match std::env::var("RWOS_TEST_WHISPER_MODEL") {
+            Ok(p) => p,
+            Err(_) => {
+                eprintln!("skipping: set RWOS_TEST_WHISPER_MODEL to a GGUF model path");
+                return;
+            }
+        };
+        let t = WhisperTranscriber::load(std::path::Path::new(&model), 2).unwrap();
+        let silence = vec![0.0f32; 16_000]; // 1 s @ 16 kHz mono
+        let segments = t.transcribe_window(&silence, AudioSource::Mic, 0).unwrap();
+        // Silence may yield zero or a few hallucinated segments — both are fine.
+        // Any returned segment must carry the mic label and sane absolute timing.
+        for s in &segments {
+            assert_eq!(s.source, "mic");
+            assert_eq!(s.speaker_label, "You");
+            assert!(s.start_ms >= 0);
+            assert!(s.end_ms >= s.start_ms);
+        }
+    }
 }
