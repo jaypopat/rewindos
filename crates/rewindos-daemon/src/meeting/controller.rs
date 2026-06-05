@@ -107,7 +107,7 @@ async fn start(
 
     // Load the model, open writers, start capture, and spawn the drain worker —
     // all blocking, so do it off the async runtime.
-    let (capture, worker) = tokio::task::spawn_blocking(move || -> Result<_, String> {
+    let setup = tokio::task::spawn_blocking(move || -> Result<_, String> {
         let transcriber: Arc<dyn Transcribe> = Arc::new(
             WhisperTranscriber::load(&model_path, n_threads).map_err(|e| e.to_string())?,
         );
@@ -133,7 +133,21 @@ async fn start(
         Ok((capture, worker))
     })
     .await
-    .map_err(|e| e.to_string())??;
+    .map_err(|e| e.to_string())?;
+    let (capture, worker) = match setup {
+        Ok(cw) => cw,
+        Err(e) => {
+            // Recording never started — remove the empty meeting row so it
+            // doesn't linger as a permanently-unfinished meeting.
+            let db = db.clone();
+            let _ = tokio::task::spawn_blocking(move || {
+                let db = db.lock().unwrap_or_else(|err| err.into_inner());
+                db.delete_meeting(id)
+            })
+            .await;
+            return Err(e);
+        }
+    };
 
     *active = Some(ActiveMeeting {
         meeting_id: id,

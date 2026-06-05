@@ -734,6 +734,28 @@ async fn run_daemon() -> anyhow::Result<()> {
         });
     }
 
+    // Crash recovery: close any meeting left open by a previous unclean shutdown
+    // so it becomes listable and reapable instead of stuck "in progress".
+    {
+        let db = db.clone();
+        let recovered = tokio::task::spawn_blocking(move || {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
+            let db = db.lock().unwrap_or_else(|e| e.into_inner());
+            db.end_dangling_meetings(now)
+        })
+        .await;
+        match recovered {
+            Ok(Ok(n)) if n > 0 => {
+                tracing::warn!(recovered = n, "closed meetings left open by a previous run")
+            }
+            Ok(Err(e)) => tracing::warn!(error = %e, "meeting crash-recovery failed"),
+            _ => {}
+        }
+    }
+
     // Meeting controller: receives Start/Stop commands over an mpsc channel.
     let (meeting_tx, meeting_rx) =
         tokio::sync::mpsc::channel::<crate::meeting::controller::MeetingCmd>(4);
@@ -759,7 +781,7 @@ async fn run_daemon() -> anyhow::Result<()> {
                     .duration_since(std::time::UNIX_EPOCH)
                     .map(|d| d.as_secs() as i64)
                     .unwrap_or(0);
-                let cutoff = now - retention_days * 86_400;
+                let cutoff = now.saturating_sub(retention_days.saturating_mul(86_400));
                 let db = db.clone();
                 let _ = tokio::task::spawn_blocking(move || {
                     let db = db.lock().unwrap_or_else(|e| e.into_inner());
