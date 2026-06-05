@@ -7,6 +7,11 @@ REPO="jaypopat/rewindos"
 ASSET="rewindos-linux-x86_64.tar.gz"
 APP_ID="io.github.jaypopat.rewindos"
 
+# Semantic search runs on Ollama + a local embedding model. Keep EMBED_MODEL in
+# sync with SemanticConfig::default().model in crates/rewindos-core/src/config.rs.
+OLLAMA_HOST="${OLLAMA_HOST:-http://localhost:11434}"
+EMBED_MODEL="nomic-embed-text"
+
 BIN_DIR="$HOME/.local/bin"
 APP_DIR="$HOME/.local/share/applications"
 ICON_BASE="$HOME/.local/share/icons/hicolor"
@@ -207,8 +212,8 @@ enable_service() {
   fi
 }
 
-do_install() { # do_install <with_paddleocr:0|1>
-  local with_paddle="${1:-0}"
+do_install() { # do_install <with_paddleocr:0|1> <with_semantic:0|1>
+  local with_paddle="${1:-0}" with_semantic="${2:-0}"
   [[ "$(uname -m)" == "x86_64" ]] || die "Unsupported architecture $(uname -m); x86_64 only for now."
 
   install_deps "$(detect_pkg_mgr)" "${XDG_CURRENT_DESKTOP:-}"
@@ -224,6 +229,12 @@ do_install() { # do_install <with_paddleocr:0|1>
     do_paddleocr
   else
     maybe_prompt_paddleocr
+  fi
+
+  if [[ "$with_semantic" == "1" ]]; then
+    do_semantic
+  else
+    maybe_prompt_semantic
   fi
 
   log "RewindOS $tag is installed and capturing."
@@ -277,6 +288,60 @@ do_paddleocr() {
 maybe_prompt_paddleocr() {
   if prompt_yes_no "Enable higher-accuracy PaddleOCR? Downloads ~hundreds of MB of Python deps."; then
     do_paddleocr
+  fi
+}
+
+# ollama_reachable -> 0 if the Ollama API answers at $OLLAMA_HOST
+ollama_reachable() {
+  curl -fsS --max-time 3 "$OLLAMA_HOST/api/tags" >/dev/null 2>&1
+}
+
+# Set up semantic search: ensure Ollama is present + running, pull the embedding
+# model (visible progress), then nudge the daemon to re-probe and enable it.
+# Every failure is soft — semantic search is optional, so we warn and move on.
+do_semantic() {
+  log "Setting up semantic search (Ollama + embedding model)..."
+
+  if ! command -v ollama >/dev/null 2>&1 && ! ollama_reachable; then
+    log "Installing the Ollama runtime via its official installer..."
+    if ! curl -fsSL https://ollama.com/install.sh | sh; then
+      warn "Ollama install failed — semantic search stays off."
+      warn "Install Ollama yourself, then re-run: install.sh --with-semantic"
+      return 0
+    fi
+  fi
+
+  # The official installer starts ollama.service; give the API a moment to bind.
+  local tries=0
+  until ollama_reachable || (( tries++ >= 10 )); do sleep 1; done
+  if ! ollama_reachable; then
+    warn "Ollama is installed but not reachable at $OLLAMA_HOST."
+    warn "Start it (e.g. 'systemctl --user start ollama' or 'ollama serve'), then run: ollama pull $EMBED_MODEL"
+    return 0
+  fi
+
+  log "Pulling embedding model $EMBED_MODEL (~274 MB, one time)..."
+  if ! ollama pull "$EMBED_MODEL"; then
+    warn "Model pull failed — semantic search stays off. Retry later: ollama pull $EMBED_MODEL"
+    return 0
+  fi
+
+  # Daemon auto-detects Ollama on startup and switches on hybrid search.
+  systemctl --user restart rewindos-daemon.service 2>/dev/null || true
+  log "Semantic search enabled — the daemon will embed your history in the background."
+}
+
+maybe_prompt_semantic() {
+  # Already running Ollama? Then semantic search is free to turn on — skip the
+  # prompt, just make sure the model is present (matches the daemon's own
+  # auto-enable-when-reachable behavior).
+  if ollama_reachable; then
+    log "Ollama detected at $OLLAMA_HOST — enabling semantic search."
+    do_semantic
+    return 0
+  fi
+  if prompt_yes_no "Enable semantic search? Installs Ollama + a ~274 MB model for meaning-based search."; then
+    do_semantic
   fi
 }
 # prompt_yes_no <question> -> 0 if yes. Reads /dev/tty so it works under curl|bash.
@@ -352,6 +417,7 @@ RewindOS installer
 
   install.sh                 install (or update binaries if already installed)
   install.sh --with-paddleocr install and enable higher-accuracy PaddleOCR
+  install.sh --with-semantic install and enable semantic search (Ollama + model)
   install.sh --update        update to the latest release
   install.sh --uninstall     remove RewindOS (prompts before deleting your data)
   install.sh --help          this help
@@ -359,18 +425,19 @@ EOF
 }
 
 main() {
-  local mode="install" with_paddle=0 arg
+  local mode="install" with_paddle=0 with_semantic=0 arg
   for arg in "$@"; do
     case "$arg" in
       --update)        mode="update" ;;
       --uninstall)     mode="uninstall" ;;
       --with-paddleocr) with_paddle=1 ;;
+      --with-semantic) with_semantic=1 ;;
       --help|-h)       mode="help" ;;
       *) die "Unknown option: $arg (try --help)" ;;
     esac
   done
   case "$mode" in
-    install)   do_install "$with_paddle" ;;
+    install)   do_install "$with_paddle" "$with_semantic" ;;
     update)    do_update ;;
     uninstall) do_uninstall ;;
     help)      print_help ;;
