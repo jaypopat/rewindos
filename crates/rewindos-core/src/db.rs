@@ -463,6 +463,38 @@ impl Database {
         Ok(segment_id)
     }
 
+    /// Insert a transcript segment embedding and mark the segment done.
+    pub fn insert_transcript_embedding(&self, segment_id: i64, embedding: &[f32]) -> Result<()> {
+        let blob: Vec<u8> = embedding.iter().flat_map(|f| f.to_le_bytes()).collect();
+        self.conn.execute(
+            "INSERT INTO transcript_embeddings (segment_id, embedding) VALUES (?1, ?2)",
+            params![segment_id, blob],
+        )?;
+        self.conn.execute(
+            "UPDATE transcript_segments SET embedding_status = 'done' WHERE id = ?1",
+            params![segment_id],
+        )?;
+        Ok(())
+    }
+
+    /// Segments awaiting an embedding.
+    pub fn get_pending_transcript_embeddings(&self, limit: usize) -> Result<Vec<(i64, String)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, text FROM transcript_segments
+             WHERE embedding_status = 'pending'
+             ORDER BY id
+             LIMIT ?1",
+        )?;
+        let rows = stmt.query_map(params![limit as i64], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
     /// Insert bounding boxes for a screenshot.
     /// Wrapped in a transaction for performance (single fsync instead of N).
     pub fn insert_bounding_boxes(
@@ -3337,6 +3369,26 @@ mod tests {
                 [],
             )
             .expect("transcript_segments table missing");
+    }
+
+    #[test]
+    fn transcript_embedding_roundtrip_and_pending_queue() {
+        let db = make_test_db();
+        let mid = db.insert_meeting(1000, None, None).unwrap();
+        let seg = crate::schema::NewTranscriptSegment {
+            start_ms: 0, end_ms: 10, source: "mic".into(),
+            speaker_label: "You".into(), text: "agenda item one".into(),
+        };
+        let sid = db.insert_transcript_segment(mid, &seg).unwrap();
+
+        // Pending before embedding.
+        let pending = db.get_pending_transcript_embeddings(10).unwrap();
+        assert_eq!(pending, vec![(sid, "agenda item one".to_string())]);
+
+        // After embedding, queue is empty.
+        let emb = vec![0.1f32; 768];
+        db.insert_transcript_embedding(sid, &emb).unwrap();
+        assert!(db.get_pending_transcript_embeddings(10).unwrap().is_empty());
     }
 
     #[test]
