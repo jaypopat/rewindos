@@ -336,6 +336,110 @@ fn get_app_names(state: State<'_, AppState>) -> Result<Vec<String>, String> {
 }
 
 #[tauri::command]
+fn list_meetings(
+    state: State<'_, AppState>,
+    limit: Option<i64>,
+    offset: Option<i64>,
+) -> Result<Vec<rewindos_core::schema::Meeting>, String> {
+    let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+    db.list_meetings(limit.unwrap_or(100), offset.unwrap_or(0))
+        .map_err(|e| format!("db error: {e}"))
+}
+
+#[tauri::command]
+fn get_meeting(
+    state: State<'_, AppState>,
+    id: i64,
+) -> Result<Option<rewindos_core::schema::Meeting>, String> {
+    let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+    db.get_meeting(id).map_err(|e| format!("db error: {e}"))
+}
+
+#[tauri::command]
+fn get_meeting_segments(
+    state: State<'_, AppState>,
+    meeting_id: i64,
+) -> Result<Vec<rewindos_core::schema::TranscriptSegment>, String> {
+    let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+    db.get_meeting_segments(meeting_id)
+        .map_err(|e| format!("db error: {e}"))
+}
+
+#[tauri::command]
+fn delete_meeting(state: State<'_, AppState>, meeting_id: i64) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+    db.delete_meeting(meeting_id)
+        .map_err(|e| format!("db error: {e}"))
+}
+
+#[tauri::command]
+fn search_transcripts(
+    state: State<'_, AppState>,
+    query: String,
+    limit: Option<i64>,
+) -> Result<Vec<rewindos_core::schema::TranscriptSearchResult>, String> {
+    // Keyword-only from the UI (no query embedding); the daemon owns embeddings.
+    let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+    db.search_transcripts(&query, None, limit.unwrap_or(50))
+        .map_err(|e| format!("db error: {e}"))
+}
+
+#[tauri::command]
+async fn start_meeting(state: State<'_, AppState>, title: String) -> Result<i64, String> {
+    let reply = state
+        .dbus
+        .call_method(
+            Some("com.rewindos.Daemon"),
+            "/com/rewindos/Daemon",
+            Some("com.rewindos.Daemon"),
+            "StartMeeting",
+            &(title.as_str(),),
+        )
+        .await
+        .map_err(|e| format!("dbus call: {e}"))?;
+    reply
+        .body()
+        .deserialize::<i64>()
+        .map_err(|e| format!("dbus deserialize: {e}"))
+}
+
+#[tauri::command]
+async fn stop_meeting(state: State<'_, AppState>) -> Result<(), String> {
+    state
+        .dbus
+        .call_method(
+            Some("com.rewindos.Daemon"),
+            "/com/rewindos/Daemon",
+            Some("com.rewindos.Daemon"),
+            "StopMeeting",
+            &(),
+        )
+        .await
+        .map_err(|e| format!("dbus call: {e}"))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn whisper_model_present(state: State<'_, AppState>) -> Result<bool, String> {
+    let cfg = state.config.lock().map_err(|e| format!("config lock: {e}"))?;
+    let path = cfg.whisper_model_path().map_err(|e| format!("{e}"))?;
+    Ok(path.exists())
+}
+
+#[tauri::command]
+async fn download_whisper_model(state: State<'_, AppState>) -> Result<(), String> {
+    // Clone the config out of the lock BEFORE the await point (MutexGuard isn't Send).
+    let cfg = {
+        let guard = state.config.lock().map_err(|e| format!("config lock: {e}"))?;
+        guard.clone()
+    };
+    rewindos_core::whisper_model::ensure_model_downloaded(&cfg)
+        .await
+        .map(|_| ())
+        .map_err(|e| format!("download: {e}"))
+}
+
+#[tauri::command]
 fn get_activity(
     state: State<'_, AppState>,
     since_timestamp: i64,
@@ -1778,6 +1882,15 @@ pub fn run() {
             get_screenshot,
             get_screenshots_by_ids,
             get_app_names,
+            list_meetings,
+            get_meeting,
+            get_meeting_segments,
+            delete_meeting,
+            search_transcripts,
+            start_meeting,
+            stop_meeting,
+            whisper_model_present,
+            download_whisper_model,
             get_activity,
             get_task_breakdown,
             get_active_blocks,
