@@ -885,6 +885,66 @@ impl Database {
         Ok(paths)
     }
 
+    /// Delete a meeting and everything attached to it: segments, FTS rows,
+    /// embedding rows, and audio files. FTS5/vec0 are standalone tables with
+    /// no FK cascade, so they must be cleared explicitly (same pattern as
+    /// delete_screenshots_before clearing ocr_fts).
+    pub fn delete_meeting(&self, meeting_id: i64) -> Result<()> {
+        let (mic, sys): (Option<String>, Option<String>) = self
+            .conn
+            .query_row(
+                "SELECT mic_audio_path, system_audio_path FROM meetings WHERE id = ?1",
+                params![meeting_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap_or((None, None));
+
+        let segment_ids: Vec<i64> = {
+            let mut stmt = self
+                .conn
+                .prepare("SELECT id FROM transcript_segments WHERE meeting_id = ?1")?;
+            let rows = stmt.query_map(params![meeting_id], |row| row.get::<_, i64>(0))?;
+            rows.collect::<std::result::Result<Vec<_>, _>>()?
+        };
+
+        let tx = self.conn.unchecked_transaction()?;
+        for sid in &segment_ids {
+            tx.execute("DELETE FROM transcript_fts WHERE segment_id = ?1", params![sid])?;
+            tx.execute(
+                "DELETE FROM transcript_embeddings WHERE segment_id = ?1",
+                params![sid],
+            )?;
+        }
+        tx.execute(
+            "DELETE FROM transcript_segments WHERE meeting_id = ?1",
+            params![meeting_id],
+        )?;
+        tx.execute("DELETE FROM meetings WHERE id = ?1", params![meeting_id])?;
+        tx.commit()?;
+
+        for p in [mic, sys].into_iter().flatten() {
+            let _ = std::fs::remove_file(&p);
+        }
+        Ok(())
+    }
+
+    /// Retention sweep: delete meetings ended before `timestamp` (unix seconds).
+    /// Returns the number of meetings removed.
+    pub fn delete_meetings_before(&self, timestamp: i64) -> Result<u64> {
+        let ids: Vec<i64> = {
+            let mut stmt = self.conn.prepare(
+                "SELECT id FROM meetings WHERE ended_at IS NOT NULL AND ended_at < ?1",
+            )?;
+            let rows = stmt.query_map(params![timestamp], |row| row.get::<_, i64>(0))?;
+            rows.collect::<std::result::Result<Vec<_>, _>>()?
+        };
+        let count = ids.len() as u64;
+        for id in ids {
+            self.delete_meeting(id)?;
+        }
+        Ok(count)
+    }
+
     /// Best-effort removal of files from disk.
     fn remove_files(paths: &[String]) {
         for path in paths {
@@ -3590,5 +3650,40 @@ mod tests {
         assert_eq!(results.len(), 2);
         assert!(results.iter().all(|r| r.text.contains("deploy")));
         assert!(results.iter().all(|r| r.meeting_id == mid));
+    }
+
+    #[test]
+    fn delete_meeting_purges_fts_and_embeddings() {
+        let db = make_test_db();
+        let mid = db.insert_meeting(1000, None, None).unwrap();
+        let seg = crate::schema::NewTranscriptSegment {
+            start_ms: 0, end_ms: 10, source: "mic".into(),
+            speaker_label: "You".into(), text: "secret words".into(),
+        };
+        let sid = db.insert_transcript_segment(mid, &seg).unwrap();
+        db.insert_transcript_embedding(sid, &vec![0.2f32; 768]).unwrap();
+
+        db.delete_meeting(mid).unwrap();
+
+        let seg_count: i64 = db.conn
+            .query_row("SELECT COUNT(*) FROM transcript_segments", [], |r| r.get(0)).unwrap();
+        let fts_count: i64 = db.conn
+            .query_row("SELECT COUNT(*) FROM transcript_fts", [], |r| r.get(0)).unwrap();
+        let emb_count: i64 = db.conn
+            .query_row("SELECT COUNT(*) FROM transcript_embeddings", [], |r| r.get(0)).unwrap();
+        assert_eq!((seg_count, fts_count, emb_count), (0, 0, 0));
+    }
+
+    #[test]
+    fn delete_meetings_before_removes_old() {
+        let db = make_test_db();
+        let old = db.insert_meeting(1000, None, None).unwrap();
+        db.end_meeting(old, 1500, None, None).unwrap();
+        let recent = db.insert_meeting(9000, None, None).unwrap();
+        db.end_meeting(recent, 9500, None, None).unwrap();
+
+        let removed = db.delete_meetings_before(2000).unwrap();
+        assert_eq!(removed, 1);
+        assert_eq!(db.list_meetings(50, 0).unwrap().len(), 1);
     }
 }
