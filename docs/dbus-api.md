@@ -60,6 +60,16 @@ The capture daemon exposes a D-Bus service on the **session bus** for control by
       <arg name="enabled" type="b" direction="in"/>
     </method>
 
+    <!-- Start recording a meeting (mic + system audio → Whisper transcription) -->
+    <method name="StartMeeting">
+      <arg name="title" type="s" direction="in"/>
+      <arg name="meeting_id" type="x" direction="out"/>
+    </method>
+
+    <!-- Stop the active meeting and flush the transcript -->
+    <method name="StopMeeting">
+    </method>
+
     <!-- Emitted when capture state changes -->
     <signal name="CaptureStateChanged">
       <arg name="is_capturing" type="b"/>
@@ -97,6 +107,33 @@ Resumes screen capture after pause.
 **Response:** (none)
 **Errors:** `com.rewindos.Error.AlreadyRunning` — already capturing
 
+### StartMeeting(title) → i64
+
+Starts recording a meeting: opens mic and system-audio capture streams, begins
+Whisper transcription, and creates a meeting row in the database. `title` may
+be an empty string (stored as untitled). Returns the new meeting id.
+
+**Request:**
+- `title` (string): Display name for the meeting. Pass `""` for untitled.
+
+**Response:**
+- `meeting_id` (i64): Row id of the newly created meeting.
+
+**Errors:**
+- `com.rewindos.Error.AlreadyRunning` — a meeting is already being recorded
+- `com.rewindos.Error.ModelNotAvailable` — no Whisper GGUF model is installed
+- `com.rewindos.Error.AudioCaptureFailed` — audio capture streams could not be opened
+
+### StopMeeting()
+
+Stops the active meeting: finalises audio files, flushes the transcript buffer,
+and triggers best-effort post-processing (embedding generation and an Ollama
+summary). Post-processing failures are non-fatal and logged only.
+
+**Request:** (none)
+**Response:** (none)
+**Errors:** `com.rewindos.Error.NotRunning` — no meeting is currently active
+
 ### GetStatus() → String
 
 Returns current daemon status as JSON.
@@ -116,7 +153,10 @@ Returns current daemon status as JSON.
   },
   "uptime_seconds": 28847,
   "disk_usage_bytes": 1073741824,
-  "last_capture_timestamp": 1706140800
+  "last_capture_timestamp": 1706140800,
+  "meeting_active": false,
+  "meeting_id": null,
+  "meeting_started_at": null
 }
 ```
 
@@ -128,6 +168,14 @@ Returns current daemon status as JSON.
   `null` if no frame has arrived yet.
 - `unfiltered_capture` (bool): the privacy escape hatch is active — capture is
   running without enforcing exclusions.
+
+**Meeting fields** (present in all daemon versions; default to `false`/`null` when
+the meeting-transcription feature is not in use):
+- `meeting_active` (bool): whether a meeting is currently being recorded.
+- `meeting_id` (int|null): row id of the active meeting, or `null` when no
+  meeting is in progress.
+- `meeting_started_at` (int|null): Unix-seconds timestamp at which the active
+  meeting started, or `null` when no meeting is in progress.
 
 ### Search(query, filters_json) → String
 
@@ -250,6 +298,8 @@ impl DaemonService {
     async fn delete_range(&self, start: i64, end: i64) -> zbus::fdo::Result<u64>;
     async fn recheck_window_info(&mut self) -> zbus::fdo::Result<String>;
     async fn set_unfiltered_capture(&mut self, enabled: bool) -> zbus::fdo::Result<()>;
+    async fn start_meeting(&mut self, title: &str) -> zbus::fdo::Result<i64>;
+    async fn stop_meeting(&mut self) -> zbus::fdo::Result<()>;
 
     #[zbus(signal)]
     async fn capture_state_changed(ctxt: &SignalEmitter<'_>, is_capturing: bool) -> zbus::Result<()>;
@@ -285,4 +335,13 @@ busctl --user call com.rewindos.Daemon /com/rewindos/Daemon com.rewindos.Daemon 
 
 # Monitor signals
 busctl --user monitor com.rewindos.Daemon
+
+# Start a meeting (titled)
+busctl --user call com.rewindos.Daemon /com/rewindos/Daemon com.rewindos.Daemon StartMeeting s "Weekly sync"
+
+# Start a meeting (untitled)
+busctl --user call com.rewindos.Daemon /com/rewindos/Daemon com.rewindos.Daemon StartMeeting s ""
+
+# Stop the active meeting
+busctl --user call com.rewindos.Daemon /com/rewindos/Daemon com.rewindos.Daemon StopMeeting
 ```
