@@ -928,6 +928,18 @@ impl Database {
         Ok(())
     }
 
+    /// Mark every still-open meeting (`ended_at IS NULL`) as ended at `ended_at`.
+    /// Crash recovery for daemon startup: an interrupted meeting becomes listable
+    /// and eligible for retention instead of being stuck "in progress" forever.
+    /// Returns the number of rows closed.
+    pub fn end_dangling_meetings(&self, ended_at: i64) -> Result<u64> {
+        let n = self.conn.execute(
+            "UPDATE meetings SET ended_at = ?1 WHERE ended_at IS NULL",
+            rusqlite::params![ended_at],
+        )?;
+        Ok(n as u64)
+    }
+
     /// Retention sweep: delete meetings ended before `timestamp` (unix seconds).
     /// Returns the number of meetings removed.
     pub fn delete_meetings_before(&self, timestamp: i64) -> Result<u64> {
@@ -3685,5 +3697,20 @@ mod tests {
         let removed = db.delete_meetings_before(2000).unwrap();
         assert_eq!(removed, 1);
         assert_eq!(db.list_meetings(50, 0).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn end_dangling_meetings_closes_only_open_rows() {
+        let db = Database::open_in_memory().unwrap();
+        let open = db.insert_meeting(100, Some("open"), None).unwrap();
+        let closed = db.insert_meeting(200, Some("closed"), None).unwrap();
+        db.end_meeting(closed, 250, None, None).unwrap();
+
+        let n = db.end_dangling_meetings(999).unwrap();
+        assert_eq!(n, 1); // only the open meeting
+
+        let rows = db.list_meetings(10, 0).unwrap();
+        assert_eq!(rows.iter().find(|m| m.id == open).unwrap().ended_at, Some(999));
+        assert_eq!(rows.iter().find(|m| m.id == closed).unwrap().ended_at, Some(250));
     }
 }
