@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useDebounce } from "@/hooks/useDebounce";
 import { Check, Search } from "lucide-react";
 import {
   Dialog,
@@ -25,7 +26,8 @@ export function AttachmentPicker({ open, onClose, onAttach }: AttachmentPickerPr
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<Set<number>>(new Set());
 
-  const filters: SearchFilters = useMemo(() => {
+  // Recent list: last 3 days (a quick "what was I just doing" view).
+  const recentFilters: SearchFilters = useMemo(() => {
     const now = Math.floor(Date.now() / 1000);
     return {
       start_time: now - 3 * DAY,
@@ -35,19 +37,28 @@ export function AttachmentPicker({ open, onClose, onAttach }: AttachmentPickerPr
     };
   }, []);
 
-  const trimmedQuery = query.trim();
-  const hasQuery = trimmedQuery.length > 0;
+  // Search: NO time window — the picker should find any screenshot the user
+  // can name, not just the last 3 days. (The backend enforces start_time, so
+  // reusing the recent window silently hid everything older.)
+  const searchFilters: SearchFilters = useMemo(
+    () => ({ limit: 60, offset: 0 }),
+    [],
+  );
+
+  // Debounce so we don't fire an FTS query on every keystroke.
+  const debouncedQuery = useDebounce(query.trim(), 250);
+  const hasQuery = debouncedQuery.length > 0;
 
   const { data: searchResponse } = useQuery({
-    queryKey: queryKeys.search(trimmedQuery, filters),
-    queryFn: () => search(trimmedQuery, filters),
+    queryKey: queryKeys.search(debouncedQuery, searchFilters),
+    queryFn: () => search(debouncedQuery, searchFilters),
     enabled: open && hasQuery,
   });
 
   const { data: recentItems } = useQuery({
-    queryKey: ["attachment-picker-recent", filters.start_time, filters.end_time] as const,
+    queryKey: ["attachment-picker-recent", recentFilters.start_time, recentFilters.end_time] as const,
     queryFn: () =>
-      browseScreenshots(filters.start_time, filters.end_time, undefined, filters.limit),
+      browseScreenshots(recentFilters.start_time, recentFilters.end_time, undefined, recentFilters.limit),
     enabled: open && !hasQuery,
   });
 
