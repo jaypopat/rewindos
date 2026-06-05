@@ -4,9 +4,9 @@ use crate::schema::{
     ActiveBlock, ActivityResponse, AppUsageStat, Bookmark, BoundingBox, CachedDailySummary,
     Collection, DailyActivity, HourlyActivity, JournalDateInfo, JournalEntry, JournalScreenshot,
     JournalSearchResponse, JournalSearchResult, JournalStreakInfo, JournalSummary, JournalTag,
-    JournalTemplate, NewBoundingBox, NewCollection, NewScreenshot, OcrStatus, OpenTodo, Screenshot,
-    SearchFilters, SearchResponse, SearchResult, TaskUsageStat, UpdateCollection,
-    UpsertJournalEntry,
+    JournalTemplate, NewBoundingBox, NewCollection, NewScreenshot, NewTranscriptSegment, OcrStatus,
+    OpenTodo, Screenshot, SearchFilters, SearchResponse, SearchResult, TaskUsageStat,
+    UpdateCollection, UpsertJournalEntry,
 };
 use rusqlite::{ffi::sqlite3_auto_extension, params, Connection};
 use std::path::Path;
@@ -392,6 +392,75 @@ impl Database {
         )?;
         tx.commit()?;
         Ok(())
+    }
+
+    /// Insert a meeting row (recording in progress). Returns the new id.
+    pub fn insert_meeting(
+        &self,
+        started_at: i64,
+        title: Option<&str>,
+        app_name: Option<&str>,
+    ) -> Result<i64> {
+        self.conn.execute(
+            "INSERT INTO meetings (started_at, title, app_name) VALUES (?1, ?2, ?3)",
+            params![started_at, title, app_name],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    /// Finalize a meeting: set ended_at and audio paths.
+    pub fn end_meeting(
+        &self,
+        id: i64,
+        ended_at: i64,
+        mic_path: Option<&str>,
+        system_path: Option<&str>,
+    ) -> Result<()> {
+        self.conn.execute(
+            "UPDATE meetings SET ended_at = ?2, mic_audio_path = ?3, system_audio_path = ?4
+             WHERE id = ?1",
+            params![id, ended_at, mic_path, system_path],
+        )?;
+        Ok(())
+    }
+
+    /// Store the post-meeting summary.
+    pub fn set_meeting_summary(&self, id: i64, summary: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE meetings SET summary = ?2 WHERE id = ?1",
+            params![id, summary],
+        )?;
+        Ok(())
+    }
+
+    /// Insert a transcript segment into both the table and the FTS index.
+    /// Wrapped in a transaction so both stay in sync on crash (mirror of insert_ocr_text).
+    pub fn insert_transcript_segment(
+        &self,
+        meeting_id: i64,
+        seg: &NewTranscriptSegment,
+    ) -> Result<i64> {
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute(
+            "INSERT INTO transcript_segments
+               (meeting_id, start_ms, end_ms, source, speaker_label, text)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                meeting_id,
+                seg.start_ms,
+                seg.end_ms,
+                seg.source,
+                seg.speaker_label,
+                seg.text
+            ],
+        )?;
+        let segment_id = tx.last_insert_rowid();
+        tx.execute(
+            "INSERT INTO transcript_fts (text, segment_id) VALUES (?1, ?2)",
+            params![seg.text, segment_id],
+        )?;
+        tx.commit()?;
+        Ok(segment_id)
     }
 
     /// Insert bounding boxes for a screenshot.
@@ -3268,5 +3337,33 @@ mod tests {
                 [],
             )
             .expect("transcript_segments table missing");
+    }
+
+    #[test]
+    fn insert_meeting_and_segment_indexes_fts() {
+        let db = make_test_db();
+        let mid = db.insert_meeting(1000, Some("Standup"), Some("zoom")).unwrap();
+        assert_eq!(mid, 1);
+
+        let seg = crate::schema::NewTranscriptSegment {
+            start_ms: 1_000_000,
+            end_ms: 1_002_000,
+            source: "system".to_string(),
+            speaker_label: "Remote".to_string(),
+            text: "ship the release on friday".to_string(),
+        };
+        let sid = db.insert_transcript_segment(mid, &seg).unwrap();
+        assert!(sid > 0);
+
+        // FTS row exists and matches.
+        let hit: i64 = db
+            .conn
+            .query_row(
+                "SELECT segment_id FROM transcript_fts WHERE transcript_fts MATCH 'release'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(hit, sid);
     }
 }
