@@ -422,7 +422,7 @@ async fn stop_meeting(state: State<'_, AppState>) -> Result<(), String> {
 #[tauri::command]
 fn whisper_model_present(state: State<'_, AppState>) -> Result<bool, String> {
     let cfg = state.config.lock().map_err(|e| format!("config lock: {e}"))?;
-    let path = cfg.whisper_model_path().map_err(|e| format!("{e}"))?;
+    let path = cfg.whisper_model_path().map_err(|e| format!("whisper model path: {e}"))?;
     Ok(path.exists())
 }
 
@@ -436,7 +436,7 @@ async fn download_whisper_model(state: State<'_, AppState>) -> Result<(), String
     rewindos_core::whisper_model::ensure_model_downloaded(&cfg)
         .await
         .map(|_| ())
-        .map_err(|e| format!("download: {e}"))
+        .map_err(|e| format!("whisper download: {e}"))
 }
 
 #[tauri::command]
