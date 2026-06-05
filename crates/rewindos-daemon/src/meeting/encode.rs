@@ -7,6 +7,9 @@
 
 use std::io::Write;
 
+use ogg::{PacketWriteEndInfo, PacketWriter};
+use opus::{Application, Channels, Encoder};
+
 /// Capture/encode sample rate (whisper's native input; matches `AudioWindow`).
 const SAMPLE_RATE: u32 = 16_000;
 /// 20 ms frame at 16 kHz — the Opus frame size we encode.
@@ -58,9 +61,112 @@ fn opus_tags(vendor: &str) -> Vec<u8> {
     t
 }
 
+/// Streaming Ogg-Opus encoder. Emits the header pages on construction, encodes
+/// 20 ms frames as PCM arrives, and flags end-of-stream on `finalize`.
+pub struct OpusWriter<W: Write> {
+    writer: PacketWriter<'static, W>,
+    encoder: Encoder,
+    /// Samples not yet forming a complete 320-sample frame.
+    pending: Vec<f32>,
+    /// Most-recently-encoded packet, held back so `finalize` can flag EOS on
+    /// the true last packet.
+    held: Option<Vec<u8>>,
+    /// Running granule position, in 48 kHz samples.
+    granule: u64,
+}
+
+impl<W: Write> OpusWriter<W> {
+    /// Create a writer over `sink`, emitting OpusHead + OpusTags immediately.
+    pub fn new(sink: W) -> Result<Self, EncodeError> {
+        let encoder = Encoder::new(SAMPLE_RATE, Channels::Mono, Application::Voip)?;
+        let mut writer = PacketWriter::new(sink);
+        writer.write_packet(
+            opus_head(1, SAMPLE_RATE, PRE_SKIP),
+            SERIAL,
+            PacketWriteEndInfo::EndPage,
+            0,
+        )?;
+        writer.write_packet(
+            opus_tags("rewindos"),
+            SERIAL,
+            PacketWriteEndInfo::EndPage,
+            0,
+        )?;
+        Ok(Self {
+            writer,
+            encoder,
+            pending: Vec::new(),
+            held: None,
+            granule: 0,
+        })
+    }
+
+    /// Finalize: zero-pad any partial frame, write the held packet with the
+    /// end-of-stream flag, and flush the underlying writer to disk. Takes
+    /// `self` by value so the writer can't be used after the stream is closed.
+    pub fn finalize(mut self) -> Result<(), EncodeError> {
+        if !self.pending.is_empty() {
+            let mut out = [0u8; MAX_PACKET];
+            self.pending.resize(FRAME_SAMPLES, 0.0);
+            let frame = std::mem::take(&mut self.pending);
+            let n = self.encoder.encode_float(&frame, &mut out)?;
+            self.stage(out[..n].to_vec())?;
+        }
+        if let Some(last) = self.held.take() {
+            self.granule += GRANULE_PER_FRAME;
+            self.writer
+                .write_packet(last, SERIAL, PacketWriteEndInfo::EndStream, self.granule)?;
+        }
+        // Flush explicitly rather than leaning on BufWriter's drop, which would
+        // silently discard a flush error and make this fallible method lie.
+        self.writer.into_inner().flush()?;
+        Ok(())
+    }
+
+    /// Flush the currently-held packet as a normal page, then hold `packet`.
+    /// Keeping one packet in hand lets `finalize` flag EOS on the real last one.
+    fn stage(&mut self, packet: Vec<u8>) -> Result<(), EncodeError> {
+        if let Some(prev) = self.held.take() {
+            self.granule += GRANULE_PER_FRAME;
+            self.writer
+                .write_packet(prev, SERIAL, PacketWriteEndInfo::NormalPacket, self.granule)?;
+        }
+        self.held = Some(packet);
+        Ok(())
+    }
+}
+
+impl OpusWriter<std::io::BufWriter<std::fs::File>> {
+    /// Create an Ogg-Opus file at `path`. The parent directory must exist.
+    pub fn create(path: impl AsRef<std::path::Path>) -> Result<Self, EncodeError> {
+        let file = std::fs::File::create(path)?;
+        Self::new(std::io::BufWriter::new(file))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn new_then_finalize_writes_two_header_packets() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("h.opus");
+
+        let w = OpusWriter::create(&path).unwrap();
+        w.finalize().unwrap(); // no audio — just the headers
+
+        let bytes = std::fs::read(&path).unwrap();
+        let mut rdr = ogg::PacketReader::new(std::io::Cursor::new(bytes));
+
+        let p0 = rdr.read_packet().unwrap().expect("OpusHead packet");
+        assert_eq!(&p0.data[0..8], b"OpusHead");
+        assert_eq!(p0.absgp_page(), 0);
+
+        let p1 = rdr.read_packet().unwrap().expect("OpusTags packet");
+        assert_eq!(&p1.data[0..8], b"OpusTags");
+        assert_eq!(p1.absgp_page(), 0);
+    }
 
     #[test]
     fn opus_head_layout_mono_16k() {
