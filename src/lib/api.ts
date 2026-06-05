@@ -622,6 +622,75 @@ export async function exportJournal(
   return invoke("export_journal", { startDate, endDate });
 }
 
+// -- Meetings / Transcription --
+
+export interface Meeting {
+  id: number;
+  started_at: number;
+  ended_at: number | null;
+  title: string | null;
+  app_name: string | null;
+  mic_audio_path: string | null;
+  system_audio_path: string | null;
+  summary: string | null;
+}
+
+export interface TranscriptSegment {
+  id: number;
+  meeting_id: number;
+  start_ms: number;
+  end_ms: number;
+  source: string; // "mic" | "system"
+  speaker_label: string; // "You" | "Remote"
+  text: string;
+}
+
+export interface TranscriptSearchResult {
+  segment_id: number;
+  meeting_id: number;
+  start_ms: number;
+  end_ms: number;
+  speaker_label: string;
+  text: string;
+  rank: number;
+}
+
+export async function listMeetings(limit = 100, offset = 0): Promise<Meeting[]> {
+  return invoke("list_meetings", { limit, offset });
+}
+
+export async function getMeeting(id: number): Promise<Meeting | null> {
+  return invoke("get_meeting", { id });
+}
+
+export async function getMeetingSegments(meetingId: number): Promise<TranscriptSegment[]> {
+  return invoke("get_meeting_segments", { meetingId });
+}
+
+export async function deleteMeeting(meetingId: number): Promise<void> {
+  return invoke("delete_meeting", { meetingId });
+}
+
+export async function searchTranscripts(query: string, limit = 50): Promise<TranscriptSearchResult[]> {
+  return invoke("search_transcripts", { query, limit });
+}
+
+export async function startMeeting(title: string): Promise<number> {
+  return invoke("start_meeting", { title });
+}
+
+export async function stopMeeting(): Promise<void> {
+  return invoke("stop_meeting");
+}
+
+export async function whisperModelPresent(): Promise<boolean> {
+  return invoke("whisper_model_present");
+}
+
+export async function downloadWhisperModel(): Promise<void> {
+  return invoke("download_whisper_model");
+}
+
 // -- Settings --
 
 export async function getConfig(): Promise<AppConfig> {
