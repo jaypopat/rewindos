@@ -77,9 +77,10 @@ pub async fn ensure_model_downloaded(config: &AppConfig) -> Result<PathBuf> {
     }
     drop(file);
 
-    tokio::fs::rename(&tmp, &dest)
-        .await
-        .map_err(|e| CoreError::Config(format!("finalize model: {e}")))?;
+    if let Err(e) = tokio::fs::rename(&tmp, &dest).await {
+        let _ = tokio::fs::remove_file(&tmp).await;
+        return Err(CoreError::Config(format!("finalize model: {e}")));
+    }
 
     Ok(dest)
 }
