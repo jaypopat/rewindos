@@ -8,7 +8,7 @@ mod window_info;
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use clap::{Parser, Subcommand};
 use rewindos_core::config::{init_logging, AppConfig};
@@ -18,7 +18,7 @@ use rewindos_core::hasher;
 use rewindos_core::ocr;
 use rewindos_core::paddle_ocr;
 use rewindos_core::schema::OcrStatus;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 #[derive(Parser)]
 #[command(
@@ -586,6 +586,72 @@ async fn run_daemon() -> anyhow::Result<()> {
             &config.privacy,
             unfiltered_override.load(std::sync::atomic::Ordering::SeqCst),
         );
+    }
+
+    // Auto-reprobe: if the window-info provider came up UNRELIABLE (e.g. the
+    // GNOME "Window Calls Extended" extension or KWin script wasn't ready yet
+    // when the daemon won the startup race against the session), the fail-closed
+    // privacy gate blocks ALL capture until a reliable provider appears. Nothing
+    // re-probes on its own — the D-Bus `RecheckWindowInfo` hook is on-demand
+    // only — so without this the daemon runs but silently captures nothing until
+    // a manual recheck or restart. Poll in the background and hot-swap to a
+    // reliable provider the moment one shows up, then re-open the gate. No-op on
+    // the common path where the provider is already reliable at startup.
+    if !window_info.load_full().provides_reliable_metadata() {
+        let window_info = window_info.clone();
+        let gate = gate.clone();
+        let dbus_conn = dbus_conn.clone();
+        let desktop = desktop.clone();
+        let session = session.clone();
+        let privacy = config.privacy.clone();
+        let unfiltered = unfiltered_override.clone();
+        // ~30s cadence for ~20min: long enough to outlast a slow extension load
+        // at login, bounded so a genuinely-missing provider doesn't poll forever
+        // (a later manual RecheckWindowInfo still works).
+        const REPROBE_INTERVAL: Duration = Duration::from_secs(30);
+        const MAX_REPROBES: u32 = 40;
+        tokio::spawn(async move {
+            info!("window-info provider unreliable at startup; auto-reprobing in background");
+            for _ in 0..MAX_REPROBES {
+                tokio::time::sleep(REPROBE_INTERVAL).await;
+                if window_info.load_full().provides_reliable_metadata() {
+                    return; // recovered out from under us (e.g. via D-Bus recheck)
+                }
+
+                let (candidate, _kwin) =
+                    detect::create_window_info_provider(&desktop, &session, &dbus_conn).await;
+                if !candidate.provides_reliable_metadata()
+                    || candidate.name() == window_info.load_full().name()
+                {
+                    continue; // still nothing usable
+                }
+
+                if let Err(e) = candidate.start().await {
+                    warn!(error = %e, "auto-reprobe: failed to start new provider; will retry");
+                    continue;
+                }
+                let new_name = candidate.name();
+                let old = window_info.load_full();
+                window_info.store(crate::window_info::into_shared_inner(candidate));
+                let _ = old.stop().await;
+
+                // Provider is now reliable — lift the privacy veto so capture
+                // un-blocks without a restart.
+                let p = window_info.load_full();
+                crate::capture::gate::recompute_privacy_gate(
+                    &gate,
+                    &**p,
+                    &privacy,
+                    unfiltered.load(std::sync::atomic::Ordering::SeqCst),
+                );
+                info!(
+                    provider = new_name,
+                    "auto-reprobe: window-info provider became available; capture un-blocked"
+                );
+                return;
+            }
+            debug!("auto-reprobe: gave up after {MAX_REPROBES} attempts; RecheckWindowInfo still available");
+        });
     }
 
     // Lock watcher needs the system bus for logind; session bus for screensaver.
