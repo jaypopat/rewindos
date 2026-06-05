@@ -236,4 +236,32 @@ mod tests {
         assert_eq!(last_granule, 48_000);
         assert!(last_eos, "final page must carry the end-of-stream flag");
     }
+
+    #[test]
+    fn partial_final_frame_is_padded_and_file_decodes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("b.opus");
+
+        let mut w = OpusWriter::create(&path).unwrap();
+        // 8100 samples = 25 full frames (8000) + 100 leftover → padded to 1 more.
+        w.push(&vec![0.1f32; 8_100]).unwrap();
+        w.finalize().unwrap();
+
+        // Decode the produced file back with libopus and count samples.
+        let bytes = std::fs::read(&path).unwrap();
+        let mut rdr = ogg::PacketReader::new(std::io::Cursor::new(bytes));
+        let mut dec = opus::Decoder::new(16_000, opus::Channels::Mono).unwrap();
+        let mut total = 0usize;
+        let mut idx = 0;
+        while let Some(pkt) = rdr.read_packet().unwrap() {
+            if idx < 2 {
+                idx += 1; // skip OpusHead + OpusTags
+                continue;
+            }
+            let mut out = vec![0f32; 5760]; // ≥ any single-frame decode
+            total += dec.decode_float(&pkt.data, &mut out, false).unwrap();
+        }
+        // 25 full + 1 padded = 26 frames * 320 samples = 8320.
+        assert_eq!(total, 26 * 320);
+    }
 }
