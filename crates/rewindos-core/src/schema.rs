@@ -397,6 +397,42 @@ pub struct OpenTodo {
     pub text: String,
 }
 
+// -- Meetings & Transcripts --
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Meeting {
+    pub id: i64,
+    pub started_at: i64,
+    pub ended_at: Option<i64>,
+    pub title: Option<String>,
+    pub app_name: Option<String>,
+    pub mic_audio_path: Option<String>,
+    pub system_audio_path: Option<String>,
+    pub summary: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NewTranscriptSegment {
+    pub start_ms: i64,
+    pub end_ms: i64,
+    /// "mic" | "system"
+    pub source: String,
+    /// "You" | "Remote"
+    pub speaker_label: String,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TranscriptSearchResult {
+    pub segment_id: i64,
+    pub meeting_id: i64,
+    pub start_ms: i64,
+    pub end_ms: i64,
+    pub speaker_label: String,
+    pub text: String,
+    pub rank: f64,
+}
+
 // -- Chat --
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

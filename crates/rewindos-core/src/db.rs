@@ -3252,4 +3252,21 @@ mod tests {
             "chat_messages_fts table missing: {tables:?}"
         );
     }
+
+    #[test]
+    fn migration_v009_creates_meeting_tables() {
+        let db = make_test_db();
+        // Inserting into the new tables proves the migration ran.
+        db.conn
+            .execute("INSERT INTO meetings (started_at) VALUES (1000)", [])
+            .expect("meetings table missing");
+        db.conn
+            .execute(
+                "INSERT INTO transcript_segments
+                   (meeting_id, start_ms, end_ms, source, speaker_label, text)
+                 VALUES (1, 0, 100, 'mic', 'You', 'hello')",
+                [],
+            )
+            .expect("transcript_segments table missing");
+    }
 }
