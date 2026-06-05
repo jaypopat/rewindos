@@ -14,7 +14,11 @@ export const Conversation = ({ className, ...props }: ConversationProps) => (
   <StickToBottom
     className={cn("relative flex-1 overflow-y-hidden", className)}
     initial="smooth"
-    resize="smooth"
+    // `instant` for resize, not `smooth`: while a reply streams in, the content
+    // grows every token. The spring-based `smooth` follow chases that moving
+    // bottom and visibly bounces up/down. Snapping to the bottom on each resize
+    // keeps streaming rock-steady. `initial` stays smooth for first paint.
+    resize="instant"
     role="log"
     {...props}
   />
