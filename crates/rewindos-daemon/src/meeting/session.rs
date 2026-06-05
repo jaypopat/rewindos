@@ -120,6 +120,28 @@ impl MeetingSession {
         }
         Ok(())
     }
+
+    /// Finish the meeting: flush both writers to disk, then record the end time
+    /// and (only when `keep_audio`) the audio paths. Consumes the session.
+    pub fn finalize(self, ended_at: i64) -> Result<(), SessionError> {
+        if let Some(writer) = self.mic_writer {
+            writer.finalize()?;
+        }
+        if let Some(writer) = self.sys_writer {
+            writer.finalize()?;
+        }
+        let (mic, sys) = if self.keep_audio {
+            (
+                self.mic_path.to_str().map(str::to_string),
+                self.sys_path.to_str().map(str::to_string),
+            )
+        } else {
+            (None, None)
+        };
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+        db.end_meeting(self.meeting_id, ended_at, mic.as_deref(), sys.as_deref())?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -195,5 +217,62 @@ mod tests {
         assert_eq!(segs[1].start_ms, 1000);
         assert!(!mic_path.exists(), "no audio file when keep_audio is off");
         assert!(!sys_path.exists());
+    }
+
+    #[test]
+    fn keep_audio_writes_decodable_files_and_records_paths_and_fts() {
+        let (dir, db) = temp_db();
+        let meeting_id = {
+            let g = db.lock().unwrap();
+            g.insert_meeting(2_000, Some("Recorded"), None).unwrap()
+        };
+        let mic_path = dir.path().join("rec-mic.opus");
+        let sys_path = dir.path().join("rec-system.opus");
+        let mut session = MeetingSession::new(
+            meeting_id,
+            db.clone(),
+            Arc::new(FakeTranscriber),
+            true, // keep_audio on
+            mic_path.clone(),
+            sys_path.clone(),
+        )
+        .unwrap();
+
+        // One full 20 ms frame per source so the encoder emits a packet.
+        session
+            .process_window(&AudioWindow {
+                source: AudioSource::Mic,
+                start_sample: 0,
+                samples: vec![0.05; 320],
+            })
+            .unwrap();
+        session
+            .process_window(&AudioWindow {
+                source: AudioSource::System,
+                start_sample: CAPTURE_RATE as u64,
+                samples: vec![0.05; 320],
+            })
+            .unwrap();
+        session.finalize(5_000).unwrap();
+
+        // Audio files exist and are non-trivial.
+        assert!(mic_path.exists());
+        assert!(sys_path.exists());
+        assert!(std::fs::metadata(&mic_path).unwrap().len() > 0);
+
+        // Meeting row finalized with paths + end time.
+        let meetings = db.lock().unwrap().list_meetings(10, 0).unwrap();
+        let m = meetings.iter().find(|m| m.id == meeting_id).unwrap();
+        assert_eq!(m.ended_at, Some(5_000));
+        assert_eq!(m.mic_audio_path.as_deref(), mic_path.to_str());
+        assert_eq!(m.system_audio_path.as_deref(), sys_path.to_str());
+
+        // FTS finds the transcript text.
+        let hits = db
+            .lock()
+            .unwrap()
+            .search_transcripts("hello", None, 10)
+            .unwrap();
+        assert!(hits.iter().any(|h| h.meeting_id == meeting_id));
     }
 }
