@@ -2,6 +2,9 @@
 
 use std::path::PathBuf;
 
+use futures::StreamExt;
+use tokio::io::AsyncWriteExt;
+
 use crate::config::AppConfig;
 use crate::error::{CoreError, Result};
 
@@ -11,9 +14,15 @@ pub fn whisper_model_url(model: &str) -> String {
 }
 
 /// Download the configured whisper model into `model_dir` if not already present.
-/// Returns the final model path. Streams to a `.part` temp file then renames, so a
-/// partial download never looks complete. 30-minute timeout (models range from
-/// ~75 MB `base` to ~1.5 GB `large`).
+/// Returns the final model path.
+///
+/// The response body is streamed chunk-by-chunk into a `.part` temp file, so the
+/// process never holds the entire model (up to ~1.5 GB for `large`) in RAM.
+/// Once the download is complete the temp file is renamed to the final path, so a
+/// partial download never looks complete. Any failure after the `.part` file is
+/// created triggers a best-effort cleanup of that file.
+///
+/// 30-minute timeout (models range from ~75 MB `base` to ~1.5 GB `large`).
 pub async fn ensure_model_downloaded(config: &AppConfig) -> Result<PathBuf> {
     let dest = config.whisper_model_path()?;
     if dest.exists() {
@@ -41,16 +50,37 @@ pub async fn ensure_model_downloaded(config: &AppConfig) -> Result<PathBuf> {
             resp.status()
         )));
     }
-    let bytes = resp
-        .bytes()
-        .await
-        .map_err(|e| CoreError::Embedding(format!("download body: {e}")))?;
 
     let tmp = dest.with_extension("part");
-    std::fs::write(&tmp, &bytes)
-        .map_err(|e| CoreError::Config(format!("write model: {e}")))?;
-    std::fs::rename(&tmp, &dest)
+    let mut file = tokio::fs::File::create(&tmp)
+        .await
+        .map_err(|e| CoreError::Config(format!("create .part file: {e}")))?;
+
+    let mut stream = resp.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = match chunk {
+            Ok(c) => c,
+            Err(e) => {
+                let _ = tokio::fs::remove_file(&tmp).await;
+                return Err(CoreError::Embedding(format!("download body: {e}")));
+            }
+        };
+        if let Err(e) = file.write_all(&chunk).await {
+            let _ = tokio::fs::remove_file(&tmp).await;
+            return Err(CoreError::Config(format!("write model chunk: {e}")));
+        }
+    }
+
+    if let Err(e) = file.flush().await {
+        let _ = tokio::fs::remove_file(&tmp).await;
+        return Err(CoreError::Config(format!("flush model: {e}")));
+    }
+    drop(file);
+
+    tokio::fs::rename(&tmp, &dest)
+        .await
         .map_err(|e| CoreError::Config(format!("finalize model: {e}")))?;
+
     Ok(dest)
 }
 
