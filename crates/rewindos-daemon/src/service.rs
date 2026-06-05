@@ -115,6 +115,9 @@ impl DaemonService {
             capture_state,
             seconds_since_last_frame,
             unfiltered_capture,
+            meeting_active: false,
+            meeting_id: None,
+            meeting_started_at: None,
         };
 
         serde_json::to_string(&status)

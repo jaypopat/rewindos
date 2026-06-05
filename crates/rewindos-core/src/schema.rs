@@ -128,6 +128,12 @@ pub struct DaemonStatus {
     pub seconds_since_last_frame: Option<u64>,
     #[serde(default)]
     pub unfiltered_capture: bool,
+    #[serde(default)]
+    pub meeting_active: bool,
+    #[serde(default)]
+    pub meeting_id: Option<i64>,
+    #[serde(default)]
+    pub meeting_started_at: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -570,6 +576,9 @@ mod tests {
             capture_state: Some("paused_privacy".to_string()),
             seconds_since_last_frame: None,
             unfiltered_capture: false,
+            meeting_active: false,
+            meeting_id: None,
+            meeting_started_at: None,
         };
         let json = serde_json::to_string(&s).unwrap();
         let back: DaemonStatus = serde_json::from_str(&json).unwrap();
@@ -581,5 +590,21 @@ mod tests {
         let parsed: DaemonStatus = serde_json::from_str(old).unwrap();
         assert_eq!(parsed.capture_state, None);
         assert!(!parsed.unfiltered_capture);
+    }
+
+    #[test]
+    fn daemon_status_meeting_fields_default_when_absent() {
+        // Old daemons serialize without meeting fields; new UI must still parse.
+        let json = r#"{
+            "is_capturing": true, "frames_captured_today": 0,
+            "frames_deduplicated_today": 0, "frames_ocr_pending": 0,
+            "queue_depths": {"capture":0,"hash":0,"ocr":0,"index":0},
+            "uptime_seconds": 1, "disk_usage_bytes": 0, "capture_interval": 30,
+            "last_capture_timestamp": null
+        }"#;
+        let s: DaemonStatus = serde_json::from_str(json).unwrap();
+        assert!(!s.meeting_active);
+        assert_eq!(s.meeting_id, None);
+        assert_eq!(s.meeting_started_at, None);
     }
 }
