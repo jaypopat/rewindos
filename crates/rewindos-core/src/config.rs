@@ -16,6 +16,7 @@ pub struct AppConfig {
     pub semantic: SemanticConfig,
     pub chat: ChatConfig,
     pub focus: FocusConfig,
+    pub meeting: MeetingConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -126,6 +127,38 @@ impl Default for FocusConfig {
             auto_start_breaks: true,
             auto_start_work: false,
             category_rules: HashMap::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MeetingConfig {
+    pub enabled: bool,
+    pub engine: String,
+    pub model: String,
+    pub model_dir: String,
+    /// Path or PATH name of the whisper.cpp binary.
+    pub whisper_bin: String,
+    pub keep_audio: bool,
+    pub summary_enabled: bool,
+    pub hotkey: String,
+    /// Capture/transcribe sample rate (whisper expects 16 kHz mono).
+    pub sample_rate: u32,
+}
+
+impl Default for MeetingConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            engine: "whisper-cpp".to_string(),
+            model: "base.en".to_string(),
+            model_dir: "~/.rewindos/models/whisper".to_string(),
+            whisper_bin: "whisper-cli".to_string(),
+            keep_audio: true,
+            summary_enabled: true,
+            hotkey: "Ctrl+Shift+M".to_string(),
+            sample_rate: 16000,
         }
     }
 }
@@ -343,6 +376,17 @@ mod tests {
         assert_eq!(config.storage.retention_days, 90);
         assert_eq!(config.storage.screenshot_quality, 80);
         assert_eq!(config.ocr.tesseract_lang, "eng");
+    }
+
+    #[test]
+    fn meeting_config_defaults() {
+        let c = AppConfig::default();
+        assert!(!c.meeting.enabled);
+        assert_eq!(c.meeting.engine, "whisper-cpp");
+        assert_eq!(c.meeting.model, "base.en");
+        assert_eq!(c.meeting.whisper_bin, "whisper-cli");
+        assert!(c.meeting.keep_audio);
+        assert_eq!(c.meeting.sample_rate, 16000);
     }
 
     #[test]
