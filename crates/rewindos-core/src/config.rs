@@ -142,6 +142,7 @@ pub struct MeetingConfig {
     pub whisper_bin: String,
     pub keep_audio: bool,
     pub summary_enabled: bool,
+    /// Global hotkey to toggle meeting recording (separate from `UiConfig::global_hotkey`).
     pub hotkey: String,
     /// Capture/transcribe sample rate (whisper expects 16 kHz mono).
     pub sample_rate: u32,
@@ -397,6 +398,8 @@ mod tests {
         assert_eq!(c.meeting.model, "base.en");
         assert_eq!(c.meeting.whisper_bin, "whisper-cli");
         assert!(c.meeting.keep_audio);
+        assert!(c.meeting.summary_enabled);
+        assert_eq!(c.meeting.hotkey, "Ctrl+Shift+M");
         assert_eq!(c.meeting.sample_rate, 16000);
     }
 
