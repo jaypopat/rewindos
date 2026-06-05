@@ -63,6 +63,12 @@ struct DaemonStatusResponse {
     seconds_since_last_frame: Option<u64>,
     #[serde(default)]
     unfiltered_capture: bool,
+    #[serde(default)]
+    meeting_active: bool,
+    #[serde(default)]
+    meeting_id: Option<i64>,
+    #[serde(default)]
+    meeting_started_at: Option<i64>,
 }
 
 /// Filters received from the frontend (no `query` field — it's a separate param).
