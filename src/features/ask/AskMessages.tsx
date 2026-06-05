@@ -1,6 +1,8 @@
+import { useState } from "react";
 import { Streamdown } from "streamdown";
 import { useQuery } from "@tanstack/react-query";
 import { convertFileSrc } from "@tauri-apps/api/core";
+import { Wrench, ChevronRight, Loader2 } from "lucide-react";
 import {
   Conversation,
   ConversationContent,
@@ -12,20 +14,13 @@ import {
   ReasoningContent,
 } from "@/components/ai-elements/reasoning";
 import {
-  Tool,
-  ToolHeader,
-  ToolContent,
-  ToolInput,
-  ToolOutput,
-} from "@/components/ai-elements/tool";
-import {
   Attachments,
   Attachment,
   AttachmentPreview,
   AttachmentInfo,
   type AttachmentData,
 } from "@/components/ai-elements/attachments";
-import { toUIMessages } from "@/lib/chat-messages";
+import { toUIMessages, type ChatToolPart } from "@/lib/chat-messages";
 import { getScreenshotsByIds, type ChatMessageRow } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import { decodeAttachments, stripMarker } from "@/lib/attachments";
@@ -128,22 +123,8 @@ export function AskMessages({ rows, onSelectScreenshot }: AskMessagesProps) {
                     );
                   }
 
-                  // Tool part — discriminated as `tool-${string}`
-                  return (
-                    <Tool
-                      key={key}
-                      defaultOpen={false}
-                      className="border border-border/40 bg-surface-raised/20 rounded-none"
-                    >
-                      <ToolHeader type={part.type} state={part.state} />
-                      <ToolContent>
-                        <ToolInput input={part.input} />
-                        {part.output !== undefined && (
-                          <ToolOutput output={part.output} errorText={part.errorText} />
-                        )}
-                      </ToolContent>
-                    </Tool>
-                  );
+                  // Tool call — render as a compact one-liner, not a big block.
+                  return <CompactToolCall key={key} part={part} />;
                 })}
               </div>
               {!isUser && isLast && (
@@ -166,6 +147,117 @@ export function AskMessages({ rows, onSelectScreenshot }: AskMessagesProps) {
       </ConversationContent>
       <ConversationScrollButton />
     </Conversation>
+  );
+}
+
+// Human-readable verb for an MCP tool. `part.type` is `tool-<name>`.
+const TOOL_VERBS: Record<string, string> = {
+  search_screenshots: "searched screenshots",
+  get_timeline: "viewed timeline",
+  get_app_usage: "checked app usage",
+  get_recent_activity: "checked recent activity",
+  get_screenshot_detail: "inspected screenshot",
+};
+
+function humanizeTool(type: string): string {
+  const raw = type.replace(/^tool-/, "");
+  return TOOL_VERBS[raw] ?? raw.replace(/_/g, " ");
+}
+
+// A short, human summary of what the tool was asked to do — this is the
+// "thought process" worth surfacing (e.g. the search query), without dumping
+// the full args JSON inline.
+function summarizeInput(input: unknown): string {
+  if (typeof input === "string") return input ? `"${input}"` : "";
+  if (!input || typeof input !== "object") return "";
+  const obj = input as Record<string, unknown>;
+  for (const k of ["query", "q", "term", "search", "text", "app_name"]) {
+    const v = obj[k];
+    if (typeof v === "string" && v) return `"${v}"`;
+  }
+  for (const v of Object.values(obj)) {
+    if (typeof v === "string" && v) return `"${v}"`;
+  }
+  const json = JSON.stringify(obj);
+  return json === "{}" ? "" : json.length > 56 ? `${json.slice(0, 55)}…` : json;
+}
+
+/** Compact, single-line tool-call indicator. Click to expand args + result. */
+function CompactToolCall({ part }: { part: ChatToolPart }) {
+  const [open, setOpen] = useState(false);
+  const name = humanizeTool(part.type);
+  const summary = summarizeInput(part.input);
+  const running = part.state !== "output-available" && part.state !== "output-error";
+  const isError = part.state === "output-error" || part.errorText !== undefined;
+
+  return (
+    <div className="font-mono text-[11px]">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={cn(
+          "group flex items-center gap-1.5 max-w-full transition-colors",
+          isError
+            ? "text-signal-error/80 hover:text-signal-error"
+            : "text-text-muted/80 hover:text-text-secondary",
+        )}
+      >
+        <Wrench className="size-3 shrink-0" strokeWidth={2} />
+        <span className="shrink-0">{name}</span>
+        {summary && (
+          <span className="text-text-muted/50 truncate">· {summary}</span>
+        )}
+        {running ? (
+          <Loader2 className="size-2.5 shrink-0 animate-spin" />
+        ) : (
+          <ChevronRight
+            className={cn(
+              "size-3 shrink-0 opacity-50 transition-transform",
+              open && "rotate-90",
+            )}
+            strokeWidth={2}
+          />
+        )}
+      </button>
+      {open && (
+        <div className="mt-1.5 ml-4 space-y-1.5">
+          <ToolDetail label="args" body={JSON.stringify(part.input, null, 2)} />
+          {(part.output !== undefined || part.errorText) && (
+            <ToolDetail
+              label={part.errorText ? "error" : "result"}
+              body={part.errorText ?? part.output ?? ""}
+              error={!!part.errorText}
+            />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ToolDetail({
+  label,
+  body,
+  error,
+}: {
+  label: string;
+  body: string;
+  error?: boolean;
+}) {
+  return (
+    <div className="space-y-0.5">
+      <div className="text-[9px] uppercase tracking-wider text-text-muted/50">
+        {label}
+      </div>
+      <pre
+        className={cn(
+          "max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-sm bg-surface-overlay/60 px-2 py-1 text-[10px] leading-relaxed",
+          error ? "text-signal-error/80" : "text-text-secondary/80",
+        )}
+      >
+        {body}
+      </pre>
+    </div>
   );
 }
 
