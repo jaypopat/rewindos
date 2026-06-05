@@ -6,11 +6,13 @@ use rewindos_core::config::AppConfig;
 use rewindos_core::db::Database;
 use rewindos_core::embedding::OllamaClient;
 use rewindos_core::schema::{DaemonStatus, QueueDepths, SearchFilters};
+use tokio::sync::{mpsc, oneshot};
 use tracing::{info, warn};
 use zbus::interface;
 
 use crate::capture::gate::{recompute_privacy_gate, CaptureGate};
 use crate::detect::{create_window_info_provider, DesktopEnvironment, SessionType};
+use crate::meeting::controller::{MeetingCmd, MeetingState};
 use crate::pipeline::PipelineMetrics;
 use crate::window_info::kwin::KwinWindowInfo;
 use crate::window_info::SharedProvider;
@@ -33,6 +35,8 @@ pub struct DaemonService {
     pub session: SessionType,
     pub desktop_name: String,
     pub session_name: String,
+    pub meeting_tx: mpsc::Sender<MeetingCmd>,
+    pub meeting_state: Arc<MeetingState>,
 }
 
 /// Lock a mutex, logging a warning if it was poisoned.
@@ -115,9 +119,15 @@ impl DaemonService {
             capture_state,
             seconds_since_last_frame,
             unfiltered_capture,
-            meeting_active: false,
-            meeting_id: None,
-            meeting_started_at: None,
+            meeting_active: self.meeting_state.active.load(std::sync::atomic::Ordering::Acquire),
+            meeting_id: {
+                let id = self.meeting_state.meeting_id.load(std::sync::atomic::Ordering::Acquire);
+                (id > 0).then_some(id)
+            },
+            meeting_started_at: {
+                let t = self.meeting_state.started_at.load(std::sync::atomic::Ordering::Acquire);
+                (t > 0).then_some(t)
+            },
         };
 
         serde_json::to_string(&status)
@@ -247,6 +257,38 @@ impl DaemonService {
         let p = self.window_info.load_full();
         recompute_privacy_gate(&self.gate, &**p, &self.config.privacy, enabled);
         Ok(())
+    }
+
+    /// Start recording a meeting. Empty `title` means untitled. Returns the new
+    /// meeting id.
+    async fn start_meeting(&self, title: &str) -> zbus::fdo::Result<i64> {
+        let title = if title.is_empty() {
+            None
+        } else {
+            Some(title.to_string())
+        };
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.meeting_tx
+            .send(MeetingCmd::Start { title, reply: reply_tx })
+            .await
+            .map_err(|_| zbus::fdo::Error::Failed("meeting controller unavailable".into()))?;
+        reply_rx
+            .await
+            .map_err(|_| zbus::fdo::Error::Failed("no reply from meeting controller".into()))?
+            .map_err(zbus::fdo::Error::Failed)
+    }
+
+    /// Stop the active meeting (finalize audio, transcript, and post-processing).
+    async fn stop_meeting(&self) -> zbus::fdo::Result<()> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.meeting_tx
+            .send(MeetingCmd::Stop { reply: reply_tx })
+            .await
+            .map_err(|_| zbus::fdo::Error::Failed("meeting controller unavailable".into()))?;
+        reply_rx
+            .await
+            .map_err(|_| zbus::fdo::Error::Failed("no reply from meeting controller".into()))?
+            .map_err(zbus::fdo::Error::Failed)
     }
 
     #[zbus(property)]
