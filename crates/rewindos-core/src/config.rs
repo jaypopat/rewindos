@@ -309,6 +309,16 @@ impl AppConfig {
         Ok(self.base_dir()?.join("screenshots"))
     }
 
+    /// Returns the path to the meetings directory (`<base>/meetings`).
+    pub fn meetings_dir(&self) -> Result<PathBuf> {
+        Ok(self.base_dir()?.join("meetings"))
+    }
+
+    /// Returns the resolved whisper model directory (expands `~`).
+    pub fn whisper_model_dir(&self) -> Result<PathBuf> {
+        resolve_tilde(&self.meeting.model_dir)
+    }
+
     /// Returns the path to the logs directory.
     pub fn logs_dir(&self) -> Result<PathBuf> {
         Ok(self.base_dir()?.join("logs"))
@@ -319,6 +329,7 @@ impl AppConfig {
         let base = self.base_dir()?;
         fs::create_dir_all(&base)?;
         fs::create_dir_all(base.join("screenshots"))?;
+        fs::create_dir_all(base.join("meetings"))?;
         fs::create_dir_all(base.join("logs"))?;
         Ok(())
     }
@@ -387,6 +398,15 @@ mod tests {
         assert_eq!(c.meeting.whisper_bin, "whisper-cli");
         assert!(c.meeting.keep_audio);
         assert_eq!(c.meeting.sample_rate, 16000);
+    }
+
+    #[test]
+    fn meeting_dirs_resolve() {
+        let mut c = AppConfig::default();
+        c.storage.base_dir = "/tmp/rwos-test".to_string();
+        c.meeting.model_dir = "/tmp/rwos-test/models/whisper".to_string();
+        assert_eq!(c.meetings_dir().unwrap(), std::path::PathBuf::from("/tmp/rwos-test/meetings"));
+        assert_eq!(c.whisper_model_dir().unwrap(), std::path::PathBuf::from("/tmp/rwos-test/models/whisper"));
     }
 
     #[test]
