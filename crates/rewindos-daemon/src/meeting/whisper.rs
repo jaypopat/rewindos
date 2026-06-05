@@ -3,10 +3,11 @@
 //! to ship or detect on PATH; only the GGUF model file can be missing at run
 //! time). Input is mono f32 16 kHz PCM, exactly what `capture::audio` delivers.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use rewindos_core::config::AppConfig;
 use rewindos_core::schema::NewTranscriptSegment;
+use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
 use crate::capture::audio::AudioSource;
 
@@ -62,6 +63,86 @@ fn build_segment(
     }
 }
 
+/// Pick whisper's language setting from the model filename. whisper.cpp `*.en`
+/// models are English-only (use `"en"`); multilingual models use `"auto"` so the
+/// spoken language is detected rather than forced to English.
+fn language_for_model(model_path: &Path) -> &'static str {
+    let is_english_only = model_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .is_some_and(|s| s.ends_with(".en"));
+    if is_english_only {
+        "en"
+    } else {
+        "auto"
+    }
+}
+
+/// A loaded whisper model ready to transcribe PCM windows. The underlying
+/// `WhisperContext` is `Send + Sync`; a fresh inference state is created per
+/// call, so `transcribe_window` takes `&self` and the transcriber can be shared
+/// via `Arc` once a later milestone wires it into the pipeline.
+pub struct WhisperTranscriber {
+    ctx: WhisperContext,
+    n_threads: i32,
+    language: &'static str,
+}
+
+impl WhisperTranscriber {
+    /// Load a GGUF model from `model_path` (CPU-only — no GPU features enabled).
+    pub fn load(model_path: &Path, n_threads: i32) -> Result<Self, TranscribeError> {
+        let language = language_for_model(model_path);
+        let ctx =
+            WhisperContext::new_with_params(model_path, WhisperContextParameters::default())?;
+        Ok(Self {
+            ctx,
+            n_threads,
+            language,
+        })
+    }
+
+    /// Transcribe one mono f32 16 kHz PCM window into absolute-timed segments.
+    /// `window_start_ms` is the window's offset from the start of the meeting.
+    /// Blank segments are dropped.
+    pub fn transcribe_window(
+        &self,
+        pcm: &[f32],
+        source: AudioSource,
+        window_start_ms: i64,
+    ) -> Result<Vec<NewTranscriptSegment>, TranscribeError> {
+        let mut state = self.ctx.create_state()?;
+
+        let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
+        params.set_n_threads(self.n_threads);
+        params.set_translate(false);
+        params.set_language(Some(self.language));
+        // Keep whisper.cpp from writing progress/segment chatter to stdout.
+        params.set_print_special(false);
+        params.set_print_progress(false);
+        params.set_print_realtime(false);
+        params.set_print_timestamps(false);
+
+        state.full(params, pcm)?;
+
+        let mut segments = Vec::new();
+        for seg in state.as_iter() {
+            let text = seg.to_str_lossy()?;
+            let trimmed = text.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            segments.push(build_segment(
+                trimmed,
+                seg.start_timestamp(),
+                seg.end_timestamp(),
+                source,
+                window_start_ms,
+            ));
+        }
+        Ok(segments)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -85,6 +166,14 @@ mod tests {
         let sys = build_segment("hi", 0, 10, AudioSource::System, 0);
         assert_eq!(sys.source, "system");
         assert_eq!(sys.speaker_label, "Remote");
+    }
+
+    #[test]
+    fn language_for_model_detects_english_only_models() {
+        assert_eq!(language_for_model(Path::new("/m/ggml-base.en.bin")), "en");
+        assert_eq!(language_for_model(Path::new("/m/ggml-small.en.bin")), "en");
+        assert_eq!(language_for_model(Path::new("/m/ggml-base.bin")), "auto");
+        assert_eq!(language_for_model(Path::new("/m/ggml-large-v3.bin")), "auto");
     }
 
     #[test]
