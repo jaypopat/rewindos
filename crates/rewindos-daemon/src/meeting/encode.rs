@@ -101,6 +101,19 @@ impl<W: Write> OpusWriter<W> {
         })
     }
 
+    /// Append PCM (mono f32 @ 16 kHz). Encodes every complete 20 ms frame;
+    /// leftover samples are buffered for the next call or `finalize`.
+    pub fn push(&mut self, samples: &[f32]) -> Result<(), EncodeError> {
+        self.pending.extend_from_slice(samples);
+        let mut out = [0u8; MAX_PACKET];
+        while self.pending.len() >= FRAME_SAMPLES {
+            let frame: Vec<f32> = self.pending.drain(..FRAME_SAMPLES).collect();
+            let n = self.encoder.encode_float(&frame, &mut out)?;
+            self.stage(out[..n].to_vec())?;
+        }
+        Ok(())
+    }
+
     /// Finalize: zero-pad any partial frame, write the held packet with the
     /// end-of-stream flag, and flush the underlying writer to disk. Takes
     /// `self` by value so the writer can't be used after the stream is closed.
@@ -199,5 +212,28 @@ mod tests {
             t[15 + vlen],
         ]);
         assert_eq!(count, 0, "user comment count");
+    }
+
+    #[test]
+    fn one_second_of_audio_reports_one_second_granule_and_eos() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.opus");
+
+        let mut w = OpusWriter::create(&path).unwrap();
+        // 1.0 s mono @ 16 kHz = 16000 samples = exactly 50 frames of 320.
+        w.push(&vec![0.25f32; 16_000]).unwrap();
+        w.finalize().unwrap();
+
+        let bytes = std::fs::read(&path).unwrap();
+        let mut rdr = ogg::PacketReader::new(std::io::Cursor::new(bytes));
+        let mut last_granule = 0u64;
+        let mut last_eos = false;
+        while let Some(pkt) = rdr.read_packet().unwrap() {
+            last_granule = pkt.absgp_page();
+            last_eos = pkt.last_in_stream();
+        }
+        // 50 frames * 960 granule-per-frame (48 kHz) = 48000; ÷48000 = 1.0 s.
+        assert_eq!(last_granule, 48_000);
+        assert!(last_eos, "final page must carry the end-of-stream flag");
     }
 }
