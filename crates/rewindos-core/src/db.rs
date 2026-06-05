@@ -4,9 +4,9 @@ use crate::schema::{
     ActiveBlock, ActivityResponse, AppUsageStat, Bookmark, BoundingBox, CachedDailySummary,
     Collection, DailyActivity, HourlyActivity, JournalDateInfo, JournalEntry, JournalScreenshot,
     JournalSearchResponse, JournalSearchResult, JournalStreakInfo, JournalSummary, JournalTag,
-    JournalTemplate, NewBoundingBox, NewCollection, NewScreenshot, NewTranscriptSegment, OcrStatus,
+    JournalTemplate, Meeting, NewBoundingBox, NewCollection, NewScreenshot, NewTranscriptSegment, OcrStatus,
     OpenTodo, Screenshot, SearchFilters, SearchResponse, SearchResult, TaskUsageStat,
-    TranscriptSearchResult, UpdateCollection, UpsertJournalEntry,
+    TranscriptSearchResult, TranscriptSegment, UpdateCollection, UpsertJournalEntry,
 };
 use rusqlite::{ffi::sqlite3_auto_extension, params, Connection};
 use std::path::Path;
@@ -431,6 +431,60 @@ impl Database {
             params![id, summary],
         )?;
         Ok(())
+    }
+
+    /// List meetings, newest first.
+    pub fn list_meetings(&self, limit: i64, offset: i64) -> Result<Vec<Meeting>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, started_at, ended_at, title, app_name,
+                    mic_audio_path, system_audio_path, summary
+             FROM meetings
+             ORDER BY started_at DESC
+             LIMIT ?1 OFFSET ?2",
+        )?;
+        let rows = stmt.query_map(params![limit, offset], |row| {
+            Ok(Meeting {
+                id: row.get(0)?,
+                started_at: row.get(1)?,
+                ended_at: row.get(2)?,
+                title: row.get(3)?,
+                app_name: row.get(4)?,
+                mic_audio_path: row.get(5)?,
+                system_audio_path: row.get(6)?,
+                summary: row.get(7)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    /// All segments for a meeting, in time order.
+    pub fn get_meeting_segments(&self, meeting_id: i64) -> Result<Vec<TranscriptSegment>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, meeting_id, start_ms, end_ms, source, speaker_label, text
+             FROM transcript_segments
+             WHERE meeting_id = ?1
+             ORDER BY start_ms",
+        )?;
+        let rows = stmt.query_map(params![meeting_id], |row| {
+            Ok(TranscriptSegment {
+                id: row.get(0)?,
+                meeting_id: row.get(1)?,
+                start_ms: row.get(2)?,
+                end_ms: row.get(3)?,
+                source: row.get(4)?,
+                speaker_label: row.get(5)?,
+                text: row.get(6)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
     }
 
     /// Insert a transcript segment into both the table and the FTS index.
@@ -3491,6 +3545,27 @@ mod tests {
             )
             .unwrap();
         assert_eq!(hit, sid);
+    }
+
+    #[test]
+    fn list_meetings_and_segments() {
+        let db = make_test_db();
+        let mid = db.insert_meeting(1000, Some("Retro"), Some("meet")).unwrap();
+        db.end_meeting(mid, 2000, Some("meetings/1/mic.opus"), Some("meetings/1/system.opus")).unwrap();
+        let seg = crate::schema::NewTranscriptSegment {
+            start_ms: 5, end_ms: 9, source: "system".into(),
+            speaker_label: "Remote".into(), text: "what went well".into(),
+        };
+        db.insert_transcript_segment(mid, &seg).unwrap();
+
+        let meetings = db.list_meetings(50, 0).unwrap();
+        assert_eq!(meetings.len(), 1);
+        assert_eq!(meetings[0].title.as_deref(), Some("Retro"));
+        assert_eq!(meetings[0].ended_at, Some(2000));
+
+        let segs = db.get_meeting_segments(mid).unwrap();
+        assert_eq!(segs.len(), 1);
+        assert_eq!(segs[0].speaker_label, "Remote");
     }
 
     #[test]

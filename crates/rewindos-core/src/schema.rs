@@ -423,6 +423,17 @@ pub struct NewTranscriptSegment {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TranscriptSegment {
+    pub id: i64,
+    pub meeting_id: i64,
+    pub start_ms: i64,
+    pub end_ms: i64,
+    pub source: String,
+    pub speaker_label: String,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TranscriptSearchResult {
     pub segment_id: i64,
     pub meeting_id: i64,
