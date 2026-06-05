@@ -8,7 +8,7 @@ use crate::schema::{
     OpenTodo, Screenshot, SearchFilters, SearchResponse, SearchResult, TaskUsageStat,
     TranscriptSearchResult, TranscriptSegment, UpdateCollection, UpsertJournalEntry,
 };
-use rusqlite::{ffi::sqlite3_auto_extension, params, Connection};
+use rusqlite::{ffi::sqlite3_auto_extension, params, Connection, OptionalExtension};
 use std::path::Path;
 use std::sync::Once;
 
@@ -459,6 +459,30 @@ impl Database {
             out.push(r?);
         }
         Ok(out)
+    }
+
+    /// Fetch a single meeting by id, or `None` if it doesn't exist.
+    pub fn get_meeting(&self, id: i64) -> Result<Option<Meeting>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, started_at, ended_at, title, app_name,
+                    mic_audio_path, system_audio_path, summary
+             FROM meetings WHERE id = ?1",
+        )?;
+        let row = stmt
+            .query_row(params![id], |row| {
+                Ok(Meeting {
+                    id: row.get(0)?,
+                    started_at: row.get(1)?,
+                    ended_at: row.get(2)?,
+                    title: row.get(3)?,
+                    app_name: row.get(4)?,
+                    mic_audio_path: row.get(5)?,
+                    system_audio_path: row.get(6)?,
+                    summary: row.get(7)?,
+                })
+            })
+            .optional()?;
+        Ok(row)
     }
 
     /// All segments for a meeting, in time order.
@@ -3712,5 +3736,20 @@ mod tests {
         let rows = db.list_meetings(10, 0).unwrap();
         assert_eq!(rows.iter().find(|m| m.id == open).unwrap().ended_at, Some(999));
         assert_eq!(rows.iter().find(|m| m.id == closed).unwrap().ended_at, Some(250));
+    }
+
+    #[test]
+    fn get_meeting_returns_row_or_none() {
+        let db = make_test_db();
+        let id = db
+            .insert_meeting(1_000, Some("Standup"), Some("zoom"))
+            .unwrap();
+
+        let got = db.get_meeting(id).unwrap().expect("meeting exists");
+        assert_eq!(got.id, id);
+        assert_eq!(got.title.as_deref(), Some("Standup"));
+        assert_eq!(got.started_at, 1_000);
+
+        assert!(db.get_meeting(999_999).unwrap().is_none());
     }
 }
