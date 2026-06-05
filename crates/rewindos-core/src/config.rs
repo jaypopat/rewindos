@@ -320,6 +320,14 @@ impl AppConfig {
         resolve_tilde(&self.meeting.model_dir)
     }
 
+    /// Resolved path to the whisper GGUF model file
+    /// (`<model_dir>/ggml-<model>.bin`, the whisper.cpp naming convention).
+    pub fn whisper_model_path(&self) -> Result<PathBuf> {
+        Ok(self
+            .whisper_model_dir()?
+            .join(format!("ggml-{}.bin", self.meeting.model)))
+    }
+
     /// Returns the path to the logs directory.
     pub fn logs_dir(&self) -> Result<PathBuf> {
         Ok(self.base_dir()?.join("logs"))
@@ -410,6 +418,17 @@ mod tests {
         c.meeting.model_dir = "/tmp/rwos-test/models/whisper".to_string();
         assert_eq!(c.meetings_dir().unwrap(), std::path::PathBuf::from("/tmp/rwos-test/meetings"));
         assert_eq!(c.whisper_model_dir().unwrap(), std::path::PathBuf::from("/tmp/rwos-test/models/whisper"));
+    }
+
+    #[test]
+    fn whisper_model_path_uses_ggml_prefix() {
+        let mut c = AppConfig::default();
+        c.meeting.model_dir = "/tmp/rwos-test/models/whisper".to_string();
+        c.meeting.model = "base.en".to_string();
+        assert_eq!(
+            c.whisper_model_path().unwrap(),
+            std::path::PathBuf::from("/tmp/rwos-test/models/whisper/ggml-base.en.bin")
+        );
     }
 
     #[test]
