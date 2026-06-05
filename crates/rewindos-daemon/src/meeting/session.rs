@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use rewindos_core::db::Database;
 use rewindos_core::schema::NewTranscriptSegment;
 
-use crate::capture::audio::AudioSource;
+use crate::capture::audio::{AudioSource, AudioWindow, CAPTURE_RATE};
 use crate::meeting::encode::{EncodeError, OpusWriter};
 use crate::meeting::whisper::{TranscribeError, WhisperTranscriber};
 
@@ -98,5 +98,102 @@ impl MeetingSession {
             AudioSource::Mic => self.mic_writer.as_mut(),
             AudioSource::System => self.sys_writer.as_mut(),
         }
+    }
+
+    /// Process one captured window: encode it (if `keep_audio`), transcribe it,
+    /// and insert the resulting segments. Errors are returned so the caller can
+    /// log-and-continue per window.
+    pub fn process_window(&mut self, window: &AudioWindow) -> Result<(), SessionError> {
+        if let Some(writer) = self.writer_for(window.source) {
+            writer.push(&window.samples)?;
+        }
+        let window_start_ms = (window.start_sample * 1000 / CAPTURE_RATE as u64) as i64;
+        let segments =
+            self.transcriber
+                .transcribe_window(&window.samples, window.source, window_start_ms)?;
+        if segments.is_empty() {
+            return Ok(());
+        }
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+        for seg in &segments {
+            db.insert_transcript_segment(self.meeting_id, seg)?;
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Deterministic transcriber: one segment per window, text fixed, timing
+    /// derived from the window so tests can assert the offset shift.
+    struct FakeTranscriber;
+    impl Transcribe for FakeTranscriber {
+        fn transcribe_window(
+            &self,
+            _pcm: &[f32],
+            source: AudioSource,
+            window_start_ms: i64,
+        ) -> Result<Vec<NewTranscriptSegment>, TranscribeError> {
+            Ok(vec![NewTranscriptSegment {
+                start_ms: window_start_ms,
+                end_ms: window_start_ms + 1000,
+                source: source.as_str().to_string(),
+                speaker_label: source.speaker_label().to_string(),
+                text: "hello world".to_string(),
+            }])
+        }
+    }
+
+    fn temp_db() -> (tempfile::TempDir, Arc<Mutex<Database>>) {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open(&dir.path().join("test.db")).unwrap();
+        (dir, Arc::new(Mutex::new(db)))
+    }
+
+    #[test]
+    fn process_window_without_keep_audio_inserts_segments_and_writes_no_files() {
+        let (dir, db) = temp_db();
+        let meeting_id = {
+            let g = db.lock().unwrap();
+            g.insert_meeting(1_000, Some("Test"), None).unwrap()
+        };
+        let mic_path = dir.path().join("m.opus");
+        let sys_path = dir.path().join("s.opus");
+        let mut session = MeetingSession::new(
+            meeting_id,
+            db.clone(),
+            Arc::new(FakeTranscriber),
+            false, // keep_audio off
+            mic_path.clone(),
+            sys_path.clone(),
+        )
+        .unwrap();
+
+        // mic window at sample 0 (0 ms), system window at sample 16000 (1000 ms).
+        session
+            .process_window(&AudioWindow {
+                source: AudioSource::Mic,
+                start_sample: 0,
+                samples: vec![0.1; 320],
+            })
+            .unwrap();
+        session
+            .process_window(&AudioWindow {
+                source: AudioSource::System,
+                start_sample: CAPTURE_RATE as u64,
+                samples: vec![0.1; 320],
+            })
+            .unwrap();
+
+        let segs = db.lock().unwrap().get_meeting_segments(meeting_id).unwrap();
+        assert_eq!(segs.len(), 2);
+        assert_eq!(segs[0].speaker_label, "You");
+        assert_eq!(segs[0].start_ms, 0);
+        assert_eq!(segs[1].speaker_label, "Remote");
+        assert_eq!(segs[1].start_ms, 1000);
+        assert!(!mic_path.exists(), "no audio file when keep_audio is off");
+        assert!(!sys_path.exists());
     }
 }
