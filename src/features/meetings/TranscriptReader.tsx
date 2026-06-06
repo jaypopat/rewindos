@@ -33,6 +33,8 @@ export function TranscriptReader({
                 {onJumpToTime && (
                   <button
                     className="hover:text-accent"
+                    title="Jump to this moment in Rewind"
+                    aria-label="Jump to screenshot"
                     onClick={() => onJumpToTime(meeting.started_at + Math.floor(seg.start_ms / 1000))}
                   >
                     ↪ screen
