@@ -52,4 +52,16 @@ export interface AppConfig {
     auto_start_work: boolean;
     category_rules: Record<string, string[]>;
   };
+  meeting: {
+    enabled: boolean;
+    engine: string;
+    model: string;
+    model_dir: string;
+    whisper_bin: string;
+    keep_audio: boolean;
+    summary_enabled: boolean;
+    hotkey: string;
+    sample_rate: number;
+    consent_acknowledged: boolean;
+  };
 }
