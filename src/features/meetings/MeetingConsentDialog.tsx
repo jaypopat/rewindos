@@ -2,20 +2,23 @@ export function MeetingConsentDialog({
   onAgree,
   onCancel,
   busy = false,
+  errorMessage = null,
 }: {
   onAgree: () => void;
   onCancel: () => void;
   busy?: boolean;
+  errorMessage?: string | null;
 }) {
   return (
     <div
       className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center"
       role="dialog"
       aria-modal="true"
+      aria-labelledby="meeting-consent-title"
     >
       <div className="bg-surface border border-border/50 rounded-xl shadow-xl w-[440px]">
         <div className="px-5 py-4 border-b border-border/50">
-          <h2 className="text-sm font-medium text-text-primary">
+          <h2 id="meeting-consent-title" className="text-sm font-medium text-text-primary">
             Record &amp; transcribe this meeting?
           </h2>
         </div>
@@ -31,6 +34,9 @@ export function MeetingConsentDialog({
           </p>
         </div>
         <div className="px-5 py-3 border-t border-border/50 flex gap-2 justify-end">
+          {errorMessage && (
+            <p className="text-xs text-red-400 mr-auto self-center">{errorMessage}</p>
+          )}
           <button
             onClick={onCancel}
             disabled={busy}

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Mic, Square } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { updateConfig } from "@/lib/api";
+import type { AppConfig } from "@/lib/config";
 import { queryKeys } from "@/lib/query-keys";
 import { useConfigQuery } from "@/hooks/useConfigQuery";
 import { useMeetingActions, useMeetingStatus } from "./useMeetings";
@@ -25,7 +26,12 @@ export function RecordingControls() {
       };
       await updateConfig(next as unknown as Record<string, unknown>);
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.config() }),
+    onSuccess: () => {
+      qc.setQueryData(queryKeys.config(), (old: AppConfig | undefined) =>
+        old ? { ...old, meeting: { ...old.meeting, consent_acknowledged: true } } : old,
+      );
+      qc.invalidateQueries({ queryKey: queryKeys.config() });
+    },
   });
 
   const tryStart = () => {
@@ -37,9 +43,13 @@ export function RecordingControls() {
   };
 
   const agreeAndStart = async () => {
-    await ackConsent.mutateAsync();
-    start.mutate(title || "Untitled meeting");
-    setConsentOpen(false);
+    try {
+      await ackConsent.mutateAsync();
+      start.mutate(title || "Untitled meeting");
+      setConsentOpen(false);
+    } catch {
+      // error surfaced via ackConsent.error in the dialog
+    }
   };
 
   if (active) {
@@ -73,6 +83,7 @@ export function RecordingControls() {
           onAgree={agreeAndStart}
           onCancel={() => setConsentOpen(false)}
           busy={ackConsent.isPending || start.isPending}
+          errorMessage={ackConsent.error ? String(ackConsent.error) : null}
         />
       )}
     </div>
