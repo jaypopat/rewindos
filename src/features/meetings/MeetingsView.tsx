@@ -3,9 +3,18 @@ import type { Meeting } from "@/lib/api";
 import { MeetingsList } from "./MeetingsList";
 import { RecordingControls } from "./RecordingControls";
 import { MeetingDetail } from "./MeetingDetail";
+import { useMeetingsList } from "./useMeetings";
 
 export function MeetingsView({ onJumpToTime }: { onJumpToTime?: (unixSecs: number) => void }) {
   const [selected, setSelected] = useState<Meeting | null>(null);
+  const { data: meetings = [] } = useMeetingsList();
+
+  // Track the live row from the refetched list so stopping/deleting the
+  // selected meeting updates (or clears) the detail pane instead of showing
+  // a stale snapshot.
+  const liveSelected = selected
+    ? (meetings.find((m) => m.id === selected.id) ?? null)
+    : null;
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
@@ -18,8 +27,8 @@ export function MeetingsView({ onJumpToTime }: { onJumpToTime?: (unixSecs: numbe
           <MeetingsList onSelect={setSelected} />
         </div>
         <div className="flex-1 overflow-y-auto">
-          {selected ? (
-            <MeetingDetail meeting={selected} onJumpToTime={onJumpToTime} />
+          {liveSelected ? (
+            <MeetingDetail meeting={liveSelected} onJumpToTime={onJumpToTime} />
           ) : (
             <div className="p-6 text-sm text-text-muted">Select a meeting to view its transcript.</div>
           )}
