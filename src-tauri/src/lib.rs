@@ -1801,7 +1801,8 @@ pub fn run() {
             let icon_recording =
                 tauri::image::Image::from_bytes(include_bytes!("../icons/tray-icon-recording.png"))
                     .expect("failed to load recording tray icon");
-            // Initial icon assumes capturing; the status poll corrects it.
+            // Initial icon assumes capturing; the get_status seed below (then the
+            // StateChanged signal loop) corrects it.
             let tray_icon = icon_active.clone();
 
             // If launched with --minimized, hide the window (autostart mode)
@@ -1932,7 +1933,7 @@ pub fn run() {
                 let proxy = match DaemonProxy::new(&conn).await {
                     Ok(p) => p,
                     Err(e) => {
-                        warn!("tray: daemon proxy unavailable, indicator disabled: {e}");
+                        warn!("tray: failed to build daemon proxy (match-rule error?), indicator disabled: {e}");
                         return;
                     }
                 };
