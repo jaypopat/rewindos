@@ -1634,6 +1634,67 @@ pub fn run() {
                                 let _ = window.emit("focus-search", ());
                             }
                         }
+                        let ctrl_shift_m = Shortcut::new(
+                            Some(Modifiers::CONTROL | Modifiers::SHIFT),
+                            Code::KeyM,
+                        );
+                        if shortcut == &ctrl_shift_m {
+                            let app = app.clone();
+                            tauri::async_runtime::spawn(async move {
+                                let state = app.state::<AppState>();
+                                let active = match state
+                                    .dbus
+                                    .call_method(
+                                        Some("com.rewindos.Daemon"),
+                                        "/com/rewindos/Daemon",
+                                        Some("com.rewindos.Daemon"),
+                                        "GetStatus",
+                                        &(),
+                                    )
+                                    .await
+                                {
+                                    Ok(reply) => reply
+                                        .body()
+                                        .deserialize::<String>()
+                                        .ok()
+                                        .and_then(|j| {
+                                            serde_json::from_str::<serde_json::Value>(&j).ok()
+                                        })
+                                        .and_then(|v| v["meeting_active"].as_bool())
+                                        .unwrap_or(false),
+                                    Err(e) => {
+                                        warn!("meeting hotkey status: {e}");
+                                        return;
+                                    }
+                                };
+                                let result = if active {
+                                    state
+                                        .dbus
+                                        .call_method(
+                                            Some("com.rewindos.Daemon"),
+                                            "/com/rewindos/Daemon",
+                                            Some("com.rewindos.Daemon"),
+                                            "StopMeeting",
+                                            &(),
+                                        )
+                                        .await
+                                } else {
+                                    state
+                                        .dbus
+                                        .call_method(
+                                            Some("com.rewindos.Daemon"),
+                                            "/com/rewindos/Daemon",
+                                            Some("com.rewindos.Daemon"),
+                                            "StartMeeting",
+                                            &("Untitled meeting",),
+                                        )
+                                        .await
+                                };
+                                if let Err(e) = result {
+                                    warn!("meeting hotkey toggle: {e}");
+                                }
+                            });
+                        }
                     }
                 })
                 .build(),
@@ -1678,6 +1739,14 @@ pub fn run() {
                 Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::Space);
             if let Err(e) = app.global_shortcut().register(ctrl_shift_space) {
                 warn!("Failed to register global shortcut: {e}");
+            }
+
+            // Register Ctrl+Shift+M global shortcut (toggle meeting recording)
+            // TODO: honor config.meeting.hotkey
+            let ctrl_shift_m =
+                Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyM);
+            if let Err(e) = app.global_shortcut().register(ctrl_shift_m) {
+                warn!("Failed to register meeting global shortcut: {e}");
             }
 
             // System tray
@@ -1849,11 +1918,24 @@ pub fn run() {
                         {
                             let is_capturing =
                                 status["is_capturing"].as_bool().unwrap_or(true);
+                            let meeting_active =
+                                status["meeting_active"].as_bool().unwrap_or(false);
                             if !is_capturing {
                                 let _ = startup_toggle.set_text("Resume Capture");
                                 if let Some(tray) = app_handle.tray_by_id("main-tray") {
-                                    let _ = tray.set_tooltip(Some("RewindOS - Paused"));
+                                    let tooltip = if meeting_active {
+                                        "RewindOS - Paused ● Recording meeting"
+                                    } else {
+                                        "RewindOS - Paused"
+                                    };
+                                    let _ = tray.set_tooltip(Some(tooltip));
                                     let _ = tray.set_icon(Some(icon_paused_startup.clone()));
+                                }
+                            } else if meeting_active {
+                                if let Some(tray) = app_handle.tray_by_id("main-tray") {
+                                    let _ = tray.set_tooltip(Some(
+                                        "RewindOS - Capturing ● Recording meeting",
+                                    ));
                                 }
                             }
                         }
