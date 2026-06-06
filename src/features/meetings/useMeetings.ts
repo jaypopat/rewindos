@@ -14,7 +14,7 @@ export function useMeetingsList() {
 
 export function useMeetingStatus() {
   return useQuery({
-    queryKey: ["daemon-status-meeting"],
+    queryKey: queryKeys.daemonStatus(),
     queryFn: getDaemonStatus,
     refetchInterval: 3_000,
     staleTime: 0,
@@ -26,20 +26,20 @@ export function useMeetingActions() {
   const start = useMutation({
     mutationFn: (title: string) => startMeeting(title),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["daemon-status-meeting"] });
-      qc.invalidateQueries({ queryKey: queryKeys.meetings(100, 0) });
+      qc.invalidateQueries({ queryKey: queryKeys.daemonStatus() });
+      qc.invalidateQueries({ queryKey: ["meetings"] });
     },
   });
   const stop = useMutation({
     mutationFn: () => stopMeeting(),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["daemon-status-meeting"] });
-      qc.invalidateQueries({ queryKey: queryKeys.meetings(100, 0) });
+      qc.invalidateQueries({ queryKey: queryKeys.daemonStatus() });
+      qc.invalidateQueries({ queryKey: ["meetings"] });
     },
   });
   const remove = useMutation({
     mutationFn: (id: number) => deleteMeeting(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.meetings(100, 0) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["meetings"] }),
   });
   return { start, stop, remove };
 }

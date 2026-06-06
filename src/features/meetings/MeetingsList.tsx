@@ -27,8 +27,10 @@ export function MeetingsList({ onSelect }: { onSelect: (m: Meeting) => void }) {
           </button>
           <button
             onClick={(e) => { e.stopPropagation(); remove.mutate(m.id); }}
-            className="p-1.5 text-text-muted hover:text-red-400"
+            disabled={m.ended_at == null}
+            className="p-1.5 text-text-muted hover:text-red-400 disabled:opacity-30 disabled:hover:text-text-muted disabled:cursor-not-allowed"
             aria-label="Delete meeting"
+            title={m.ended_at == null ? "Stop the recording before deleting" : "Delete meeting"}
           >
             <Trash2 className="size-4" />
           </button>
