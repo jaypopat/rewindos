@@ -65,6 +65,9 @@ export interface DaemonStatus {
   capture_state?: string | null;
   seconds_since_last_frame?: number | null;
   unfiltered_capture?: boolean;
+  meeting_active?: boolean;
+  meeting_id?: number | null;
+  meeting_started_at?: number | null;
 }
 
 export async function search(
