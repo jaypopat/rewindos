@@ -1691,7 +1691,10 @@ pub fn run() {
                                         .await
                                 };
                                 if let Err(e) = result {
-                                    warn!("meeting hotkey toggle: {e}");
+                                    warn!(
+                                        "meeting hotkey {}: {e}",
+                                        if active { "stop" } else { "start" }
+                                    );
                                 }
                             });
                         }
