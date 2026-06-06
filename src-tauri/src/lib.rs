@@ -15,12 +15,27 @@ use rewindos_core::schema::{
     JournalSummary, JournalTag, JournalTemplate, NewCollection, OpenTodo,
     SearchResponse, TaskUsageStat, UpdateCollection, UpsertJournalEntry,
 };
+use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri::tray::TrayIconBuilder;
 use tauri::{Emitter, Manager, State};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 use tracing::warn;
+
+/// Client proxy for the daemon interface — used to subscribe to the `StateChanged`
+/// signal so the tray reflects capture/meeting state live, without polling.
+#[zbus::proxy(
+    interface = "com.rewindos.Daemon",
+    default_service = "com.rewindos.Daemon",
+    default_path = "/com/rewindos/Daemon",
+    gen_blocking = false
+)]
+trait Daemon {
+    fn get_status(&self) -> zbus::Result<String>;
+    #[zbus(signal)]
+    fn state_changed(&self, is_capturing: bool, meeting_active: bool) -> zbus::Result<()>;
+}
 
 struct AppState {
     dbus: zbus::Connection,
@@ -1903,74 +1918,78 @@ pub fn run() {
                 .build(app)
                 .expect("failed to build tray icon");
 
-            // Poll daemon status (~3s) and keep the tray live: a red square while
-            // a meeting is recording (highest priority), the green dot while
-            // capturing, the dimmed glyph while paused. Only touches the tray when
-            // the state actually changes, so it doesn't flicker. Runs immediately
-            // on spawn, so it also serves as the startup state probe.
+            // Keep the tray live via the daemon's `StateChanged` signal (no
+            // polling): a red square while a meeting records (highest priority),
+            // the green dot while capturing, the dimmed glyph while paused. We seed
+            // the initial icon with a single GetStatus, then react to each signal.
             let app_handle = app.handle().clone();
-            let poll_toggle = toggle_item.clone();
-            let icon_active_poll = icon_active.clone();
-            let icon_paused_poll = icon_paused.clone();
-            let icon_recording_poll = icon_recording.clone();
+            let tray_toggle = toggle_item.clone();
+            let icon_active_tray = icon_active.clone();
+            let icon_paused_tray = icon_paused.clone();
+            let icon_recording_tray = icon_recording.clone();
             tauri::async_runtime::spawn(async move {
+                let conn = app_handle.state::<AppState>().dbus.clone();
+                let proxy = match DaemonProxy::new(&conn).await {
+                    Ok(p) => p,
+                    Err(e) => {
+                        warn!("tray: daemon proxy unavailable, indicator disabled: {e}");
+                        return;
+                    }
+                };
+
+                // Apply a (is_capturing, meeting_active) state to the tray, only
+                // touching it when the resolved state actually changes.
                 let mut last: Option<&'static str> = None;
-                loop {
-                    let reply = {
-                        let state = app_handle.state::<AppState>();
-                        state
-                            .dbus
-                            .call_method(
-                                Some("com.rewindos.Daemon"),
-                                "/com/rewindos/Daemon",
-                                Some("com.rewindos.Daemon"),
-                                "GetStatus",
-                                &(),
-                            )
-                            .await
+                let mut apply = |is_capturing: bool, meeting_active: bool| {
+                    let next = if meeting_active {
+                        "recording"
+                    } else if is_capturing {
+                        "capturing"
+                    } else {
+                        "paused"
                     };
-                    if let Ok(reply) = reply {
-                        if let Ok(status_json) = reply.body().deserialize::<String>() {
-                            if let Ok(status) =
-                                serde_json::from_str::<serde_json::Value>(&status_json)
-                            {
-                                let is_capturing =
-                                    status["is_capturing"].as_bool().unwrap_or(true);
-                                let meeting_active =
-                                    status["meeting_active"].as_bool().unwrap_or(false);
-                                let next = if meeting_active {
-                                    "recording"
-                                } else if is_capturing {
-                                    "capturing"
-                                } else {
-                                    "paused"
-                                };
-                                if last != Some(next) {
-                                    last = Some(next);
-                                    let _ = poll_toggle.set_text(if is_capturing {
-                                        "Pause Capture"
-                                    } else {
-                                        "Resume Capture"
-                                    });
-                                    if let Some(tray) = app_handle.tray_by_id("main-tray") {
-                                        let (icon, tooltip) = match next {
-                                            "recording" => (
-                                                &icon_recording_poll,
-                                                "RewindOS - ● Recording meeting",
-                                            ),
-                                            "capturing" => {
-                                                (&icon_active_poll, "RewindOS - Capturing")
-                                            }
-                                            _ => (&icon_paused_poll, "RewindOS - Paused"),
-                                        };
-                                        let _ = tray.set_icon(Some(icon.clone()));
-                                        let _ = tray.set_tooltip(Some(tooltip));
-                                    }
-                                }
+                    if last == Some(next) {
+                        return;
+                    }
+                    last = Some(next);
+                    let _ = tray_toggle.set_text(if is_capturing {
+                        "Pause Capture"
+                    } else {
+                        "Resume Capture"
+                    });
+                    if let Some(tray) = app_handle.tray_by_id("main-tray") {
+                        let (icon, tooltip) = match next {
+                            "recording" => {
+                                (&icon_recording_tray, "RewindOS - ● Recording meeting")
+                            }
+                            "capturing" => (&icon_active_tray, "RewindOS - Capturing"),
+                            _ => (&icon_paused_tray, "RewindOS - Paused"),
+                        };
+                        let _ = tray.set_icon(Some(icon.clone()));
+                        let _ = tray.set_tooltip(Some(tooltip));
+                    }
+                };
+
+                // Seed initial state (best-effort; if the daemon isn't up yet, the
+                // first signal it emits will correct the icon).
+                if let Ok(json) = proxy.get_status().await {
+                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&json) {
+                        apply(
+                            v["is_capturing"].as_bool().unwrap_or(true),
+                            v["meeting_active"].as_bool().unwrap_or(false),
+                        );
+                    }
+                }
+
+                match proxy.receive_state_changed().await {
+                    Ok(mut stream) => {
+                        while let Some(sig) = stream.next().await {
+                            if let Ok(args) = sig.args() {
+                                apply(args.is_capturing, args.meeting_active);
                             }
                         }
                     }
-                    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                    Err(e) => warn!("tray: cannot subscribe to StateChanged: {e}"),
                 }
             });
 

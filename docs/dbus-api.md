@@ -70,9 +70,10 @@ The capture daemon exposes a D-Bus service on the **session bus** for control by
     <method name="StopMeeting">
     </method>
 
-    <!-- Emitted when capture state changes -->
-    <signal name="CaptureStateChanged">
+    <!-- Emitted when capture state or meeting-recording state changes -->
+    <signal name="StateChanged">
       <arg name="is_capturing" type="b"/>
+      <arg name="meeting_active" type="b"/>
     </signal>
 
     <!-- Whether capture is currently active -->
@@ -276,9 +277,12 @@ Emits `PropertiesChanged` signal when changed.
 
 ## Signals
 
-### CaptureStateChanged(is_capturing: bool)
+### StateChanged(is_capturing: bool, meeting_active: bool)
 
-Emitted when capture is paused or resumed. UI should update tray icon and status indicator.
+Emitted when capture is paused/resumed (Pause/Resume) or a meeting starts/stops
+(StartMeeting/StopMeeting). Lets clients update the tray icon and status indicator
+without polling `GetStatus`. The tray subscribes to this and shows a red square
+while `meeting_active`, the live dot while capturing, and a dimmed glyph while paused.
 
 ## zbus Rust Interface
 
@@ -298,11 +302,15 @@ impl DaemonService {
     async fn delete_range(&self, start: i64, end: i64) -> zbus::fdo::Result<u64>;
     async fn recheck_window_info(&mut self) -> zbus::fdo::Result<String>;
     async fn set_unfiltered_capture(&mut self, enabled: bool) -> zbus::fdo::Result<()>;
-    async fn start_meeting(&mut self, title: &str) -> zbus::fdo::Result<i64>;
-    async fn stop_meeting(&mut self) -> zbus::fdo::Result<()>;
+    async fn start_meeting(&self, title: &str) -> zbus::fdo::Result<i64>;
+    async fn stop_meeting(&self) -> zbus::fdo::Result<()>;
 
     #[zbus(signal)]
-    async fn capture_state_changed(ctxt: &SignalEmitter<'_>, is_capturing: bool) -> zbus::Result<()>;
+    async fn state_changed(
+        emitter: &SignalEmitter<'_>,
+        is_capturing: bool,
+        meeting_active: bool,
+    ) -> zbus::Result<()>;
 
     #[zbus(property)]
     fn is_capturing(&self) -> bool;
