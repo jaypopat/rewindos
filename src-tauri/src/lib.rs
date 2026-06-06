@@ -15,12 +15,27 @@ use rewindos_core::schema::{
     JournalSummary, JournalTag, JournalTemplate, NewCollection, OpenTodo,
     SearchResponse, TaskUsageStat, UpdateCollection, UpsertJournalEntry,
 };
+use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri::tray::TrayIconBuilder;
 use tauri::{Emitter, Manager, State};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 use tracing::warn;
+
+/// Client proxy for the daemon interface — used to subscribe to the `StateChanged`
+/// signal so the tray reflects capture/meeting state live, without polling.
+#[zbus::proxy(
+    interface = "com.rewindos.Daemon",
+    default_service = "com.rewindos.Daemon",
+    default_path = "/com/rewindos/Daemon",
+    gen_blocking = false
+)]
+trait Daemon {
+    fn get_status(&self) -> zbus::Result<String>;
+    #[zbus(signal)]
+    fn state_changed(&self, is_capturing: bool, meeting_active: bool) -> zbus::Result<()>;
+}
 
 struct AppState {
     dbus: zbus::Connection,
@@ -63,6 +78,12 @@ struct DaemonStatusResponse {
     seconds_since_last_frame: Option<u64>,
     #[serde(default)]
     unfiltered_capture: bool,
+    #[serde(default)]
+    meeting_active: bool,
+    #[serde(default)]
+    meeting_id: Option<i64>,
+    #[serde(default)]
+    meeting_started_at: Option<i64>,
 }
 
 /// Filters received from the frontend (no `query` field — it's a separate param).
@@ -327,6 +348,110 @@ fn browse_screenshots(
 fn get_app_names(state: State<'_, AppState>) -> Result<Vec<String>, String> {
     let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
     db.get_app_names().map_err(|e| format!("db error: {e}"))
+}
+
+#[tauri::command]
+fn list_meetings(
+    state: State<'_, AppState>,
+    limit: Option<i64>,
+    offset: Option<i64>,
+) -> Result<Vec<rewindos_core::schema::Meeting>, String> {
+    let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+    db.list_meetings(limit.unwrap_or(100), offset.unwrap_or(0))
+        .map_err(|e| format!("db error: {e}"))
+}
+
+#[tauri::command]
+fn get_meeting(
+    state: State<'_, AppState>,
+    id: i64,
+) -> Result<Option<rewindos_core::schema::Meeting>, String> {
+    let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+    db.get_meeting(id).map_err(|e| format!("db error: {e}"))
+}
+
+#[tauri::command]
+fn get_meeting_segments(
+    state: State<'_, AppState>,
+    meeting_id: i64,
+) -> Result<Vec<rewindos_core::schema::TranscriptSegment>, String> {
+    let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+    db.get_meeting_segments(meeting_id)
+        .map_err(|e| format!("db error: {e}"))
+}
+
+#[tauri::command]
+fn delete_meeting(state: State<'_, AppState>, meeting_id: i64) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+    db.delete_meeting(meeting_id)
+        .map_err(|e| format!("db error: {e}"))
+}
+
+#[tauri::command]
+fn search_transcripts(
+    state: State<'_, AppState>,
+    query: String,
+    limit: Option<i64>,
+) -> Result<Vec<rewindos_core::schema::TranscriptSearchResult>, String> {
+    // Keyword-only from the UI (no query embedding); the daemon owns embeddings.
+    let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+    db.search_transcripts(&query, None, limit.unwrap_or(50))
+        .map_err(|e| format!("db error: {e}"))
+}
+
+#[tauri::command]
+async fn start_meeting(state: State<'_, AppState>, title: String) -> Result<i64, String> {
+    let reply = state
+        .dbus
+        .call_method(
+            Some("com.rewindos.Daemon"),
+            "/com/rewindos/Daemon",
+            Some("com.rewindos.Daemon"),
+            "StartMeeting",
+            &(title.as_str(),),
+        )
+        .await
+        .map_err(|e| format!("dbus call: {e}"))?;
+    reply
+        .body()
+        .deserialize::<i64>()
+        .map_err(|e| format!("dbus deserialize: {e}"))
+}
+
+#[tauri::command]
+async fn stop_meeting(state: State<'_, AppState>) -> Result<(), String> {
+    state
+        .dbus
+        .call_method(
+            Some("com.rewindos.Daemon"),
+            "/com/rewindos/Daemon",
+            Some("com.rewindos.Daemon"),
+            "StopMeeting",
+            &(),
+        )
+        .await
+        .map_err(|e| format!("dbus call: {e}"))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn whisper_model_present(state: State<'_, AppState>) -> Result<bool, String> {
+    let cfg = state.config.lock().map_err(|e| format!("config lock: {e}"))?;
+    let path = cfg.whisper_model_path().map_err(|e| format!("whisper model path: {e}"))?;
+    Ok(path.exists())
+}
+
+#[tauri::command]
+async fn download_whisper_model(state: State<'_, AppState>) -> Result<(), String> {
+    // Clone the config out of the lock BEFORE the await point (MutexGuard isn't Send).
+    let cfg = {
+        let guard = state.config.lock().map_err(|e| format!("config lock: {e}"))?;
+        guard.clone()
+    };
+    rewindos_core::whisper_model::ensure_model_downloaded(&cfg)
+        .await
+        .map(|_| ())
+        .map_err(|e| format!("whisper download: {e}"))
 }
 
 #[tauri::command]
@@ -1524,6 +1649,70 @@ pub fn run() {
                                 let _ = window.emit("focus-search", ());
                             }
                         }
+                        let ctrl_shift_m = Shortcut::new(
+                            Some(Modifiers::CONTROL | Modifiers::SHIFT),
+                            Code::KeyM,
+                        );
+                        if shortcut == &ctrl_shift_m {
+                            let app = app.clone();
+                            tauri::async_runtime::spawn(async move {
+                                let state = app.state::<AppState>();
+                                let active = match state
+                                    .dbus
+                                    .call_method(
+                                        Some("com.rewindos.Daemon"),
+                                        "/com/rewindos/Daemon",
+                                        Some("com.rewindos.Daemon"),
+                                        "GetStatus",
+                                        &(),
+                                    )
+                                    .await
+                                {
+                                    Ok(reply) => reply
+                                        .body()
+                                        .deserialize::<String>()
+                                        .ok()
+                                        .and_then(|j| {
+                                            serde_json::from_str::<serde_json::Value>(&j).ok()
+                                        })
+                                        .and_then(|v| v["meeting_active"].as_bool())
+                                        .unwrap_or(false),
+                                    Err(e) => {
+                                        warn!("meeting hotkey status: {e}");
+                                        return;
+                                    }
+                                };
+                                let result = if active {
+                                    state
+                                        .dbus
+                                        .call_method(
+                                            Some("com.rewindos.Daemon"),
+                                            "/com/rewindos/Daemon",
+                                            Some("com.rewindos.Daemon"),
+                                            "StopMeeting",
+                                            &(),
+                                        )
+                                        .await
+                                } else {
+                                    state
+                                        .dbus
+                                        .call_method(
+                                            Some("com.rewindos.Daemon"),
+                                            "/com/rewindos/Daemon",
+                                            Some("com.rewindos.Daemon"),
+                                            "StartMeeting",
+                                            &("Untitled meeting",),
+                                        )
+                                        .await
+                                };
+                                if let Err(e) = result {
+                                    warn!(
+                                        "meeting hotkey {}: {e}",
+                                        if active { "stop" } else { "start" }
+                                    );
+                                }
+                            });
+                        }
                     }
                 })
                 .build(),
@@ -1570,6 +1759,14 @@ pub fn run() {
                 warn!("Failed to register global shortcut: {e}");
             }
 
+            // Register Ctrl+Shift+M global shortcut (toggle meeting recording)
+            // TODO: honor config.meeting.hotkey
+            let ctrl_shift_m =
+                Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyM);
+            if let Err(e) = app.global_shortcut().register(ctrl_shift_m) {
+                warn!("Failed to register meeting global shortcut: {e}");
+            }
+
             // System tray
             let toggle_item = MenuItemBuilder::with_id("toggle", "Pause Capture")
                 .build(app)
@@ -1599,7 +1796,13 @@ pub fn run() {
             let icon_paused =
                 tauri::image::Image::from_bytes(include_bytes!("../icons/tray-icon-paused.png"))
                     .expect("failed to load paused tray icon");
-            // Initial icon assumes capturing; the startup probe corrects it if paused.
+            // Red square shown while a meeting is recording (takes priority over
+            // the capture-state icons).
+            let icon_recording =
+                tauri::image::Image::from_bytes(include_bytes!("../icons/tray-icon-recording.png"))
+                    .expect("failed to load recording tray icon");
+            // Initial icon assumes capturing; the get_status seed below (then the
+            // StateChanged signal loop) corrects it.
             let tray_icon = icon_active.clone();
 
             // If launched with --minimized, hide the window (autostart mode)
@@ -1716,38 +1919,78 @@ pub fn run() {
                 .build(app)
                 .expect("failed to build tray icon");
 
-            // Probe daemon state at startup to set correct tray text and icon
+            // Keep the tray live via the daemon's `StateChanged` signal (no
+            // polling): a red square while a meeting records (highest priority),
+            // the green dot while capturing, the dimmed glyph while paused. We seed
+            // the initial icon with a single GetStatus, then react to each signal.
             let app_handle = app.handle().clone();
-            let startup_toggle = toggle_item.clone();
-            let icon_paused_startup = icon_paused.clone();
+            let tray_toggle = toggle_item.clone();
+            let icon_active_tray = icon_active.clone();
+            let icon_paused_tray = icon_paused.clone();
+            let icon_recording_tray = icon_recording.clone();
             tauri::async_runtime::spawn(async move {
-                let state = app_handle.state::<AppState>();
-                let reply = state
-                    .dbus
-                    .call_method(
-                        Some("com.rewindos.Daemon"),
-                        "/com/rewindos/Daemon",
-                        Some("com.rewindos.Daemon"),
-                        "GetStatus",
-                        &(),
-                    )
-                    .await;
-                if let Ok(reply) = reply {
-                    if let Ok(status_json) = reply.body().deserialize::<String>() {
-                        if let Ok(status) =
-                            serde_json::from_str::<serde_json::Value>(&status_json)
-                        {
-                            let is_capturing =
-                                status["is_capturing"].as_bool().unwrap_or(true);
-                            if !is_capturing {
-                                let _ = startup_toggle.set_text("Resume Capture");
-                                if let Some(tray) = app_handle.tray_by_id("main-tray") {
-                                    let _ = tray.set_tooltip(Some("RewindOS - Paused"));
-                                    let _ = tray.set_icon(Some(icon_paused_startup.clone()));
-                                }
+                let conn = app_handle.state::<AppState>().dbus.clone();
+                let proxy = match DaemonProxy::new(&conn).await {
+                    Ok(p) => p,
+                    Err(e) => {
+                        warn!("tray: failed to build daemon proxy (match-rule error?), indicator disabled: {e}");
+                        return;
+                    }
+                };
+
+                // Apply a (is_capturing, meeting_active) state to the tray, only
+                // touching it when the resolved state actually changes.
+                let mut last: Option<&'static str> = None;
+                let mut apply = |is_capturing: bool, meeting_active: bool| {
+                    let next = if meeting_active {
+                        "recording"
+                    } else if is_capturing {
+                        "capturing"
+                    } else {
+                        "paused"
+                    };
+                    if last == Some(next) {
+                        return;
+                    }
+                    last = Some(next);
+                    let _ = tray_toggle.set_text(if is_capturing {
+                        "Pause Capture"
+                    } else {
+                        "Resume Capture"
+                    });
+                    if let Some(tray) = app_handle.tray_by_id("main-tray") {
+                        let (icon, tooltip) = match next {
+                            "recording" => {
+                                (&icon_recording_tray, "RewindOS - ● Recording meeting")
+                            }
+                            "capturing" => (&icon_active_tray, "RewindOS - Capturing"),
+                            _ => (&icon_paused_tray, "RewindOS - Paused"),
+                        };
+                        let _ = tray.set_icon(Some(icon.clone()));
+                        let _ = tray.set_tooltip(Some(tooltip));
+                    }
+                };
+
+                // Seed initial state (best-effort; if the daemon isn't up yet, the
+                // first signal it emits will correct the icon).
+                if let Ok(json) = proxy.get_status().await {
+                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&json) {
+                        apply(
+                            v["is_capturing"].as_bool().unwrap_or(true),
+                            v["meeting_active"].as_bool().unwrap_or(false),
+                        );
+                    }
+                }
+
+                match proxy.receive_state_changed().await {
+                    Ok(mut stream) => {
+                        while let Some(sig) = stream.next().await {
+                            if let Ok(args) = sig.args() {
+                                apply(args.is_capturing, args.meeting_active);
                             }
                         }
                     }
+                    Err(e) => warn!("tray: cannot subscribe to StateChanged: {e}"),
                 }
             });
 
@@ -1772,6 +2015,15 @@ pub fn run() {
             get_screenshot,
             get_screenshots_by_ids,
             get_app_names,
+            list_meetings,
+            get_meeting,
+            get_meeting_segments,
+            delete_meeting,
+            search_transcripts,
+            start_meeting,
+            stop_meeting,
+            whisper_model_present,
+            download_whisper_model,
             get_activity,
             get_task_breakdown,
             get_active_blocks,

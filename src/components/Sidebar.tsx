@@ -5,9 +5,9 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { LayoutGrid, CalendarDays, Rewind, Search, Sparkles, Clock, Settings, Bookmark, BookOpen } from "lucide-react";
+import { LayoutGrid, CalendarDays, Rewind, Search, Sparkles, Clock, Settings, Bookmark, BookOpen, Mic } from "lucide-react";
 
-export type View = "dashboard" | "history" | "rewind" | "search" | "saved" | "journal" | "ask" | "focus" | "settings";
+export type View = "dashboard" | "history" | "rewind" | "search" | "saved" | "journal" | "ask" | "meetings" | "focus" | "settings";
 
 interface SidebarProps {
   activeView: View;
@@ -56,6 +56,12 @@ const NAV_ITEMS: { view: View; label: string; shortcut: string; icon: React.Reac
     label: "Ask",
     shortcut: "g a",
     icon: <Sparkles className="size-5" strokeWidth={1.8} />,
+  },
+  {
+    view: "meetings",
+    label: "Meetings",
+    shortcut: "g m",
+    icon: <Mic className="size-5" strokeWidth={1.8} />,
   },
   {
     view: "focus",

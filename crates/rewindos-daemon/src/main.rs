@@ -1,6 +1,7 @@
 mod capture;
 mod detect;
 mod lock_watcher;
+mod meeting;
 mod mcp_server;
 mod pipeline;
 mod service;
@@ -511,6 +512,7 @@ async fn run_daemon() -> anyhow::Result<()> {
 
     let config = AppConfig::load()?;
     config.ensure_dirs()?;
+    let config = std::sync::Arc::new(config);
 
     info!(
         interval = config.capture.interval_seconds,
@@ -732,10 +734,77 @@ async fn run_daemon() -> anyhow::Result<()> {
         });
     }
 
+    // Crash recovery: close any meeting left open by a previous unclean shutdown
+    // so it becomes listable and reapable instead of stuck "in progress".
+    {
+        let db = db.clone();
+        let recovered = tokio::task::spawn_blocking(move || {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
+            let db = db.lock().unwrap_or_else(|e| e.into_inner());
+            db.end_dangling_meetings(now)
+        })
+        .await;
+        match recovered {
+            Ok(Ok(n)) if n > 0 => {
+                tracing::warn!(recovered = n, "closed meetings left open by a previous run")
+            }
+            Ok(Err(e)) => tracing::warn!(error = %e, "meeting crash-recovery failed"),
+            _ => {}
+        }
+    }
+
+    // Meeting controller: receives Start/Stop commands over an mpsc channel.
+    let (meeting_tx, meeting_rx) =
+        tokio::sync::mpsc::channel::<crate::meeting::controller::MeetingCmd>(4);
+    let meeting_state = std::sync::Arc::new(crate::meeting::controller::MeetingState::default());
+    {
+        let db = db.clone();
+        let config = config.clone();
+        let state = meeting_state.clone();
+        tokio::spawn(async move {
+            crate::meeting::controller::run(meeting_rx, db, config, state).await;
+        });
+    }
+
+    // Retention sweep: hourly, removes screenshots and meetings past the cutoff.
+    {
+        let db = db.clone();
+        let retention_days = config.storage.retention_days as i64;
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(std::time::Duration::from_secs(3600));
+            loop {
+                tick.tick().await;
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs() as i64)
+                    .unwrap_or(0);
+                let cutoff = now.saturating_sub(retention_days.saturating_mul(86_400));
+                let db = db.clone();
+                let _ = tokio::task::spawn_blocking(move || {
+                    let db = db.lock().unwrap_or_else(|e| e.into_inner());
+                    match db.delete_screenshots_before(cutoff) {
+                        Ok(n) if n > 0 => tracing::info!(deleted = n, "retention: screenshots"),
+                        Err(e) => tracing::warn!(error = %e, "retention: screenshot sweep failed"),
+                        _ => {}
+                    }
+                    match db.delete_meetings_before(cutoff) {
+                        Ok(n) if n > 0 => tracing::info!(deleted = n, "retention: meetings"),
+                        Err(e) => tracing::warn!(error = %e, "retention: meeting sweep failed"),
+                        _ => {}
+                    }
+                })
+                .await;
+            }
+        });
+    }
+
     // Register D-Bus service
     let dbus_service = service::DaemonService {
         db: db.clone(),
-        config: Arc::new(config.clone()),
+        config: config.clone(),
         metrics: pipeline_handle.metrics.clone(),
         gate: gate.clone(),
         unfiltered_override: unfiltered_override.clone(),
@@ -749,6 +818,8 @@ async fn run_daemon() -> anyhow::Result<()> {
         session: session.clone(),
         desktop_name: desktop.to_string(),
         session_name: session.to_string(),
+        meeting_tx,
+        meeting_state,
     };
 
     dbus_conn

@@ -6,11 +6,14 @@ use rewindos_core::config::AppConfig;
 use rewindos_core::db::Database;
 use rewindos_core::embedding::OllamaClient;
 use rewindos_core::schema::{DaemonStatus, QueueDepths, SearchFilters};
+use tokio::sync::{mpsc, oneshot};
 use tracing::{info, warn};
 use zbus::interface;
+use zbus::object_server::SignalEmitter;
 
 use crate::capture::gate::{recompute_privacy_gate, CaptureGate};
 use crate::detect::{create_window_info_provider, DesktopEnvironment, SessionType};
+use crate::meeting::controller::{MeetingCmd, MeetingState};
 use crate::pipeline::PipelineMetrics;
 use crate::window_info::kwin::KwinWindowInfo;
 use crate::window_info::SharedProvider;
@@ -33,6 +36,8 @@ pub struct DaemonService {
     pub session: SessionType,
     pub desktop_name: String,
     pub session_name: String,
+    pub meeting_tx: mpsc::Sender<MeetingCmd>,
+    pub meeting_state: Arc<MeetingState>,
 }
 
 /// Lock a mutex, logging a warning if it was poisoned.
@@ -45,7 +50,10 @@ fn lock_db(db: &Mutex<Database>) -> std::sync::MutexGuard<'_, Database> {
 
 #[interface(name = "com.rewindos.Daemon")]
 impl DaemonService {
-    async fn pause(&mut self) -> zbus::fdo::Result<()> {
+    async fn pause(
+        &mut self,
+        #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
+    ) -> zbus::fdo::Result<()> {
         if !self.gate.wants_capture() {
             return Err(zbus::fdo::Error::Failed("not capturing".into()));
         }
@@ -53,10 +61,15 @@ impl DaemonService {
         info!("pause requested via D-Bus");
         self.gate.set_wants_capture(false);
 
+        let meeting_active = self.meeting_state.active.load(Ordering::Acquire);
+        let _ = emitter.state_changed(false, meeting_active).await;
         Ok(())
     }
 
-    async fn resume(&mut self) -> zbus::fdo::Result<()> {
+    async fn resume(
+        &mut self,
+        #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
+    ) -> zbus::fdo::Result<()> {
         if self.gate.wants_capture() {
             return Err(zbus::fdo::Error::Failed("already capturing".into()));
         }
@@ -64,6 +77,8 @@ impl DaemonService {
         info!("resume requested via D-Bus");
         self.gate.set_wants_capture(true);
 
+        let meeting_active = self.meeting_state.active.load(Ordering::Acquire);
+        let _ = emitter.state_changed(true, meeting_active).await;
         Ok(())
     }
 
@@ -115,6 +130,15 @@ impl DaemonService {
             capture_state,
             seconds_since_last_frame,
             unfiltered_capture,
+            meeting_active: self.meeting_state.active.load(std::sync::atomic::Ordering::Acquire),
+            meeting_id: {
+                let id = self.meeting_state.meeting_id.load(std::sync::atomic::Ordering::Acquire);
+                (id > 0).then_some(id)
+            },
+            meeting_started_at: {
+                let t = self.meeting_state.started_at.load(std::sync::atomic::Ordering::Acquire);
+                (t > 0).then_some(t)
+            },
         };
 
         serde_json::to_string(&status)
@@ -245,6 +269,58 @@ impl DaemonService {
         recompute_privacy_gate(&self.gate, &**p, &self.config.privacy, enabled);
         Ok(())
     }
+
+    /// Start recording a meeting. Empty `title` means untitled. Returns the new
+    /// meeting id.
+    async fn start_meeting(
+        &self,
+        title: &str,
+        #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
+    ) -> zbus::fdo::Result<i64> {
+        let title = if title.is_empty() {
+            None
+        } else {
+            Some(title.to_string())
+        };
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.meeting_tx
+            .send(MeetingCmd::Start { title, reply: reply_tx })
+            .await
+            .map_err(|_| zbus::fdo::Error::Failed("meeting controller unavailable".into()))?;
+        let id = reply_rx
+            .await
+            .map_err(|_| zbus::fdo::Error::Failed("no reply from meeting controller".into()))?
+            .map_err(zbus::fdo::Error::Failed)?;
+        let _ = emitter.state_changed(self.gate.wants_capture(), true).await;
+        Ok(id)
+    }
+
+    /// Stop the active meeting (finalize audio, transcript, and post-processing).
+    async fn stop_meeting(
+        &self,
+        #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
+    ) -> zbus::fdo::Result<()> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.meeting_tx
+            .send(MeetingCmd::Stop { reply: reply_tx })
+            .await
+            .map_err(|_| zbus::fdo::Error::Failed("meeting controller unavailable".into()))?;
+        reply_rx
+            .await
+            .map_err(|_| zbus::fdo::Error::Failed("no reply from meeting controller".into()))?
+            .map_err(zbus::fdo::Error::Failed)?;
+        let _ = emitter.state_changed(self.gate.wants_capture(), false).await;
+        Ok(())
+    }
+
+    /// Emitted whenever capture state or meeting-recording state changes, so
+    /// clients (e.g. the tray indicator) can react without polling `GetStatus`.
+    #[zbus(signal)]
+    async fn state_changed(
+        emitter: &SignalEmitter<'_>,
+        is_capturing: bool,
+        meeting_active: bool,
+    ) -> zbus::Result<()>;
 
     #[zbus(property)]
     fn is_capturing(&self) -> bool {

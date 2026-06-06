@@ -15,6 +15,7 @@ import {
   HistoryView,
   RewindView,
   AskView,
+  MeetingsView,
   SavedView,
   JournalView,
   FocusView,
@@ -82,6 +83,7 @@ const VIEW_SHORTCUTS: { sequence: HotkeySequence; view: View }[] = [
   { sequence: ["G", "V"], view: "saved" },
   { sequence: ["G", "J"], view: "journal" },
   { sequence: ["G", "A"], view: "ask" },
+  { sequence: ["G", "M"], view: "meetings" },
   { sequence: ["G", "F"], view: "focus" },
   { sequence: ["G", ","], view: "settings" },
 ];
@@ -258,6 +260,12 @@ function App() {
         {view === "ask" && subView === "list" && (
           <ViewSuspense>
             <AskView onSelectScreenshot={handleSelectResult} />
+          </ViewSuspense>
+        )}
+
+        {view === "meetings" && subView === "list" && (
+          <ViewSuspense>
+            <MeetingsView onJumpToTime={(unixSecs) => handleRewindToRange(unixSecs - 120, unixSecs + 120)} />
           </ViewSuspense>
         )}
 

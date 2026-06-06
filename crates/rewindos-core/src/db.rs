@@ -4,11 +4,11 @@ use crate::schema::{
     ActiveBlock, ActivityResponse, AppUsageStat, Bookmark, BoundingBox, CachedDailySummary,
     Collection, DailyActivity, HourlyActivity, JournalDateInfo, JournalEntry, JournalScreenshot,
     JournalSearchResponse, JournalSearchResult, JournalStreakInfo, JournalSummary, JournalTag,
-    JournalTemplate, NewBoundingBox, NewCollection, NewScreenshot, OcrStatus, OpenTodo, Screenshot,
-    SearchFilters, SearchResponse, SearchResult, TaskUsageStat, UpdateCollection,
-    UpsertJournalEntry,
+    JournalTemplate, Meeting, NewBoundingBox, NewCollection, NewScreenshot, NewTranscriptSegment, OcrStatus,
+    OpenTodo, Screenshot, SearchFilters, SearchResponse, SearchResult, TaskUsageStat,
+    TranscriptSearchResult, TranscriptSegment, UpdateCollection, UpsertJournalEntry,
 };
-use rusqlite::{ffi::sqlite3_auto_extension, params, Connection};
+use rusqlite::{ffi::sqlite3_auto_extension, params, Connection, OptionalExtension};
 use std::path::Path;
 use std::sync::Once;
 
@@ -394,6 +394,185 @@ impl Database {
         Ok(())
     }
 
+    /// Insert a meeting row (recording in progress). Returns the new id.
+    pub fn insert_meeting(
+        &self,
+        started_at: i64,
+        title: Option<&str>,
+        app_name: Option<&str>,
+    ) -> Result<i64> {
+        self.conn.execute(
+            "INSERT INTO meetings (started_at, title, app_name) VALUES (?1, ?2, ?3)",
+            params![started_at, title, app_name],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    /// Finalize a meeting: set ended_at and audio paths.
+    pub fn end_meeting(
+        &self,
+        id: i64,
+        ended_at: i64,
+        mic_path: Option<&str>,
+        system_path: Option<&str>,
+    ) -> Result<()> {
+        self.conn.execute(
+            "UPDATE meetings SET ended_at = ?2, mic_audio_path = ?3, system_audio_path = ?4
+             WHERE id = ?1",
+            params![id, ended_at, mic_path, system_path],
+        )?;
+        Ok(())
+    }
+
+    /// Store the post-meeting summary.
+    pub fn set_meeting_summary(&self, id: i64, summary: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE meetings SET summary = ?2 WHERE id = ?1",
+            params![id, summary],
+        )?;
+        Ok(())
+    }
+
+    /// List meetings, newest first.
+    pub fn list_meetings(&self, limit: i64, offset: i64) -> Result<Vec<Meeting>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, started_at, ended_at, title, app_name,
+                    mic_audio_path, system_audio_path, summary
+             FROM meetings
+             ORDER BY started_at DESC
+             LIMIT ?1 OFFSET ?2",
+        )?;
+        let rows = stmt.query_map(params![limit, offset], |row| {
+            Ok(Meeting {
+                id: row.get(0)?,
+                started_at: row.get(1)?,
+                ended_at: row.get(2)?,
+                title: row.get(3)?,
+                app_name: row.get(4)?,
+                mic_audio_path: row.get(5)?,
+                system_audio_path: row.get(6)?,
+                summary: row.get(7)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    /// Fetch a single meeting by id, or `None` if it doesn't exist.
+    pub fn get_meeting(&self, id: i64) -> Result<Option<Meeting>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, started_at, ended_at, title, app_name,
+                    mic_audio_path, system_audio_path, summary
+             FROM meetings WHERE id = ?1",
+        )?;
+        let row = stmt
+            .query_row(params![id], |row| {
+                Ok(Meeting {
+                    id: row.get(0)?,
+                    started_at: row.get(1)?,
+                    ended_at: row.get(2)?,
+                    title: row.get(3)?,
+                    app_name: row.get(4)?,
+                    mic_audio_path: row.get(5)?,
+                    system_audio_path: row.get(6)?,
+                    summary: row.get(7)?,
+                })
+            })
+            .optional()?;
+        Ok(row)
+    }
+
+    /// All segments for a meeting, in time order.
+    pub fn get_meeting_segments(&self, meeting_id: i64) -> Result<Vec<TranscriptSegment>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, meeting_id, start_ms, end_ms, source, speaker_label, text
+             FROM transcript_segments
+             WHERE meeting_id = ?1
+             ORDER BY start_ms",
+        )?;
+        let rows = stmt.query_map(params![meeting_id], |row| {
+            Ok(TranscriptSegment {
+                id: row.get(0)?,
+                meeting_id: row.get(1)?,
+                start_ms: row.get(2)?,
+                end_ms: row.get(3)?,
+                source: row.get(4)?,
+                speaker_label: row.get(5)?,
+                text: row.get(6)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    /// Insert a transcript segment into both the table and the FTS index.
+    /// Wrapped in a transaction so both stay in sync on crash (mirror of insert_ocr_text).
+    pub fn insert_transcript_segment(
+        &self,
+        meeting_id: i64,
+        seg: &NewTranscriptSegment,
+    ) -> Result<i64> {
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute(
+            "INSERT INTO transcript_segments
+               (meeting_id, start_ms, end_ms, source, speaker_label, text)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                meeting_id,
+                seg.start_ms,
+                seg.end_ms,
+                seg.source,
+                seg.speaker_label,
+                seg.text
+            ],
+        )?;
+        let segment_id = tx.last_insert_rowid();
+        tx.execute(
+            "INSERT INTO transcript_fts (text, segment_id) VALUES (?1, ?2)",
+            params![seg.text, segment_id],
+        )?;
+        tx.commit()?;
+        Ok(segment_id)
+    }
+
+    /// Insert a transcript segment embedding and mark the segment done.
+    pub fn insert_transcript_embedding(&self, segment_id: i64, embedding: &[f32]) -> Result<()> {
+        let blob: Vec<u8> = embedding.iter().flat_map(|f| f.to_le_bytes()).collect();
+        self.conn.execute(
+            "INSERT INTO transcript_embeddings (segment_id, embedding) VALUES (?1, ?2)",
+            params![segment_id, blob],
+        )?;
+        self.conn.execute(
+            "UPDATE transcript_segments SET embedding_status = 'done' WHERE id = ?1",
+            params![segment_id],
+        )?;
+        Ok(())
+    }
+
+    /// Segments awaiting an embedding.
+    pub fn get_pending_transcript_embeddings(&self, limit: usize) -> Result<Vec<(i64, String)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, text FROM transcript_segments
+             WHERE embedding_status = 'pending'
+             ORDER BY id
+             LIMIT ?1",
+        )?;
+        let rows = stmt.query_map(params![limit as i64], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
     /// Insert bounding boxes for a screenshot.
     /// Wrapped in a transaction for performance (single fsync instead of N).
     pub fn insert_bounding_boxes(
@@ -728,6 +907,78 @@ impl Database {
             }
         }
         Ok(paths)
+    }
+
+    /// Delete a meeting and everything attached to it: segments, FTS rows,
+    /// embedding rows, and audio files. FTS5/vec0 are standalone tables with
+    /// no FK cascade, so they must be cleared explicitly (same pattern as
+    /// delete_screenshots_before clearing ocr_fts).
+    pub fn delete_meeting(&self, meeting_id: i64) -> Result<()> {
+        let (mic, sys): (Option<String>, Option<String>) = self
+            .conn
+            .query_row(
+                "SELECT mic_audio_path, system_audio_path FROM meetings WHERE id = ?1",
+                params![meeting_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap_or((None, None));
+
+        let segment_ids: Vec<i64> = {
+            let mut stmt = self
+                .conn
+                .prepare("SELECT id FROM transcript_segments WHERE meeting_id = ?1")?;
+            let rows = stmt.query_map(params![meeting_id], |row| row.get::<_, i64>(0))?;
+            rows.collect::<std::result::Result<Vec<_>, _>>()?
+        };
+
+        let tx = self.conn.unchecked_transaction()?;
+        for sid in &segment_ids {
+            tx.execute("DELETE FROM transcript_fts WHERE segment_id = ?1", params![sid])?;
+            tx.execute(
+                "DELETE FROM transcript_embeddings WHERE segment_id = ?1",
+                params![sid],
+            )?;
+        }
+        tx.execute(
+            "DELETE FROM transcript_segments WHERE meeting_id = ?1",
+            params![meeting_id],
+        )?;
+        tx.execute("DELETE FROM meetings WHERE id = ?1", params![meeting_id])?;
+        tx.commit()?;
+
+        for p in [mic, sys].into_iter().flatten() {
+            let _ = std::fs::remove_file(&p);
+        }
+        Ok(())
+    }
+
+    /// Mark every still-open meeting (`ended_at IS NULL`) as ended at `ended_at`.
+    /// Crash recovery for daemon startup: an interrupted meeting becomes listable
+    /// and eligible for retention instead of being stuck "in progress" forever.
+    /// Returns the number of rows closed.
+    pub fn end_dangling_meetings(&self, ended_at: i64) -> Result<u64> {
+        let n = self.conn.execute(
+            "UPDATE meetings SET ended_at = ?1 WHERE ended_at IS NULL",
+            rusqlite::params![ended_at],
+        )?;
+        Ok(n as u64)
+    }
+
+    /// Retention sweep: delete meetings ended before `timestamp` (unix seconds).
+    /// Returns the number of meetings removed.
+    pub fn delete_meetings_before(&self, timestamp: i64) -> Result<u64> {
+        let ids: Vec<i64> = {
+            let mut stmt = self.conn.prepare(
+                "SELECT id FROM meetings WHERE ended_at IS NOT NULL AND ended_at < ?1",
+            )?;
+            let rows = stmt.query_map(params![timestamp], |row| row.get::<_, i64>(0))?;
+            rows.collect::<std::result::Result<Vec<_>, _>>()?
+        };
+        let count = ids.len() as u64;
+        for id in ids {
+            self.delete_meeting(id)?;
+        }
+        Ok(count)
     }
 
     /// Best-effort removal of files from disk.
@@ -1279,6 +1530,80 @@ impl Database {
             total_count: deduped_total,
             search_mode: Some("hybrid".to_string()),
         })
+    }
+
+    /// Search transcript segments via FTS5 (+ optional vector KNN), fused with RRF.
+    /// Returns up to `limit` results ranked by fused score.
+    pub fn search_transcripts(
+        &self,
+        query: &str,
+        query_embedding: Option<&[f32]>,
+        limit: i64,
+    ) -> Result<Vec<TranscriptSearchResult>> {
+        use std::collections::HashMap;
+        const RRF_K: f64 = 60.0;
+        const FUSION_LIMIT: i64 = 300;
+
+        let mut scores: HashMap<i64, f64> = HashMap::new();
+
+        // FTS ranked by bm25 (fts5 `rank`).
+        {
+            let mut stmt = self.conn.prepare(
+                "SELECT segment_id FROM transcript_fts
+                 WHERE transcript_fts MATCH ?1
+                 ORDER BY rank
+                 LIMIT ?2",
+            )?;
+            let rows = stmt.query_map(params![query, FUSION_LIMIT], |row| row.get::<_, i64>(0))?;
+            for (rank, id) in rows.enumerate() {
+                let id = id?;
+                *scores.entry(id).or_default() += 1.0 / (RRF_K + rank as f64 + 1.0);
+            }
+        }
+
+        // Optional vector KNN.
+        if let Some(emb) = query_embedding {
+            let blob: Vec<u8> = emb.iter().flat_map(|f| f.to_le_bytes()).collect();
+            let mut stmt = self.conn.prepare(
+                "SELECT segment_id FROM transcript_embeddings
+                 WHERE embedding MATCH ?1
+                 ORDER BY distance
+                 LIMIT ?2",
+            )?;
+            let rows = stmt.query_map(params![blob, FUSION_LIMIT], |row| row.get::<_, i64>(0))?;
+            for (rank, id) in rows.enumerate() {
+                let id = id?;
+                *scores.entry(id).or_default() += 1.0 / (RRF_K + rank as f64 + 1.0);
+            }
+        }
+
+        let mut ranked: Vec<(i64, f64)> = scores.into_iter().collect();
+        ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        ranked.truncate(limit as usize);
+
+        let mut out = Vec::new();
+        for (segment_id, score) in ranked {
+            let row = self.conn.query_row(
+                "SELECT id, meeting_id, start_ms, end_ms, speaker_label, text
+                 FROM transcript_segments WHERE id = ?1",
+                params![segment_id],
+                |row| {
+                    Ok(TranscriptSearchResult {
+                        segment_id: row.get(0)?,
+                        meeting_id: row.get(1)?,
+                        start_ms: row.get(2)?,
+                        end_ms: row.get(3)?,
+                        speaker_label: row.get(4)?,
+                        text: row.get(5)?,
+                        rank: score,
+                    })
+                },
+            );
+            if let Ok(r) = row {
+                out.push(r);
+            }
+        }
+        Ok(out)
     }
 
     /// Get task-level breakdown: app + window title with estimated time.
@@ -3251,5 +3576,180 @@ mod tests {
             tables.iter().any(|t| t == "chat_messages_fts"),
             "chat_messages_fts table missing: {tables:?}"
         );
+    }
+
+    #[test]
+    fn migration_v009_creates_meeting_tables() {
+        let db = make_test_db();
+        // Inserting into the new tables proves the migration ran.
+        db.conn
+            .execute("INSERT INTO meetings (started_at) VALUES (1000)", [])
+            .expect("meetings table missing");
+        db.conn
+            .execute(
+                "INSERT INTO transcript_segments
+                   (meeting_id, start_ms, end_ms, source, speaker_label, text)
+                 VALUES (1, 0, 100, 'mic', 'You', 'hello')",
+                [],
+            )
+            .expect("transcript_segments table missing");
+    }
+
+    #[test]
+    fn transcript_embedding_roundtrip_and_pending_queue() {
+        let db = make_test_db();
+        let mid = db.insert_meeting(1000, None, None).unwrap();
+        let seg = crate::schema::NewTranscriptSegment {
+            start_ms: 0, end_ms: 10, source: "mic".into(),
+            speaker_label: "You".into(), text: "agenda item one".into(),
+        };
+        let sid = db.insert_transcript_segment(mid, &seg).unwrap();
+
+        // Pending before embedding.
+        let pending = db.get_pending_transcript_embeddings(10).unwrap();
+        assert_eq!(pending, vec![(sid, "agenda item one".to_string())]);
+
+        // After embedding, queue is empty.
+        let emb = vec![0.1f32; 768];
+        db.insert_transcript_embedding(sid, &emb).unwrap();
+        assert!(db.get_pending_transcript_embeddings(10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn insert_meeting_and_segment_indexes_fts() {
+        let db = make_test_db();
+        let mid = db.insert_meeting(1000, Some("Standup"), Some("zoom")).unwrap();
+        assert_eq!(mid, 1);
+
+        let seg = crate::schema::NewTranscriptSegment {
+            start_ms: 1_000_000,
+            end_ms: 1_002_000,
+            source: "system".to_string(),
+            speaker_label: "Remote".to_string(),
+            text: "ship the release on friday".to_string(),
+        };
+        let sid = db.insert_transcript_segment(mid, &seg).unwrap();
+        assert!(sid > 0);
+
+        // FTS row exists and matches.
+        let hit: i64 = db
+            .conn
+            .query_row(
+                "SELECT segment_id FROM transcript_fts WHERE transcript_fts MATCH 'release'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(hit, sid);
+    }
+
+    #[test]
+    fn list_meetings_and_segments() {
+        let db = make_test_db();
+        let mid = db.insert_meeting(1000, Some("Retro"), Some("meet")).unwrap();
+        db.end_meeting(mid, 2000, Some("meetings/1/mic.opus"), Some("meetings/1/system.opus")).unwrap();
+        let seg = crate::schema::NewTranscriptSegment {
+            start_ms: 5, end_ms: 9, source: "system".into(),
+            speaker_label: "Remote".into(), text: "what went well".into(),
+        };
+        db.insert_transcript_segment(mid, &seg).unwrap();
+
+        let meetings = db.list_meetings(50, 0).unwrap();
+        assert_eq!(meetings.len(), 1);
+        assert_eq!(meetings[0].title.as_deref(), Some("Retro"));
+        assert_eq!(meetings[0].ended_at, Some(2000));
+
+        let segs = db.get_meeting_segments(mid).unwrap();
+        assert_eq!(segs.len(), 1);
+        assert_eq!(segs[0].speaker_label, "Remote");
+    }
+
+    #[test]
+    fn search_transcripts_keyword_only() {
+        let db = make_test_db();
+        let mid = db.insert_meeting(1000, Some("Sync"), None).unwrap();
+        for (i, text) in ["deploy the worker", "lunch plans", "deploy rollback steps"]
+            .iter()
+            .enumerate()
+        {
+            let seg = crate::schema::NewTranscriptSegment {
+                start_ms: i as i64 * 1000,
+                end_ms: i as i64 * 1000 + 500,
+                source: "mic".into(),
+                speaker_label: "You".into(),
+                text: (*text).into(),
+            };
+            db.insert_transcript_segment(mid, &seg).unwrap();
+        }
+
+        let results = db.search_transcripts("deploy", None, 10).unwrap();
+        assert_eq!(results.len(), 2);
+        assert!(results.iter().all(|r| r.text.contains("deploy")));
+        assert!(results.iter().all(|r| r.meeting_id == mid));
+    }
+
+    #[test]
+    fn delete_meeting_purges_fts_and_embeddings() {
+        let db = make_test_db();
+        let mid = db.insert_meeting(1000, None, None).unwrap();
+        let seg = crate::schema::NewTranscriptSegment {
+            start_ms: 0, end_ms: 10, source: "mic".into(),
+            speaker_label: "You".into(), text: "secret words".into(),
+        };
+        let sid = db.insert_transcript_segment(mid, &seg).unwrap();
+        db.insert_transcript_embedding(sid, &vec![0.2f32; 768]).unwrap();
+
+        db.delete_meeting(mid).unwrap();
+
+        let seg_count: i64 = db.conn
+            .query_row("SELECT COUNT(*) FROM transcript_segments", [], |r| r.get(0)).unwrap();
+        let fts_count: i64 = db.conn
+            .query_row("SELECT COUNT(*) FROM transcript_fts", [], |r| r.get(0)).unwrap();
+        let emb_count: i64 = db.conn
+            .query_row("SELECT COUNT(*) FROM transcript_embeddings", [], |r| r.get(0)).unwrap();
+        assert_eq!((seg_count, fts_count, emb_count), (0, 0, 0));
+    }
+
+    #[test]
+    fn delete_meetings_before_removes_old() {
+        let db = make_test_db();
+        let old = db.insert_meeting(1000, None, None).unwrap();
+        db.end_meeting(old, 1500, None, None).unwrap();
+        let recent = db.insert_meeting(9000, None, None).unwrap();
+        db.end_meeting(recent, 9500, None, None).unwrap();
+
+        let removed = db.delete_meetings_before(2000).unwrap();
+        assert_eq!(removed, 1);
+        assert_eq!(db.list_meetings(50, 0).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn end_dangling_meetings_closes_only_open_rows() {
+        let db = Database::open_in_memory().unwrap();
+        let open = db.insert_meeting(100, Some("open"), None).unwrap();
+        let closed = db.insert_meeting(200, Some("closed"), None).unwrap();
+        db.end_meeting(closed, 250, None, None).unwrap();
+
+        let n = db.end_dangling_meetings(999).unwrap();
+        assert_eq!(n, 1); // only the open meeting
+
+        let rows = db.list_meetings(10, 0).unwrap();
+        assert_eq!(rows.iter().find(|m| m.id == open).unwrap().ended_at, Some(999));
+        assert_eq!(rows.iter().find(|m| m.id == closed).unwrap().ended_at, Some(250));
+    }
+
+    #[test]
+    fn get_meeting_returns_row_or_none() {
+        let db = make_test_db();
+        let id = db
+            .insert_meeting(1_000, Some("Standup"), Some("zoom"))
+            .unwrap();
+
+        let got = db.get_meeting(id).unwrap().expect("meeting exists");
+        assert_eq!(got.id, id);
+        assert_eq!(got.title.as_deref(), Some("Standup"));
+        assert_eq!(got.started_at, 1_000);
+
+        assert!(db.get_meeting(999_999).unwrap().is_none());
     }
 }

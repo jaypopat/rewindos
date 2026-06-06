@@ -16,6 +16,7 @@ pub struct AppConfig {
     pub semantic: SemanticConfig,
     pub chat: ChatConfig,
     pub focus: FocusConfig,
+    pub meeting: MeetingConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -126,6 +127,39 @@ impl Default for FocusConfig {
             auto_start_breaks: true,
             auto_start_work: false,
             category_rules: HashMap::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MeetingConfig {
+    pub enabled: bool,
+    pub engine: String,
+    pub model: String,
+    pub model_dir: String,
+    /// Path or PATH name of the whisper.cpp binary.
+    pub whisper_bin: String,
+    pub keep_audio: bool,
+    pub summary_enabled: bool,
+    /// Global hotkey to toggle meeting recording (separate from `UiConfig::global_hotkey`).
+    pub hotkey: String,
+    /// Capture/transcribe sample rate (whisper expects 16 kHz mono).
+    pub sample_rate: u32,
+}
+
+impl Default for MeetingConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            engine: "whisper-cpp".to_string(),
+            model: "base.en".to_string(),
+            model_dir: "~/.rewindos/models/whisper".to_string(),
+            whisper_bin: "whisper-cli".to_string(),
+            keep_audio: true,
+            summary_enabled: true,
+            hotkey: "Ctrl+Shift+M".to_string(),
+            sample_rate: 16000,
         }
     }
 }
@@ -276,6 +310,24 @@ impl AppConfig {
         Ok(self.base_dir()?.join("screenshots"))
     }
 
+    /// Returns the path to the meetings directory (`<base>/meetings`).
+    pub fn meetings_dir(&self) -> Result<PathBuf> {
+        Ok(self.base_dir()?.join("meetings"))
+    }
+
+    /// Returns the resolved whisper model directory (expands `~`).
+    pub fn whisper_model_dir(&self) -> Result<PathBuf> {
+        resolve_tilde(&self.meeting.model_dir)
+    }
+
+    /// Resolved path to the whisper GGUF model file
+    /// (`<model_dir>/ggml-<model>.bin`, the whisper.cpp naming convention).
+    pub fn whisper_model_path(&self) -> Result<PathBuf> {
+        Ok(self
+            .whisper_model_dir()?
+            .join(format!("ggml-{}.bin", self.meeting.model)))
+    }
+
     /// Returns the path to the logs directory.
     pub fn logs_dir(&self) -> Result<PathBuf> {
         Ok(self.base_dir()?.join("logs"))
@@ -286,6 +338,7 @@ impl AppConfig {
         let base = self.base_dir()?;
         fs::create_dir_all(&base)?;
         fs::create_dir_all(base.join("screenshots"))?;
+        fs::create_dir_all(base.join("meetings"))?;
         fs::create_dir_all(base.join("logs"))?;
         Ok(())
     }
@@ -343,6 +396,39 @@ mod tests {
         assert_eq!(config.storage.retention_days, 90);
         assert_eq!(config.storage.screenshot_quality, 80);
         assert_eq!(config.ocr.tesseract_lang, "eng");
+    }
+
+    #[test]
+    fn meeting_config_defaults() {
+        let c = AppConfig::default();
+        assert!(!c.meeting.enabled);
+        assert_eq!(c.meeting.engine, "whisper-cpp");
+        assert_eq!(c.meeting.model, "base.en");
+        assert_eq!(c.meeting.whisper_bin, "whisper-cli");
+        assert!(c.meeting.keep_audio);
+        assert!(c.meeting.summary_enabled);
+        assert_eq!(c.meeting.hotkey, "Ctrl+Shift+M");
+        assert_eq!(c.meeting.sample_rate, 16000);
+    }
+
+    #[test]
+    fn meeting_dirs_resolve() {
+        let mut c = AppConfig::default();
+        c.storage.base_dir = "/tmp/rwos-test".to_string();
+        c.meeting.model_dir = "/tmp/rwos-test/models/whisper".to_string();
+        assert_eq!(c.meetings_dir().unwrap(), std::path::PathBuf::from("/tmp/rwos-test/meetings"));
+        assert_eq!(c.whisper_model_dir().unwrap(), std::path::PathBuf::from("/tmp/rwos-test/models/whisper"));
+    }
+
+    #[test]
+    fn whisper_model_path_uses_ggml_prefix() {
+        let mut c = AppConfig::default();
+        c.meeting.model_dir = "/tmp/rwos-test/models/whisper".to_string();
+        c.meeting.model = "base.en".to_string();
+        assert_eq!(
+            c.whisper_model_path().unwrap(),
+            std::path::PathBuf::from("/tmp/rwos-test/models/whisper/ggml-base.en.bin")
+        );
     }
 
     #[test]

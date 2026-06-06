@@ -9,6 +9,7 @@ pub mod mcp;
 pub mod ocr;
 pub mod paddle_ocr;
 pub mod schema;
+pub mod whisper_model;
 
 pub use config::AppConfig;
 pub use db::Database;

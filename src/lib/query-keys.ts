@@ -50,4 +50,9 @@ export const queryKeys = {
   chatMessages: (chatId: number) => ["chat-messages", chatId] as const,
   chatSearch: (query: string) => ["chat-search", query] as const,
   ollamaModels: (baseUrl: string) => ["ollama-models", baseUrl] as const,
+  meetings: (limit: number, offset: number) => ["meetings", limit, offset] as const,
+  meeting: (id: number) => ["meeting", id] as const,
+  meetingSegments: (id: number) => ["meeting-segments", id] as const,
+  transcriptSearch: (query: string) => ["transcript-search", query] as const,
+  whisperModel: () => ["whisper-model"] as const,
 };
