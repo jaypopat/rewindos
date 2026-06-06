@@ -62,6 +62,5 @@ export interface AppConfig {
     summary_enabled: boolean;
     hotkey: string;
     sample_rate: number;
-    consent_acknowledged: boolean;
   };
 }

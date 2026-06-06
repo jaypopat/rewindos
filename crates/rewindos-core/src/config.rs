@@ -146,9 +146,6 @@ pub struct MeetingConfig {
     pub hotkey: String,
     /// Capture/transcribe sample rate (whisper expects 16 kHz mono).
     pub sample_rate: u32,
-    /// Whether the user has acknowledged the first-use recording-consent notice.
-    #[serde(default)]
-    pub consent_acknowledged: bool,
 }
 
 impl Default for MeetingConfig {
@@ -163,7 +160,6 @@ impl Default for MeetingConfig {
             summary_enabled: true,
             hotkey: "Ctrl+Shift+M".to_string(),
             sample_rate: 16000,
-            consent_acknowledged: false,
         }
     }
 }
@@ -433,27 +429,6 @@ mod tests {
             c.whisper_model_path().unwrap(),
             std::path::PathBuf::from("/tmp/rwos-test/models/whisper/ggml-base.en.bin")
         );
-    }
-
-    #[test]
-    fn meeting_config_consent_defaults_false_and_is_optional() {
-        // Default is unacknowledged.
-        assert!(!MeetingConfig::default().consent_acknowledged);
-
-        // Old config files without the field still deserialize (serde default).
-        let toml = r#"
-            enabled = false
-            engine = "whisper-cpp"
-            model = "base.en"
-            model_dir = "~/.rewindos/models/whisper"
-            whisper_bin = "whisper-cli"
-            keep_audio = true
-            summary_enabled = true
-            hotkey = "Ctrl+Shift+M"
-            sample_rate = 16000
-        "#;
-        let cfg: MeetingConfig = toml::from_str(toml).unwrap();
-        assert!(!cfg.consent_acknowledged);
     }
 
     #[test]
