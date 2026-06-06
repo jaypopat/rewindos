@@ -2,8 +2,9 @@ import { useState } from "react";
 import type { Meeting } from "@/lib/api";
 import { MeetingsList } from "./MeetingsList";
 import { RecordingControls } from "./RecordingControls";
+import { MeetingDetail } from "./MeetingDetail";
 
-export function MeetingsView(_props: { onSelectScreenshot?: (unixSecs: number) => void }) {
+export function MeetingsView({ onJumpToTime }: { onJumpToTime?: (unixSecs: number) => void }) {
   const [selected, setSelected] = useState<Meeting | null>(null);
 
   return (
@@ -18,9 +19,7 @@ export function MeetingsView(_props: { onSelectScreenshot?: (unixSecs: number) =
         </div>
         <div className="flex-1 overflow-y-auto">
           {selected ? (
-            <div className="p-6 text-sm text-text-secondary">
-              Selected: {selected.title ?? "Untitled"} (detail in next task)
-            </div>
+            <MeetingDetail meeting={selected} onJumpToTime={onJumpToTime} />
           ) : (
             <div className="p-6 text-sm text-text-muted">Select a meeting to view its transcript.</div>
           )}

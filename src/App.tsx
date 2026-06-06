@@ -265,7 +265,7 @@ function App() {
 
         {view === "meetings" && subView === "list" && (
           <ViewSuspense>
-            <MeetingsView onSelectScreenshot={handleSelectResult} />
+            <MeetingsView onJumpToTime={(unixSecs) => handleRewindToRange(unixSecs - 120, unixSecs + 120)} />
           </ViewSuspense>
         )}
 
