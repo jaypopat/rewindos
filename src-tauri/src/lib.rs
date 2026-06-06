@@ -1781,7 +1781,12 @@ pub fn run() {
             let icon_paused =
                 tauri::image::Image::from_bytes(include_bytes!("../icons/tray-icon-paused.png"))
                     .expect("failed to load paused tray icon");
-            // Initial icon assumes capturing; the startup probe corrects it if paused.
+            // Red square shown while a meeting is recording (takes priority over
+            // the capture-state icons).
+            let icon_recording =
+                tauri::image::Image::from_bytes(include_bytes!("../icons/tray-icon-recording.png"))
+                    .expect("failed to load recording tray icon");
+            // Initial icon assumes capturing; the status poll corrects it.
             let tray_icon = icon_active.clone();
 
             // If launched with --minimized, hide the window (autostart mode)
@@ -1898,51 +1903,74 @@ pub fn run() {
                 .build(app)
                 .expect("failed to build tray icon");
 
-            // Probe daemon state at startup to set correct tray text and icon
+            // Poll daemon status (~3s) and keep the tray live: a red square while
+            // a meeting is recording (highest priority), the green dot while
+            // capturing, the dimmed glyph while paused. Only touches the tray when
+            // the state actually changes, so it doesn't flicker. Runs immediately
+            // on spawn, so it also serves as the startup state probe.
             let app_handle = app.handle().clone();
-            let startup_toggle = toggle_item.clone();
-            let icon_paused_startup = icon_paused.clone();
+            let poll_toggle = toggle_item.clone();
+            let icon_active_poll = icon_active.clone();
+            let icon_paused_poll = icon_paused.clone();
+            let icon_recording_poll = icon_recording.clone();
             tauri::async_runtime::spawn(async move {
-                let state = app_handle.state::<AppState>();
-                let reply = state
-                    .dbus
-                    .call_method(
-                        Some("com.rewindos.Daemon"),
-                        "/com/rewindos/Daemon",
-                        Some("com.rewindos.Daemon"),
-                        "GetStatus",
-                        &(),
-                    )
-                    .await;
-                if let Ok(reply) = reply {
-                    if let Ok(status_json) = reply.body().deserialize::<String>() {
-                        if let Ok(status) =
-                            serde_json::from_str::<serde_json::Value>(&status_json)
-                        {
-                            let is_capturing =
-                                status["is_capturing"].as_bool().unwrap_or(true);
-                            let meeting_active =
-                                status["meeting_active"].as_bool().unwrap_or(false);
-                            if !is_capturing {
-                                let _ = startup_toggle.set_text("Resume Capture");
-                                if let Some(tray) = app_handle.tray_by_id("main-tray") {
-                                    let tooltip = if meeting_active {
-                                        "RewindOS - Paused ● Recording meeting"
+                let mut last: Option<&'static str> = None;
+                loop {
+                    let reply = {
+                        let state = app_handle.state::<AppState>();
+                        state
+                            .dbus
+                            .call_method(
+                                Some("com.rewindos.Daemon"),
+                                "/com/rewindos/Daemon",
+                                Some("com.rewindos.Daemon"),
+                                "GetStatus",
+                                &(),
+                            )
+                            .await
+                    };
+                    if let Ok(reply) = reply {
+                        if let Ok(status_json) = reply.body().deserialize::<String>() {
+                            if let Ok(status) =
+                                serde_json::from_str::<serde_json::Value>(&status_json)
+                            {
+                                let is_capturing =
+                                    status["is_capturing"].as_bool().unwrap_or(true);
+                                let meeting_active =
+                                    status["meeting_active"].as_bool().unwrap_or(false);
+                                let next = if meeting_active {
+                                    "recording"
+                                } else if is_capturing {
+                                    "capturing"
+                                } else {
+                                    "paused"
+                                };
+                                if last != Some(next) {
+                                    last = Some(next);
+                                    let _ = poll_toggle.set_text(if is_capturing {
+                                        "Pause Capture"
                                     } else {
-                                        "RewindOS - Paused"
-                                    };
-                                    let _ = tray.set_tooltip(Some(tooltip));
-                                    let _ = tray.set_icon(Some(icon_paused_startup.clone()));
-                                }
-                            } else if meeting_active {
-                                if let Some(tray) = app_handle.tray_by_id("main-tray") {
-                                    let _ = tray.set_tooltip(Some(
-                                        "RewindOS - Capturing ● Recording meeting",
-                                    ));
+                                        "Resume Capture"
+                                    });
+                                    if let Some(tray) = app_handle.tray_by_id("main-tray") {
+                                        let (icon, tooltip) = match next {
+                                            "recording" => (
+                                                &icon_recording_poll,
+                                                "RewindOS - ● Recording meeting",
+                                            ),
+                                            "capturing" => {
+                                                (&icon_active_poll, "RewindOS - Capturing")
+                                            }
+                                            _ => (&icon_paused_poll, "RewindOS - Paused"),
+                                        };
+                                        let _ = tray.set_icon(Some(icon.clone()));
+                                        let _ = tray.set_tooltip(Some(tooltip));
+                                    }
                                 }
                             }
                         }
                     }
+                    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
                 }
             });
 
