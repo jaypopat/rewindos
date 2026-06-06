@@ -11,7 +11,7 @@ export function MeetingsView({ onJumpToTime }: { onJumpToTime?: (unixSecs: numbe
     <div className="flex-1 flex flex-col min-h-0">
       <header className="flex items-center justify-between px-4 py-3 border-b border-border/50">
         <h1 className="text-sm font-medium text-text-primary">Meetings</h1>
-        <RecordingControls onNeedsConsent={() => true} />
+        <RecordingControls />
       </header>
       <div className="flex-1 flex min-h-0">
         <div className="w-80 border-r border-border/50 overflow-y-auto">
