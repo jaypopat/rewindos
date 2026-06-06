@@ -23,6 +23,12 @@ export const AskView = lazy(() =>
   })),
 );
 
+export const MeetingsView = lazy(() =>
+  import("@/features/meetings/MeetingsView").then((m) => ({
+    default: m.MeetingsView,
+  })),
+);
+
 export const SavedView = lazy(() =>
   import("@/features/saved/SavedView").then((m) => ({
     default: m.SavedView,
