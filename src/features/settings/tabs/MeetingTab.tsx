@@ -65,7 +65,7 @@ export function MeetingTab({ config, update }: TabProps) {
         <div className="flex items-center gap-2">
           <span
             className={`w-1.5 h-1.5 rounded-full ${
-              present ? "bg-signal-success" : "bg-text-muted/40"
+              present ? "bg-signal-active" : "bg-text-muted/40"
             }`}
           />
           <span className="font-mono text-xs text-text-secondary">
