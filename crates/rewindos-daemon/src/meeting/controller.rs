@@ -98,6 +98,14 @@ async fn start(
     };
 
     let keep_audio = config.meeting.keep_audio;
+    let mic_source = {
+        let m = config.meeting.mic_source.clone();
+        if m.is_empty() {
+            None
+        } else {
+            Some(m)
+        }
+    };
     let mic_path = meetings_dir.join(format!("{id}-mic.opus"));
     let sys_path = meetings_dir.join(format!("{id}-system.opus"));
     let n_threads = std::thread::available_parallelism()
@@ -120,7 +128,7 @@ async fn start(
             sys_path,
         )
         .map_err(|e| e.to_string())?;
-        let (capture, rx_windows) = AudioCapture::start().map_err(|e| e.to_string())?;
+        let (capture, rx_windows) = AudioCapture::start(mic_source).map_err(|e| e.to_string())?;
         let worker = std::thread::spawn(move || -> MeetingSession {
             let mut session = session;
             while let Ok(window) = rx_windows.recv() {

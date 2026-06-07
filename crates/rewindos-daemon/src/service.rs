@@ -38,6 +38,7 @@ pub struct DaemonService {
     pub session_name: String,
     pub meeting_tx: mpsc::Sender<MeetingCmd>,
     pub meeting_state: Arc<MeetingState>,
+    pub mic_monitor: std::sync::Mutex<Option<crate::capture::audio::MicMonitor>>,
 }
 
 /// Lock a mutex, logging a warning if it was poisoned.
@@ -321,6 +322,52 @@ impl DaemonService {
         is_capturing: bool,
         meeting_active: bool,
     ) -> zbus::Result<()>;
+
+    /// List available microphone sources (JSON array of {id,name,description}).
+    async fn list_audio_sources(&self) -> zbus::fdo::Result<String> {
+        let sources = tokio::task::spawn_blocking(crate::capture::audio::list_audio_sources)
+            .await
+            .map_err(|e| zbus::fdo::Error::Failed(format!("enum task panicked: {e}")))?
+            .map_err(|e| zbus::fdo::Error::Failed(format!("enum sources: {e}")))?;
+        serde_json::to_string(&sources)
+            .map_err(|e| zbus::fdo::Error::Failed(format!("serialize sources: {e}")))
+    }
+
+    /// Start the live mic-level monitor on `source` (empty = system default).
+    async fn start_mic_monitor(&self, source: &str) -> zbus::fdo::Result<()> {
+        let sel = if source.is_empty() { None } else { Some(source.to_string()) };
+        let monitor = tokio::task::spawn_blocking(move || crate::capture::audio::MicMonitor::start(sel))
+            .await
+            .map_err(|e| zbus::fdo::Error::Failed(format!("monitor task panicked: {e}")))?
+            .map_err(|e| zbus::fdo::Error::Failed(format!("start monitor: {e}")))?;
+        // Replace any previous monitor (stop it first).
+        let prev = self.mic_monitor.lock().unwrap_or_else(|e| e.into_inner()).replace(monitor);
+        if let Some(p) = prev {
+            tokio::task::spawn_blocking(move || p.stop());
+        }
+        Ok(())
+    }
+
+    /// Stop the live mic-level monitor.
+    async fn stop_mic_monitor(&self) -> zbus::fdo::Result<()> {
+        let prev = self.mic_monitor.lock().unwrap_or_else(|e| e.into_inner()).take();
+        if let Some(p) = prev {
+            tokio::task::spawn_blocking(move || p.stop());
+        }
+        Ok(())
+    }
+
+    /// Current mic RMS level (0.0 if no monitor running).
+    async fn get_mic_level(&self) -> zbus::fdo::Result<f64> {
+        let lvl = self
+            .mic_monitor
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .map(|m| m.level())
+            .unwrap_or(0.0);
+        Ok(lvl as f64)
+    }
 
     #[zbus(property)]
     fn is_capturing(&self) -> bool {

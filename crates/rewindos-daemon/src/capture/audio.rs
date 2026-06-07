@@ -2,7 +2,7 @@
 //! VAD-windowed into f32 PCM windows. See `src/bin/audio_spike.rs` for the
 //! proven pipewire wiring this builds on.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -41,6 +41,71 @@ impl AudioSource {
             AudioSource::System => "Remote",
         }
     }
+}
+
+/// A selectable audio input device.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AudioSourceInfo {
+    pub id: u32,
+    /// PipeWire `node.name` — the stable id used for `target.object`.
+    pub name: String,
+    /// Human-readable label.
+    pub description: String,
+}
+
+/// Enumerate `Audio/Source` nodes (microphones) via the PipeWire registry.
+/// Pumps the loop ~300ms to collect the registry's existing globals, then returns.
+pub fn list_audio_sources() -> Result<Vec<AudioSourceInfo>, CaptureError> {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    pw::init();
+    let mainloop = pw::main_loop::MainLoopBox::new(None)
+        .map_err(|e| CaptureError::PipeWire(format!("enum: main loop: {e}")))?;
+    let context = pw::context::ContextBox::new(mainloop.loop_(), None)
+        .map_err(|e| CaptureError::PipeWire(format!("enum: context: {e}")))?;
+    let core = context
+        .connect(None)
+        .map_err(|e| CaptureError::PipeWire(format!("enum: connect: {e}")))?;
+    let registry = core
+        .get_registry()
+        .map_err(|e| CaptureError::PipeWire(format!("enum: registry: {e}")))?;
+
+    let sources: Rc<RefCell<Vec<AudioSourceInfo>>> = Rc::new(RefCell::new(Vec::new()));
+    let sources_cb = sources.clone();
+    let _listener = registry
+        .add_listener_local()
+        .global(move |global| {
+            // global.props is Option<&spa::utils::dict::DictRef>; .get(key)->Option<&str>
+            let Some(props) = global.props else { return };
+            if props.get("media.class") != Some("Audio/Source") {
+                return;
+            }
+            let Some(name) = props.get("node.name") else { return };
+            if name.is_empty() {
+                return;
+            }
+            let description = props
+                .get("node.description")
+                .or_else(|| props.get("node.nick"))
+                .unwrap_or(name)
+                .to_string();
+            sources_cb.borrow_mut().push(AudioSourceInfo {
+                id: global.id,
+                name: name.to_string(),
+                description,
+            });
+        })
+        .register();
+
+    // Registry globals are delivered right after registration; pump briefly.
+    let loop_ = mainloop.loop_();
+    for _ in 0..15 {
+        loop_.iterate(Duration::from_millis(20));
+    }
+
+    let out = sources.borrow().clone();
+    Ok(out)
 }
 
 /// A completed PCM window, ready for encode + transcription.
@@ -213,7 +278,7 @@ impl AudioCapture {
     /// Spawn the PipeWire capture thread. Returns the handle plus a receiver of
     /// completed windows from BOTH sources (mic + system monitor). The receiver
     /// closes once the thread stops and drops its senders (see [`stop`]).
-    pub fn start() -> Result<(Self, Receiver<AudioWindow>), CaptureError> {
+    pub fn start(mic_source: Option<String>) -> Result<(Self, Receiver<AudioWindow>), CaptureError> {
         let (tx, rx) = mpsc::channel::<AudioWindow>();
         let should_stop = Arc::new(AtomicBool::new(false));
         let stop_for_thread = should_stop.clone();
@@ -221,7 +286,7 @@ impl AudioCapture {
         let thread = std::thread::Builder::new()
             .name("rewindos-audio".into())
             .spawn(move || {
-                if let Err(e) = run_capture(stop_for_thread, tx) {
+                if let Err(e) = run_capture(stop_for_thread, tx, mic_source) {
                     tracing::error!(error = %e, "audio capture thread exited with error");
                 }
             })
@@ -252,6 +317,7 @@ impl AudioCapture {
 fn run_capture(
     should_stop: Arc<AtomicBool>,
     tx: Sender<AudioWindow>,
+    mic_source: Option<String>,
 ) -> Result<(), CaptureError> {
     pw::init();
 
@@ -271,10 +337,15 @@ fn run_capture(
 
     // Keep streams + listeners alive for the whole loop. Tuple-pattern bindings
     // drop in reverse (listener before its stream) — the order pipewire needs.
-    let (_mic_stream, _mic_listener) =
-        build_stream(&core, AudioSource::Mic, mic_windower.clone(), tx.clone())?;
+    let (_mic_stream, _mic_listener) = build_stream(
+        &core,
+        AudioSource::Mic,
+        mic_windower.clone(),
+        tx.clone(),
+        mic_source.as_deref(),
+    )?;
     let (_sys_stream, _sys_listener) =
-        build_stream(&core, AudioSource::System, sys_windower.clone(), tx.clone())?;
+        build_stream(&core, AudioSource::System, sys_windower.clone(), tx.clone(), None)?;
 
     tracing::info!("audio capture: mic + system streams connected");
 
@@ -307,11 +378,12 @@ fn build_stream<'c>(
     source: AudioSource,
     windower: Arc<Mutex<Windower>>,
     tx: Sender<AudioWindow>,
+    mic_target: Option<&str>,
 ) -> Result<(pw::stream::StreamBox<'c>, pw::stream::StreamListener<()>), CaptureError> {
     // Mic: plain audio Capture stream → default source.
     // System: `stream.capture.sink = true` flips a Capture stream to record the
     // default sink's MONITOR (system output).
-    let props = match source {
+    let mut props = match source {
         AudioSource::Mic => pw::properties::properties! {
             *pw::keys::MEDIA_TYPE => "Audio",
             *pw::keys::MEDIA_CATEGORY => "Capture",
@@ -326,6 +398,16 @@ fn build_stream<'c>(
             "stream.capture.sink" => "true",
         },
     };
+
+    // Pin the mic stream to a specific source when one was selected; an empty
+    // selection (or System) keeps PipeWire's autoconnect default.
+    if source == AudioSource::Mic {
+        if let Some(name) = mic_target {
+            if !name.is_empty() {
+                props.insert("target.object", name);
+            }
+        }
+    }
 
     let stream = pw::stream::StreamBox::new(core, "rewindos-audio", props)
         .map_err(|e| CaptureError::PipeWire(format!("create {} stream: {e}", source.as_str())))?;
@@ -422,6 +504,169 @@ fn build_stream<'c>(
         .map_err(|e| CaptureError::PipeWire(format!("connect {} stream: {e}", source.as_str())))?;
 
     Ok((stream, listener))
+}
+
+// ---- Live mic level monitor ----------------------------------------------
+
+/// A short-lived preview stream that reports the mic's live RMS level (0.0..~1.0)
+/// so the UI can show a meter while picking a source. Does not record.
+pub struct MicMonitor {
+    should_stop: Arc<AtomicBool>,
+    level: Arc<AtomicU32>, // f32 bits
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl MicMonitor {
+    pub fn start(mic_source: Option<String>) -> Result<Self, CaptureError> {
+        let should_stop = Arc::new(AtomicBool::new(false));
+        let level = Arc::new(AtomicU32::new(0));
+        let stop_t = should_stop.clone();
+        let level_t = level.clone();
+        let thread = std::thread::Builder::new()
+            .name("rewindos-mic-monitor".into())
+            .spawn(move || {
+                if let Err(e) = run_monitor(stop_t, level_t, mic_source) {
+                    tracing::warn!(error = %e, "mic monitor exited with error");
+                }
+            })
+            .map_err(|e| CaptureError::PipeWire(format!("spawn monitor thread: {e}")))?;
+        Ok(Self {
+            should_stop,
+            level,
+            thread: Some(thread),
+        })
+    }
+
+    /// Current RMS level (0.0 = silence). Read by the D-Bus `get_mic_level`.
+    pub fn level(&self) -> f32 {
+        f32::from_bits(self.level.load(Ordering::Relaxed))
+    }
+
+    pub fn stop(mut self) {
+        self.should_stop.store(true, Ordering::Release);
+        if let Some(h) = self.thread.take() {
+            let _ = h.join();
+        }
+    }
+}
+
+fn run_monitor(
+    should_stop: Arc<AtomicBool>,
+    level: Arc<AtomicU32>,
+    mic_source: Option<String>,
+) -> Result<(), CaptureError> {
+    pw::init();
+
+    let mainloop = pw::main_loop::MainLoopBox::new(None)
+        .map_err(|e| CaptureError::PipeWire(format!("monitor: main loop: {e}")))?;
+    let context = pw::context::ContextBox::new(mainloop.loop_(), None)
+        .map_err(|e| CaptureError::PipeWire(format!("monitor: context: {e}")))?;
+    let core = context
+        .connect(None)
+        .map_err(|e| CaptureError::PipeWire(format!("monitor: connect: {e}")))?;
+
+    // Single mic Capture stream — mirrors build_stream's Mic branch.
+    let mut props = pw::properties::properties! {
+        *pw::keys::MEDIA_TYPE => "Audio",
+        *pw::keys::MEDIA_CATEGORY => "Capture",
+        *pw::keys::MEDIA_ROLE => "Communication",
+        *pw::keys::NODE_NAME => "rewindos-mic-monitor",
+    };
+    if let Some(name) = mic_source.as_deref() {
+        if !name.is_empty() {
+            props.insert("target.object", name);
+        }
+    }
+
+    let stream = pw::stream::StreamBox::new(&core, "rewindos-mic-monitor", props)
+        .map_err(|e| CaptureError::PipeWire(format!("monitor: create stream: {e}")))?;
+
+    let fmt: Arc<Mutex<Option<NegotiatedAudio>>> = Arc::new(Mutex::new(None));
+    let fmt_param = fmt.clone();
+    let fmt_proc = fmt.clone();
+    let level_proc = level.clone();
+
+    let listener = stream
+        .add_local_listener_with_user_data(())
+        .state_changed(|_, _, old, new| match &new {
+            StreamState::Error(msg) => {
+                tracing::warn!(error = %msg, "mic monitor stream error");
+            }
+            _ => tracing::debug!(?old, ?new, "mic monitor stream state"),
+        })
+        .param_changed(move |_, _, id, param| {
+            let Some(param) = param else { return };
+            if id != spa::param::ParamType::Format.as_raw() {
+                return;
+            }
+            match parse_audio_format(param) {
+                Ok(f) => *fmt_param.lock().unwrap() = Some(f),
+                Err(e) => tracing::warn!("mic monitor parse audio format: {e}"),
+            }
+        })
+        .process(move |stream, _| {
+            let fmt = *fmt_proc.lock().unwrap();
+            let Some(fmt) = fmt else { return };
+            let bps = fmt.bytes_per_sample();
+            if bps == 0 {
+                return;
+            }
+
+            while let Some(mut buffer) = stream.dequeue_buffer() {
+                let datas = buffer.datas_mut();
+                if datas.is_empty() {
+                    continue;
+                }
+                let data = &mut datas[0];
+                let n_bytes = data.chunk().size() as usize;
+                let Some(slice) = data.data() else { continue };
+                let valid = &slice[..n_bytes.min(slice.len())];
+                if valid.is_empty() {
+                    continue;
+                }
+
+                let samples: Vec<f32> = match fmt.format_id {
+                    SPA_AUDIO_FORMAT_S16_LE => s16le_to_f32(valid),
+                    SPA_AUDIO_FORMAT_F32_LE => valid
+                        .chunks_exact(4)
+                        .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+                        .collect(),
+                    _ => continue,
+                };
+                if samples.is_empty() {
+                    continue;
+                }
+                let lvl = rms(&samples);
+                level_proc.store(lvl.to_bits(), Ordering::Relaxed);
+            }
+        })
+        .register()
+        .map_err(|e| CaptureError::PipeWire(format!("monitor: register listener: {e}")))?;
+
+    let mut params_buf = vec![0u8; 1024];
+    let params_pod = build_audio_params(&mut params_buf);
+
+    stream
+        .connect(
+            spa::utils::Direction::Input,
+            None,
+            StreamFlags::AUTOCONNECT | StreamFlags::MAP_BUFFERS,
+            &mut [params_pod],
+        )
+        .map_err(|e| CaptureError::PipeWire(format!("monitor: connect stream: {e}")))?;
+
+    // Keep stream + listener alive for the loop. Local drop order is reverse of
+    // declaration, so the listener (last) drops before its stream — as pipewire
+    // needs. Re-bind to make that explicit.
+    let _stream = stream;
+    let _listener = listener;
+
+    let loop_ = mainloop.loop_();
+    while !should_stop.load(Ordering::Relaxed) {
+        loop_.iterate(Duration::from_millis(50));
+    }
+
+    Ok(())
 }
 
 /// Build the SPA audio-format EnumFormat pod. Offers F32_LE + S16_LE so the
@@ -649,7 +894,7 @@ mod tests {
     #[test]
     #[ignore = "requires a live PipeWire daemon"]
     fn audiocapture_produces_windows() {
-        let (cap, rx) = AudioCapture::start().expect("start capture");
+        let (cap, rx) = AudioCapture::start(None).expect("start capture");
         std::thread::sleep(std::time::Duration::from_secs(4));
         cap.stop(); // flushes + joins; senders drop, so rx iteration ends
         let windows: Vec<AudioWindow> = rx.iter().collect();

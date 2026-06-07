@@ -820,6 +820,7 @@ async fn run_daemon() -> anyhow::Result<()> {
         session_name: session.to_string(),
         meeting_tx,
         meeting_state,
+        mic_monitor: std::sync::Mutex::new(None),
     };
 
     dbus_conn

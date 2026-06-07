@@ -146,6 +146,9 @@ pub struct MeetingConfig {
     pub hotkey: String,
     /// Capture/transcribe sample rate (whisper expects 16 kHz mono).
     pub sample_rate: u32,
+    /// PipeWire `node.name` of the mic to capture. Empty = system default.
+    #[serde(default)]
+    pub mic_source: String,
 }
 
 impl Default for MeetingConfig {
@@ -160,6 +163,7 @@ impl Default for MeetingConfig {
             summary_enabled: true,
             hotkey: "Ctrl+Shift+M".to_string(),
             sample_rate: 16000,
+            mic_source: String::new(),
         }
     }
 }
