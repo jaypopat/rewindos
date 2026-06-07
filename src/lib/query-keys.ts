@@ -55,4 +55,5 @@ export const queryKeys = {
   meetingSegments: (id: number) => ["meeting-segments", id] as const,
   transcriptSearch: (query: string) => ["transcript-search", query] as const,
   whisperModel: () => ["whisper-model"] as const,
+  audioSources: () => ["audio-sources"] as const,
 };

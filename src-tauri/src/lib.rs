@@ -86,6 +86,13 @@ struct DaemonStatusResponse {
     meeting_started_at: Option<i64>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AudioSourceInfo {
+    id: u32,
+    name: String,
+    description: String,
+}
+
 /// Filters received from the frontend (no `query` field — it's a separate param).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct UiSearchFilters {
@@ -432,6 +439,77 @@ async fn stop_meeting(state: State<'_, AppState>) -> Result<(), String> {
         .await
         .map_err(|e| format!("dbus call: {e}"))?;
     Ok(())
+}
+
+#[tauri::command]
+async fn list_audio_sources(state: State<'_, AppState>) -> Result<Vec<AudioSourceInfo>, String> {
+    let reply = state
+        .dbus
+        .call_method(
+            Some("com.rewindos.Daemon"),
+            "/com/rewindos/Daemon",
+            Some("com.rewindos.Daemon"),
+            "ListAudioSources",
+            &(),
+        )
+        .await
+        .map_err(|e| format!("dbus call: {e}"))?;
+    let json: String = reply
+        .body()
+        .deserialize()
+        .map_err(|e| format!("dbus deserialize: {e}"))?;
+    serde_json::from_str(&json).map_err(|e| format!("parse sources: {e}"))
+}
+
+#[tauri::command]
+async fn start_mic_monitor(state: State<'_, AppState>, source: String) -> Result<(), String> {
+    state
+        .dbus
+        .call_method(
+            Some("com.rewindos.Daemon"),
+            "/com/rewindos/Daemon",
+            Some("com.rewindos.Daemon"),
+            "StartMicMonitor",
+            &(source.as_str(),),
+        )
+        .await
+        .map_err(|e| format!("dbus call: {e}"))?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn stop_mic_monitor(state: State<'_, AppState>) -> Result<(), String> {
+    state
+        .dbus
+        .call_method(
+            Some("com.rewindos.Daemon"),
+            "/com/rewindos/Daemon",
+            Some("com.rewindos.Daemon"),
+            "StopMicMonitor",
+            &(),
+        )
+        .await
+        .map_err(|e| format!("dbus call: {e}"))?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn get_mic_level(state: State<'_, AppState>) -> Result<f64, String> {
+    let reply = state
+        .dbus
+        .call_method(
+            Some("com.rewindos.Daemon"),
+            "/com/rewindos/Daemon",
+            Some("com.rewindos.Daemon"),
+            "GetMicLevel",
+            &(),
+        )
+        .await
+        .map_err(|e| format!("dbus call: {e}"))?;
+    reply
+        .body()
+        .deserialize::<f64>()
+        .map_err(|e| format!("dbus deserialize: {e}"))
 }
 
 #[tauri::command]
@@ -2022,6 +2100,10 @@ pub fn run() {
             search_transcripts,
             start_meeting,
             stop_meeting,
+            list_audio_sources,
+            start_mic_monitor,
+            stop_mic_monitor,
+            get_mic_level,
             whisper_model_present,
             download_whisper_model,
             get_activity,

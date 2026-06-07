@@ -3,11 +3,14 @@ import type { Meeting } from "@/lib/api";
 import { MeetingsList } from "./MeetingsList";
 import { RecordingControls } from "./RecordingControls";
 import { MeetingDetail } from "./MeetingDetail";
-import { useMeetingsList } from "./useMeetings";
+import { MicPicker } from "./MicPicker";
+import { useMeetingsList, useMeetingStatus } from "./useMeetings";
 
 export function MeetingsView({ onJumpToTime }: { onJumpToTime?: (unixSecs: number) => void }) {
   const [selected, setSelected] = useState<Meeting | null>(null);
   const { data: meetings = [] } = useMeetingsList();
+  const { data: status } = useMeetingStatus();
+  const active = status?.meeting_active ?? false;
 
   // Track the live row from the refetched list so stopping/deleting the
   // selected meeting updates (or clears) the detail pane instead of showing
@@ -18,9 +21,12 @@ export function MeetingsView({ onJumpToTime }: { onJumpToTime?: (unixSecs: numbe
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
-      <header className="flex items-center justify-between px-4 py-3 border-b border-border/50">
-        <h1 className="text-sm font-medium text-text-primary">Meetings</h1>
-        <RecordingControls />
+      <header className="flex flex-col gap-2 px-4 py-3 border-b border-border/50">
+        <div className="flex items-center justify-between">
+          <h1 className="text-sm font-medium text-text-primary">Meetings</h1>
+          <RecordingControls />
+        </div>
+        <MicPicker active={active} />
       </header>
       <div className="flex-1 flex min-h-0">
         <div className="w-80 border-r border-border/50 overflow-y-auto">

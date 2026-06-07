@@ -62,5 +62,6 @@ export interface AppConfig {
     summary_enabled: boolean;
     hotkey: string;
     sample_rate: number;
+    mic_source: string;
   };
 }

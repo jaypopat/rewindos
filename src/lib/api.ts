@@ -686,6 +686,12 @@ export async function stopMeeting(): Promise<void> {
   return invoke("stop_meeting");
 }
 
+export interface AudioSourceInfo { id: number; name: string; description: string; }
+export async function listAudioSources(): Promise<AudioSourceInfo[]> { return invoke("list_audio_sources"); }
+export async function startMicMonitor(source: string): Promise<void> { return invoke("start_mic_monitor", { source }); }
+export async function stopMicMonitor(): Promise<void> { return invoke("stop_mic_monitor"); }
+export async function getMicLevel(): Promise<number> { return invoke("get_mic_level"); }
+
 export async function whisperModelPresent(): Promise<boolean> {
   return invoke("whisper_model_present");
 }
