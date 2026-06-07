@@ -11,6 +11,16 @@ import {
 } from "@/lib/api";
 import type { AppConfig } from "@/lib/config";
 import { useConfigQuery } from "@/hooks/useConfigQuery";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+
+// Radix Select reserves "" — use a sentinel for "system default".
+const DEFAULT = "__default__";
 
 export function MicPicker({ active }: { active: boolean }) {
   const { data: config } = useConfigQuery();
@@ -41,8 +51,7 @@ export function MicPicker({ active }: { active: boolean }) {
 
   // Live level-meter lifecycle: when not recording, open a preview monitor on
   // the selected source and poll its RMS level every 100ms. Re-runs whenever the
-  // source changes or recording starts/stops. The `alive` flag and interval
-  // cleanup guard against overlapping start/poll calls across re-renders.
+  // source changes or recording starts/stops.
   useEffect(() => {
     if (active || config === undefined) {
       setLevel(0);
@@ -72,38 +81,47 @@ export function MicPicker({ active }: { active: boolean }) {
     };
   }, [selected, active, config === undefined]);
 
-  const fillWidth = Math.min(100, level * 300);
+  // RMS for speech sits around 0.05–0.3; ×280 maps that to a usable bar.
+  const fillWidth = Math.min(100, level * 280);
+  const hasSignal = fillWidth >= 3;
 
   return (
     <div className="flex items-center gap-2 text-xs text-text-secondary">
       <Mic className="size-3.5 shrink-0 text-text-muted" />
       <span className="shrink-0">Microphone</span>
-      <select
-        value={selected}
-        onChange={(e) => save.mutate(e.target.value)}
+
+      <Select
+        value={selected === "" ? DEFAULT : selected}
+        onValueChange={(v) => save.mutate(v === DEFAULT ? "" : v)}
         disabled={save.isPending}
-        className="max-w-48 px-2 py-1 rounded-md bg-surface border border-border/50 text-text-primary disabled:opacity-50"
       >
-        <option value="">System default</option>
-        {sources.map((s) => (
-          <option key={s.id} value={s.name}>
-            {s.description}
-          </option>
-        ))}
-      </select>
+        <SelectTrigger className="h-7 w-56 text-xs">
+          <SelectValue placeholder="System default" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={DEFAULT}>System default</SelectItem>
+          {sources.map((s) => (
+            <SelectItem key={s.id} value={s.name}>
+              {s.description}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+
       {active ? (
         <span className="text-text-muted">recording…</span>
       ) : (
         <div className="flex items-center gap-2">
-          <div className="h-2 w-28 rounded-full bg-surface-overlay overflow-hidden">
+          {/* Visible track even at zero (bordered, lighter than the surface). */}
+          <div className="h-2.5 w-32 overflow-hidden rounded-full border border-border/60 bg-text-muted/20">
             <div
               className="h-full rounded-full bg-signal-active transition-[width] duration-75"
               style={{ width: `${fillWidth}%` }}
             />
           </div>
-          {fillWidth < 2 && (
-            <span className="text-text-muted">Speak — the bar should move</span>
-          )}
+          <span className="text-text-muted">
+            {hasSignal ? "input detected" : "speak to test"}
+          </span>
         </div>
       )}
     </div>
