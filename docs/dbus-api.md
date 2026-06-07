@@ -304,6 +304,11 @@ impl DaemonService {
     async fn set_unfiltered_capture(&mut self, enabled: bool) -> zbus::fdo::Result<()>;
     async fn start_meeting(&self, title: &str) -> zbus::fdo::Result<i64>;
     async fn stop_meeting(&self) -> zbus::fdo::Result<()>;
+    // Mic source selection + live level meter (used by the Meetings UI picker).
+    async fn list_audio_sources(&self) -> zbus::fdo::Result<String>; // JSON [{id,name,description}]
+    async fn start_mic_monitor(&self, source: &str) -> zbus::fdo::Result<()>; // "" = default
+    async fn stop_mic_monitor(&self) -> zbus::fdo::Result<()>;
+    async fn get_mic_level(&self) -> zbus::fdo::Result<f64>; // RMS 0.0..~1.0
 
     #[zbus(signal)]
     async fn state_changed(
