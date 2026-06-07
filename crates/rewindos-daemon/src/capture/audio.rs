@@ -1,15 +1,21 @@
-//! Meeting audio capture: two PipeWire input streams (mic + sink monitor),
-//! VAD-windowed into f32 PCM windows. See `src/bin/audio_spike.rs` for the
-//! proven pipewire wiring this builds on.
+//! Meeting audio capture: two `pw-cat` subprocesses (mic + sink monitor) stream
+//! raw S16/16k/mono PCM on stdout, which we convert to f32 and VAD-window.
+//!
+//! We shell out to `pw-cat` rather than hand-rolling SPA format negotiation with
+//! `pipewire-rs`: the in-process path proved fragile on analog devices (PipeWire
+//! delivered 8-bit U8 buffers while reporting S16, pinning levels and feeding
+//! whisper garbage). `pw-cat` is the reference capture tool and reliably
+//! negotiates a converter to exactly the S16/16k/mono format we ask for.
 
+use std::io::{ErrorKind, Read};
+use std::process::{Child, ChildStdout, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use pipewire as pw;
-use pw::spa;
-use pw::stream::{StreamFlags, StreamState};
 
 use crate::capture::CaptureError;
 
@@ -217,8 +223,8 @@ fn rms(frame: &[f32]) -> f32 {
 }
 
 /// Convert interleaved S16_LE bytes to normalized f32 samples in [-1.0, 1.0].
-/// A trailing odd byte (incomplete sample) is ignored. The spike confirmed
-/// PipeWire negotiates S16_LE here; this is the capture→f32 boundary.
+/// A trailing odd byte (incomplete sample) is ignored. We request S16_LE from
+/// `pw-cat`; this is the capture→f32 boundary.
 pub fn s16le_to_f32(bytes: &[u8]) -> Vec<f32> {
     bytes
         .chunks_exact(2)
@@ -226,313 +232,203 @@ pub fn s16le_to_f32(bytes: &[u8]) -> Vec<f32> {
         .collect()
 }
 
-// ---- PipeWire dual-stream capture ----------------------------------------
+// ---- pw-cat subprocess capture -------------------------------------------
 //
-// Ported from `src/bin/audio_spike.rs` (the proven spike). The spike offers a
-// format Choice (F32_LE preferred, S16_LE accepted — forcing one fails
-// negotiation), learns the fixated format in `param_changed`, and converts the
-// raw PCM to f32 in `process`. Here we feed each stream's samples into a
-// per-source `Windower` and forward completed windows over an mpsc channel.
+// Each source is captured by a `pw-cat --record --raw` child that resamples,
+// downmixes, and format-converts to S16 LE / 16 kHz / mono and writes headerless
+// PCM to stdout. A reader thread converts that to f32 and VAD-windows it.
 
-// `spa_format` keys (audio block from spa/param/audio/raw.h).
-const SPA_FORMAT_MEDIA_TYPE: u32 = 1;
-const SPA_FORMAT_MEDIA_SUBTYPE: u32 = 2;
-const SPA_FORMAT_AUDIO_FORMAT: u32 = 0x0001_0001;
-const SPA_FORMAT_AUDIO_RATE: u32 = 0x0001_0003;
-const SPA_FORMAT_AUDIO_CHANNELS: u32 = 0x0001_0004;
-
-const SPA_MEDIA_TYPE_AUDIO: u32 = 1;
-const SPA_MEDIA_SUBTYPE_RAW: u32 = 1;
-const SPA_AUDIO_FORMAT_S16_LE: u32 = 0x0000_0102;
-const SPA_AUDIO_FORMAT_F32_LE: u32 = 0x0000_011a;
-
-const TARGET_CHANNELS: u32 = 1;
-
-/// The audio format the server actually fixated, parsed from `param_changed`.
-#[derive(Clone, Copy)]
-struct NegotiatedAudio {
-    format_id: u32,
-    #[allow(dead_code)]
-    rate: u32,
-    #[allow(dead_code)]
-    channels: u32,
-}
-
-impl NegotiatedAudio {
-    fn bytes_per_sample(&self) -> usize {
-        match self.format_id {
-            SPA_AUDIO_FORMAT_S16_LE => 2,
-            SPA_AUDIO_FORMAT_F32_LE => 4,
-            _ => 0,
+/// Build the `pw-cat` argv to capture `source` as raw S16/16k/mono on stdout.
+/// `mic_target` pins the mic to a specific node (empty/None = PipeWire default).
+fn pw_cat_command(source: AudioSource, mic_target: Option<&str>) -> Command {
+    let mut cmd = Command::new("pw-cat");
+    cmd.args([
+        "--record",
+        "--raw",
+        "--format",
+        "s16",
+        "--rate",
+        "16000",
+        "--channels",
+        "1",
+    ]);
+    match source {
+        AudioSource::Mic => {
+            if let Some(name) = mic_target {
+                if !name.is_empty() {
+                    cmd.args(["--target", name]);
+                }
+            }
+        }
+        // `stream.capture.sink=true` records the default sink's monitor.
+        AudioSource::System => {
+            cmd.args(["-P", "stream.capture.sink=true"]);
         }
     }
+    cmd.arg("-"); // write PCM to stdout
+    cmd.stdout(Stdio::piped()).stderr(Stdio::null());
+    cmd
 }
 
-/// Handle to a running dual-stream PipeWire capture thread.
+/// Append `incoming` bytes to `carry`, decode all whole S16 samples, and keep a
+/// trailing odd byte in `carry` so a sample split across reads isn't corrupted.
+fn drain_samples(carry: &mut Vec<u8>, incoming: &[u8]) -> Vec<f32> {
+    carry.extend_from_slice(incoming);
+    let even = carry.len() & !1;
+    let samples = s16le_to_f32(&carry[..even]);
+    carry.drain(..even);
+    samples
+}
+
+/// Handle to the running capture subprocesses (mic + system) and reader threads.
 pub struct AudioCapture {
     should_stop: Arc<AtomicBool>,
-    thread: Option<std::thread::JoinHandle<()>>,
+    children: Vec<Child>,
+    threads: Vec<JoinHandle<()>>,
 }
 
 impl AudioCapture {
-    /// Spawn the PipeWire capture thread. Returns the handle plus a receiver of
-    /// completed windows from BOTH sources (mic + system monitor). The receiver
-    /// closes once the thread stops and drops its senders (see [`stop`]).
+    /// Spawn a `pw-cat` capture child per source plus a reader thread each.
+    /// Returns the handle and a receiver of completed windows from BOTH sources.
+    /// The receiver closes once both readers finish and drop their senders.
     pub fn start(mic_source: Option<String>) -> Result<(Self, Receiver<AudioWindow>), CaptureError> {
         let (tx, rx) = mpsc::channel::<AudioWindow>();
         let should_stop = Arc::new(AtomicBool::new(false));
-        let stop_for_thread = should_stop.clone();
+        let mut cap = Self {
+            should_stop: should_stop.clone(),
+            children: Vec::new(),
+            threads: Vec::new(),
+        };
 
-        let thread = std::thread::Builder::new()
-            .name("rewindos-audio".into())
-            .spawn(move || {
-                if let Err(e) = run_capture(stop_for_thread, tx, mic_source) {
-                    tracing::error!(error = %e, "audio capture thread exited with error");
-                }
-            })
-            .map_err(|e| CaptureError::PipeWire(format!("spawn audio thread: {e}")))?;
+        let sources = [
+            (AudioSource::Mic, mic_source.as_deref()),
+            (AudioSource::System, None),
+        ];
+        for (source, target) in sources {
+            let mut child = pw_cat_command(source, target).spawn().map_err(|e| {
+                cap.kill_all();
+                CaptureError::PipeWire(format!("spawn pw-cat ({}): {e}", source.as_str()))
+            })?;
+            let stdout = child.stdout.take();
+            cap.children.push(child); // push first so kill_all covers it on error
+            let Some(stdout) = stdout else {
+                cap.kill_all();
+                return Err(CaptureError::PipeWire(format!(
+                    "pw-cat ({}) stdout unavailable",
+                    source.as_str()
+                )));
+            };
 
-        Ok((
-            Self {
-                should_stop,
-                thread: Some(thread),
-            },
-            rx,
-        ))
+            let tx = tx.clone();
+            let stop = should_stop.clone();
+            let thread = thread::Builder::new()
+                .name(format!("rewindos-audio-{}", source.as_str()))
+                .spawn(move || read_capture_stream(stdout, source, tx, stop))
+                .map_err(|e| {
+                    cap.kill_all();
+                    CaptureError::PipeWire(format!("spawn reader ({}): {e}", source.as_str()))
+                })?;
+            cap.threads.push(thread);
+        }
+
+        // The original `tx` drops here; only the per-thread clones remain, so the
+        // receiver closes once both reader threads exit.
+        Ok((cap, rx))
     }
 
-    /// Signal the thread to stop and join it. The thread flushes both Windowers
-    /// (tail flush) and sends the remaining windows before dropping its senders.
+    /// Kill the capture children (closing their stdout) and join the readers.
     pub fn stop(mut self) {
         self.should_stop.store(true, Ordering::Release);
-        if let Some(h) = self.thread.take() {
-            let _ = h.join();
+        self.kill_all();
+        for t in self.threads.drain(..) {
+            let _ = t.join();
+        }
+    }
+
+    fn kill_all(&mut self) {
+        for c in &mut self.children {
+            let _ = c.kill();
+        }
+        for c in &mut self.children {
+            let _ = c.wait();
         }
     }
 }
 
-/// Owns the PipeWire mainloop, context, core, and both streams for the lifetime
-/// of the capture loop. `core` and the streams must outlive the loop, so they
-/// stay in local bindings here (they are not returned across the thread).
-fn run_capture(
-    should_stop: Arc<AtomicBool>,
-    tx: Sender<AudioWindow>,
-    mic_source: Option<String>,
-) -> Result<(), CaptureError> {
-    pw::init();
-
-    let mainloop = pw::main_loop::MainLoopBox::new(None)
-        .map_err(|e| CaptureError::PipeWire(format!("create main loop: {e}")))?;
-    let context = pw::context::ContextBox::new(mainloop.loop_(), None)
-        .map_err(|e| CaptureError::PipeWire(format!("create context: {e}")))?;
-    // No portal fd — connect straight to the running PipeWire daemon.
-    let core = context
-        .connect(None)
-        .map_err(|e| CaptureError::PipeWire(format!("connect to PipeWire daemon: {e}")))?;
-
-    // Per-source Windowers, shared with the process closures so they can be
-    // flushed after the loop exits.
-    let mic_windower = Arc::new(Mutex::new(Windower::new(AudioSource::Mic)));
-    let sys_windower = Arc::new(Mutex::new(Windower::new(AudioSource::System)));
-
-    // Keep streams + listeners alive for the whole loop. Tuple-pattern bindings
-    // drop in reverse (listener before its stream) — the order pipewire needs.
-    let (_mic_stream, _mic_listener) = build_stream(
-        &core,
-        AudioSource::Mic,
-        mic_windower.clone(),
-        tx.clone(),
-        mic_source.as_deref(),
-    )?;
-    let (_sys_stream, _sys_listener) =
-        build_stream(&core, AudioSource::System, sys_windower.clone(), tx.clone(), None)?;
-
-    tracing::info!("audio capture: mic + system streams connected");
-
-    let loop_ = mainloop.loop_();
-    while !should_stop.load(Ordering::Relaxed) {
-        loop_.iterate(Duration::from_millis(50));
-    }
-
-    // Tail flush: emit whatever remains in each Windower.
-    let mut out = Vec::new();
-    for w in [&mic_windower, &sys_windower] {
-        out.clear();
-        w.lock().unwrap().flush(&mut out);
-        for window in out.drain(..) {
-            let _ = tx.send(window);
-        }
-    }
-
-    // Streams, listeners, and the local `tx` clones drop here; the original `tx`
-    // moved into this fn drops on return, closing the receiver.
-    Ok(())
-}
-
-/// Create one audio capture stream, register its listener, and connect it
-/// (autoconnect to the PipeWire default for this stream kind). Returns the
-/// stream + listener so the caller keeps them alive.
-#[allow(clippy::type_complexity)]
-fn build_stream<'c>(
-    core: &'c pw::core::Core,
+/// Read raw S16 PCM from a capture child's stdout, VAD-window it, and forward
+/// completed windows. Returns on stdout EOF (child exited) or when `stop` is set,
+/// performing a tail flush first.
+fn read_capture_stream(
+    mut stdout: ChildStdout,
     source: AudioSource,
-    windower: Arc<Mutex<Windower>>,
     tx: Sender<AudioWindow>,
-    mic_target: Option<&str>,
-) -> Result<(pw::stream::StreamBox<'c>, pw::stream::StreamListener<()>), CaptureError> {
-    // Mic: plain audio Capture stream → default source.
-    // System: `stream.capture.sink = true` flips a Capture stream to record the
-    // default sink's MONITOR (system output).
-    let mut props = match source {
-        AudioSource::Mic => pw::properties::properties! {
-            *pw::keys::MEDIA_TYPE => "Audio",
-            *pw::keys::MEDIA_CATEGORY => "Capture",
-            *pw::keys::MEDIA_ROLE => "Communication",
-            *pw::keys::NODE_NAME => "rewindos-mic",
-        },
-        AudioSource::System => pw::properties::properties! {
-            *pw::keys::MEDIA_TYPE => "Audio",
-            *pw::keys::MEDIA_CATEGORY => "Capture",
-            *pw::keys::MEDIA_ROLE => "Music",
-            *pw::keys::NODE_NAME => "rewindos-system",
-            "stream.capture.sink" => "true",
-        },
-    };
-
-    // Pin the mic stream to a specific source when one was selected; an empty
-    // selection (or System) keeps PipeWire's autoconnect default.
-    if source == AudioSource::Mic {
-        if let Some(name) = mic_target {
-            if !name.is_empty() {
-                props.insert("target.object", name);
+    stop: Arc<AtomicBool>,
+) {
+    let mut windower = Windower::new(source);
+    let mut carry = Vec::new();
+    let mut buf = [0u8; 8192];
+    let mut out = Vec::new();
+    while !stop.load(Ordering::Relaxed) {
+        match stdout.read(&mut buf) {
+            Ok(0) => break, // EOF — child exited
+            Ok(n) => {
+                let samples = drain_samples(&mut carry, &buf[..n]);
+                out.clear();
+                windower.push(&samples, &mut out);
+                for w in out.drain(..) {
+                    if tx.send(w).is_err() {
+                        return; // receiver gone
+                    }
+                }
             }
+            Err(e) if e.kind() == ErrorKind::Interrupted => continue,
+            Err(_) => break,
         }
     }
-
-    let stream = pw::stream::StreamBox::new(core, "rewindos-audio", props)
-        .map_err(|e| CaptureError::PipeWire(format!("create {} stream: {e}", source.as_str())))?;
-
-    // Negotiated format, learned in param_changed and read in process.
-    let fmt: Arc<Mutex<Option<NegotiatedAudio>>> = Arc::new(Mutex::new(None));
-    let fmt_param = fmt.clone();
-    let fmt_proc = fmt.clone();
-    let label = source.as_str();
-
-    let listener = stream
-        .add_local_listener_with_user_data(())
-        .state_changed(move |_, _, old, new| match &new {
-            StreamState::Streaming => {
-                tracing::info!(label, ?old, "audio stream streaming");
-            }
-            StreamState::Error(msg) => {
-                tracing::warn!(label, error = %msg, "audio stream error");
-            }
-            _ => tracing::debug!(label, ?old, ?new, "audio stream state"),
-        })
-        .param_changed(move |_, _, id, param| {
-            let Some(param) = param else { return };
-            if id != spa::param::ParamType::Format.as_raw() {
-                return;
-            }
-            match parse_audio_format(param) {
-                Ok(f) => {
-                    tracing::info!(
-                        label,
-                        format_id = f.format_id,
-                        rate = f.rate,
-                        channels = f.channels,
-                        "audio format negotiated"
-                    );
-                    *fmt_param.lock().unwrap() = Some(f);
-                }
-                Err(e) => tracing::warn!(label, "parse audio format: {e}"),
-            }
-        })
-        .process(move |stream, _| {
-            let fmt = *fmt_proc.lock().unwrap();
-            let Some(fmt) = fmt else { return };
-            let bps = fmt.bytes_per_sample();
-            if bps == 0 {
-                return; // unknown format; can't interpret
-            }
-
-            let mut out = Vec::new();
-            // Drain ALL available buffers (the spike under-read one per call).
-            while let Some(mut buffer) = stream.dequeue_buffer() {
-                let datas = buffer.datas_mut();
-                if datas.is_empty() {
-                    continue;
-                }
-                let data = &mut datas[0];
-                let n_bytes = data.chunk().size() as usize;
-                let Some(slice) = data.data() else { continue };
-                let valid = &slice[..n_bytes.min(slice.len())];
-                if valid.is_empty() {
-                    continue;
-                }
-
-                let samples: Vec<f32> = match fmt.format_id {
-                    SPA_AUDIO_FORMAT_S16_LE => s16le_to_f32(valid),
-                    SPA_AUDIO_FORMAT_F32_LE => valid
-                        .chunks_exact(4)
-                        .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
-                        .collect(),
-                    _ => continue,
-                };
-
-                out.clear();
-                windower.lock().unwrap().push(&samples, &mut out);
-                for w in out.drain(..) {
-                    let _ = tx.send(w);
-                }
-            }
-        })
-        .register()
-        .map_err(|e| CaptureError::PipeWire(format!("register {} listener: {e}", source.as_str())))?;
-
-    // Offer a Choice of formats so negotiation succeeds (forcing one fails).
-    let mut params_buf = vec![0u8; 1024];
-    let params_pod = build_audio_params(&mut params_buf);
-
-    stream
-        .connect(
-            spa::utils::Direction::Input,
-            None,
-            StreamFlags::AUTOCONNECT | StreamFlags::MAP_BUFFERS,
-            &mut [params_pod],
-        )
-        .map_err(|e| CaptureError::PipeWire(format!("connect {} stream: {e}", source.as_str())))?;
-
-    Ok((stream, listener))
+    out.clear();
+    windower.flush(&mut out);
+    for w in out.drain(..) {
+        let _ = tx.send(w);
+    }
 }
 
 // ---- Live mic level monitor ----------------------------------------------
 
-/// A short-lived preview stream that reports the mic's live RMS level (0.0..~1.0)
-/// so the UI can show a meter while picking a source. Does not record.
+/// A `pw-cat` preview capture that reports the mic's live RMS level (0.0..~1.0)
+/// so the UI can show a meter while picking a source. Does not persist audio.
 pub struct MicMonitor {
     should_stop: Arc<AtomicBool>,
     level: Arc<AtomicU32>, // f32 bits
-    thread: Option<std::thread::JoinHandle<()>>,
+    child: Option<Child>,
+    thread: Option<JoinHandle<()>>,
 }
 
 impl MicMonitor {
     pub fn start(mic_source: Option<String>) -> Result<Self, CaptureError> {
+        let mut child = pw_cat_command(AudioSource::Mic, mic_source.as_deref())
+            .spawn()
+            .map_err(|e| CaptureError::PipeWire(format!("spawn pw-cat (monitor): {e}")))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| CaptureError::PipeWire("pw-cat (monitor) stdout unavailable".into()))?;
+
         let should_stop = Arc::new(AtomicBool::new(false));
         let level = Arc::new(AtomicU32::new(0));
-        let stop_t = should_stop.clone();
+        let stop = should_stop.clone();
         let level_t = level.clone();
-        let thread = std::thread::Builder::new()
+        let thread = thread::Builder::new()
             .name("rewindos-mic-monitor".into())
-            .spawn(move || {
-                if let Err(e) = run_monitor(stop_t, level_t, mic_source) {
-                    tracing::warn!(error = %e, "mic monitor exited with error");
-                }
-            })
-            .map_err(|e| CaptureError::PipeWire(format!("spawn monitor thread: {e}")))?;
+            .spawn(move || monitor_level(stdout, level_t, stop))
+            .map_err(|e| {
+                let _ = child.kill();
+                CaptureError::PipeWire(format!("spawn monitor reader: {e}"))
+            })?;
+
         Ok(Self {
             should_stop,
             level,
+            child: Some(child),
             thread: Some(thread),
         })
     }
@@ -544,269 +440,33 @@ impl MicMonitor {
 
     pub fn stop(mut self) {
         self.should_stop.store(true, Ordering::Release);
+        if let Some(mut c) = self.child.take() {
+            let _ = c.kill();
+            let _ = c.wait();
+        }
         if let Some(h) = self.thread.take() {
             let _ = h.join();
         }
     }
 }
 
-fn run_monitor(
-    should_stop: Arc<AtomicBool>,
-    level: Arc<AtomicU32>,
-    mic_source: Option<String>,
-) -> Result<(), CaptureError> {
-    pw::init();
-
-    let mainloop = pw::main_loop::MainLoopBox::new(None)
-        .map_err(|e| CaptureError::PipeWire(format!("monitor: main loop: {e}")))?;
-    let context = pw::context::ContextBox::new(mainloop.loop_(), None)
-        .map_err(|e| CaptureError::PipeWire(format!("monitor: context: {e}")))?;
-    let core = context
-        .connect(None)
-        .map_err(|e| CaptureError::PipeWire(format!("monitor: connect: {e}")))?;
-
-    // Single mic Capture stream — mirrors build_stream's Mic branch.
-    let mut props = pw::properties::properties! {
-        *pw::keys::MEDIA_TYPE => "Audio",
-        *pw::keys::MEDIA_CATEGORY => "Capture",
-        *pw::keys::MEDIA_ROLE => "Communication",
-        *pw::keys::NODE_NAME => "rewindos-mic-monitor",
-    };
-    if let Some(name) = mic_source.as_deref() {
-        if !name.is_empty() {
-            props.insert("target.object", name);
+/// Read raw S16 from the monitor child's stdout and publish a rolling RMS level.
+fn monitor_level(mut stdout: ChildStdout, level: Arc<AtomicU32>, stop: Arc<AtomicBool>) {
+    let mut carry = Vec::new();
+    let mut buf = [0u8; 4096];
+    while !stop.load(Ordering::Relaxed) {
+        match stdout.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => {
+                let samples = drain_samples(&mut carry, &buf[..n]);
+                if !samples.is_empty() {
+                    level.store(rms(&samples).to_bits(), Ordering::Relaxed);
+                }
+            }
+            Err(e) if e.kind() == ErrorKind::Interrupted => continue,
+            Err(_) => break,
         }
     }
-
-    let stream = pw::stream::StreamBox::new(&core, "rewindos-mic-monitor", props)
-        .map_err(|e| CaptureError::PipeWire(format!("monitor: create stream: {e}")))?;
-
-    let fmt: Arc<Mutex<Option<NegotiatedAudio>>> = Arc::new(Mutex::new(None));
-    let fmt_param = fmt.clone();
-    let fmt_proc = fmt.clone();
-    let level_proc = level.clone();
-
-    let listener = stream
-        .add_local_listener_with_user_data(())
-        .state_changed(|_, _, old, new| match &new {
-            StreamState::Error(msg) => {
-                tracing::warn!(error = %msg, "mic monitor stream error");
-            }
-            _ => tracing::debug!(?old, ?new, "mic monitor stream state"),
-        })
-        .param_changed(move |_, _, id, param| {
-            let Some(param) = param else { return };
-            if id != spa::param::ParamType::Format.as_raw() {
-                return;
-            }
-            match parse_audio_format(param) {
-                Ok(f) => *fmt_param.lock().unwrap() = Some(f),
-                Err(e) => tracing::warn!("mic monitor parse audio format: {e}"),
-            }
-        })
-        .process(move |stream, _| {
-            let fmt = *fmt_proc.lock().unwrap();
-            let Some(fmt) = fmt else { return };
-            let bps = fmt.bytes_per_sample();
-            if bps == 0 {
-                return;
-            }
-
-            while let Some(mut buffer) = stream.dequeue_buffer() {
-                let datas = buffer.datas_mut();
-                if datas.is_empty() {
-                    continue;
-                }
-                let data = &mut datas[0];
-                let n_bytes = data.chunk().size() as usize;
-                let Some(slice) = data.data() else { continue };
-                let valid = &slice[..n_bytes.min(slice.len())];
-                if valid.is_empty() {
-                    continue;
-                }
-
-                let samples: Vec<f32> = match fmt.format_id {
-                    SPA_AUDIO_FORMAT_S16_LE => s16le_to_f32(valid),
-                    SPA_AUDIO_FORMAT_F32_LE => valid
-                        .chunks_exact(4)
-                        .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
-                        .collect(),
-                    _ => continue,
-                };
-                if samples.is_empty() {
-                    continue;
-                }
-                let lvl = rms(&samples);
-                level_proc.store(lvl.to_bits(), Ordering::Relaxed);
-            }
-        })
-        .register()
-        .map_err(|e| CaptureError::PipeWire(format!("monitor: register listener: {e}")))?;
-
-    let mut params_buf = vec![0u8; 1024];
-    let params_pod = build_audio_params(&mut params_buf);
-
-    stream
-        .connect(
-            spa::utils::Direction::Input,
-            None,
-            StreamFlags::AUTOCONNECT | StreamFlags::MAP_BUFFERS,
-            &mut [params_pod],
-        )
-        .map_err(|e| CaptureError::PipeWire(format!("monitor: connect stream: {e}")))?;
-
-    // Keep stream + listener alive for the loop. Local drop order is reverse of
-    // declaration, so the listener (last) drops before its stream — as pipewire
-    // needs. Re-bind to make that explicit.
-    let _stream = stream;
-    let _listener = listener;
-
-    let loop_ = mainloop.loop_();
-    while !should_stop.load(Ordering::Relaxed) {
-        loop_.iterate(Duration::from_millis(50));
-    }
-
-    Ok(())
-}
-
-/// Build the SPA audio-format EnumFormat pod. Offers F32_LE + S16_LE so the
-/// server can fixate one (forcing a single format fails negotiation).
-fn build_audio_params(buf: &mut [u8]) -> &spa::pod::Pod {
-    use spa::pod::serialize::PodSerializer;
-    use spa::pod::{ChoiceValue, Object, Property, PropertyFlags, Value};
-    use spa::utils::{Choice, ChoiceEnum, ChoiceFlags, Id};
-
-    let obj = Value::Object(Object {
-        type_: spa::utils::SpaTypes::ObjectParamFormat.as_raw(),
-        id: spa::param::ParamType::EnumFormat.as_raw(),
-        properties: vec![
-            Property {
-                key: SPA_FORMAT_MEDIA_TYPE,
-                value: Value::Id(Id(SPA_MEDIA_TYPE_AUDIO)),
-                flags: PropertyFlags::empty(),
-            },
-            Property {
-                key: SPA_FORMAT_MEDIA_SUBTYPE,
-                value: Value::Id(Id(SPA_MEDIA_SUBTYPE_RAW)),
-                flags: PropertyFlags::empty(),
-            },
-            Property {
-                key: SPA_FORMAT_AUDIO_FORMAT,
-                value: Value::Choice(ChoiceValue::Id(Choice(
-                    ChoiceFlags::empty(),
-                    ChoiceEnum::Enum {
-                        default: Id(SPA_AUDIO_FORMAT_F32_LE),
-                        alternatives: vec![
-                            Id(SPA_AUDIO_FORMAT_F32_LE),
-                            Id(SPA_AUDIO_FORMAT_S16_LE),
-                        ],
-                    },
-                ))),
-                flags: PropertyFlags::empty(),
-            },
-            Property {
-                key: SPA_FORMAT_AUDIO_RATE,
-                value: Value::Int(CAPTURE_RATE as i32),
-                flags: PropertyFlags::empty(),
-            },
-            Property {
-                key: SPA_FORMAT_AUDIO_CHANNELS,
-                value: Value::Int(TARGET_CHANNELS as i32),
-                flags: PropertyFlags::empty(),
-            },
-        ],
-    });
-
-    let (result, _) = PodSerializer::serialize(std::io::Cursor::new(buf), &obj)
-        .expect("serialize audio params pod");
-
-    unsafe {
-        let ptr = result.into_inner().as_ptr();
-        &*(ptr as *const spa::pod::Pod)
-    }
-}
-
-/// Read an Id (u32) from a pod value, bare or Choice-wrapped.
-fn extract_id(value: &spa::pod::Value) -> Option<u32> {
-    use spa::pod::{ChoiceValue, Value};
-    match value {
-        Value::Id(id) => Some(id.0),
-        Value::Choice(ChoiceValue::Id(c)) => Some(choice_default_id(c)),
-        _ => None,
-    }
-}
-
-/// Read an i32 from a pod value, bare or Choice-wrapped.
-fn extract_int(value: &spa::pod::Value) -> Option<i32> {
-    use spa::pod::{ChoiceValue, Value};
-    use spa::utils::ChoiceEnum;
-    match value {
-        Value::Int(i) => Some(*i),
-        Value::Choice(ChoiceValue::Int(c)) => Some(match &c.1 {
-            ChoiceEnum::None(v) => *v,
-            ChoiceEnum::Range { default, .. } => *default,
-            ChoiceEnum::Step { default, .. } => *default,
-            ChoiceEnum::Enum { default, .. } => *default,
-            ChoiceEnum::Flags { default, .. } => *default,
-        }),
-        _ => None,
-    }
-}
-
-fn choice_default_id(choice: &spa::utils::Choice<spa::utils::Id>) -> u32 {
-    use spa::utils::ChoiceEnum;
-    match &choice.1 {
-        ChoiceEnum::None(v) => v.0,
-        ChoiceEnum::Range { default, .. } => default.0,
-        ChoiceEnum::Step { default, .. } => default.0,
-        ChoiceEnum::Enum { default, .. } => default.0,
-        ChoiceEnum::Flags { default, .. } => default.0,
-    }
-}
-
-/// Parse the negotiated audio format from a SPA pod.
-fn parse_audio_format(param: &spa::pod::Pod) -> Result<NegotiatedAudio, String> {
-    use spa::pod::deserialize::PodDeserializer;
-    use spa::pod::Value;
-
-    let (_, value) = PodDeserializer::deserialize_any_from(param.as_bytes())
-        .map_err(|e| format!("pod deserialize: {e:?}"))?;
-    let Value::Object(obj) = value else {
-        return Err("expected Object pod".into());
-    };
-
-    let mut format_id = 0u32;
-    let mut rate = 0u32;
-    let mut channels = 0u32;
-    for prop in &obj.properties {
-        match prop.key {
-            SPA_FORMAT_AUDIO_FORMAT => {
-                if let Some(id) = extract_id(&prop.value) {
-                    format_id = id;
-                }
-            }
-            SPA_FORMAT_AUDIO_RATE => {
-                if let Some(r) = extract_int(&prop.value) {
-                    rate = r as u32;
-                }
-            }
-            SPA_FORMAT_AUDIO_CHANNELS => {
-                if let Some(c) = extract_int(&prop.value) {
-                    channels = c as u32;
-                }
-            }
-            _ => {}
-        }
-    }
-
-    if format_id == 0 {
-        return Err("missing audio format in negotiated pod".into());
-    }
-    Ok(NegotiatedAudio {
-        format_id,
-        rate,
-        channels,
-    })
 }
 
 #[cfg(test)]
@@ -834,6 +494,59 @@ mod tests {
         assert!((out[0] - 0.0).abs() < 1e-6);
         assert!((out[1] - 0.99997).abs() < 1e-3); // 32767/32768
         assert!((out[2] + 1.0).abs() < 1e-6); // -32768/32768 = -1.0
+    }
+
+    #[test]
+    fn pw_cat_argv_includes_format_and_mic_target() {
+        let cmd = pw_cat_command(AudioSource::Mic, Some("alsa_input.foo"));
+        let argv: Vec<String> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert!(argv.iter().any(|a| a == "--record"));
+        assert!(argv.iter().any(|a| a == "--raw"));
+        assert!(argv.windows(2).any(|w| w[0] == "--format" && w[1] == "s16"));
+        assert!(argv.windows(2).any(|w| w[0] == "--rate" && w[1] == "16000"));
+        assert!(argv.windows(2).any(|w| w[0] == "--channels" && w[1] == "1"));
+        assert!(argv
+            .windows(2)
+            .any(|w| w[0] == "--target" && w[1] == "alsa_input.foo"));
+    }
+
+    #[test]
+    fn pw_cat_argv_system_captures_sink_and_omits_target() {
+        let cmd = pw_cat_command(AudioSource::System, None);
+        let argv: Vec<String> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert!(argv.iter().any(|a| a == "stream.capture.sink=true"));
+        assert!(!argv.iter().any(|a| a == "--target"));
+    }
+
+    #[test]
+    fn pw_cat_argv_mic_default_has_no_target() {
+        for target in [None, Some("")] {
+            let cmd = pw_cat_command(AudioSource::Mic, target);
+            let argv: Vec<String> = cmd
+                .get_args()
+                .map(|a| a.to_string_lossy().into_owned())
+                .collect();
+            assert!(!argv.iter().any(|a| a == "--target"), "target={target:?}");
+        }
+    }
+
+    #[test]
+    fn drain_samples_carries_split_sample_across_reads() {
+        let mut carry = Vec::new();
+        // one whole sample (2 bytes) + a leftover odd byte
+        let s1 = drain_samples(&mut carry, &[0x00, 0x40, 0x11]);
+        assert_eq!(s1.len(), 1);
+        assert_eq!(carry, vec![0x11]); // odd byte held back
+        // the next read completes the split sample
+        let s2 = drain_samples(&mut carry, &[0x22]);
+        assert_eq!(s2.len(), 1);
+        assert!(carry.is_empty());
     }
 
     fn loud(secs: f32) -> Vec<f32> {
