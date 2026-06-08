@@ -214,7 +214,7 @@ impl Windower {
     }
 }
 
-fn rms(frame: &[f32]) -> f32 {
+pub(crate) fn rms(frame: &[f32]) -> f32 {
     if frame.is_empty() {
         return 0.0;
     }

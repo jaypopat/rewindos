@@ -9,9 +9,16 @@ use std::sync::{Arc, Mutex};
 use rewindos_core::db::Database;
 use rewindos_core::schema::NewTranscriptSegment;
 
-use crate::capture::audio::{AudioSource, AudioWindow, CAPTURE_RATE};
+use crate::capture::audio::{rms, AudioSource, AudioWindow, CAPTURE_RATE};
 use crate::meeting::encode::{EncodeError, OpusWriter};
 use crate::meeting::whisper::{TranscribeError, WhisperTranscriber};
+
+/// Windows whose RMS is below this are not transcribed. Whisper hallucinates
+/// filler ("you", "Thank you", "[BLANK_AUDIO]") on silence, so a silent track —
+/// e.g. the system monitor when nothing is playing — would otherwise produce
+/// phantom segments. Audio is still encoded (when `keep_audio`); only
+/// transcription is skipped. Sits just under the VAD's 0.01 per-frame gate.
+const SILENCE_GATE_RMS: f32 = 0.005;
 
 /// The transcription capability a session needs. Implemented by the real
 /// `WhisperTranscriber` and by test fakes, so sessions need no whisper model.
@@ -106,6 +113,10 @@ impl MeetingSession {
     pub fn process_window(&mut self, window: &AudioWindow) -> Result<(), SessionError> {
         if let Some(writer) = self.writer_for(window.source) {
             writer.push(&window.samples)?;
+        }
+        // Don't transcribe near-silent windows — whisper invents filler on them.
+        if rms(&window.samples) < SILENCE_GATE_RMS {
+            return Ok(());
         }
         let window_start_ms = (window.start_sample * 1000 / CAPTURE_RATE as u64) as i64;
         let segments =
@@ -217,6 +228,45 @@ mod tests {
         assert_eq!(segs[1].start_ms, 1000);
         assert!(!mic_path.exists(), "no audio file when keep_audio is off");
         assert!(!sys_path.exists());
+    }
+
+    #[test]
+    fn silent_windows_are_encoded_but_not_transcribed() {
+        let (dir, db) = temp_db();
+        let meeting_id = {
+            let g = db.lock().unwrap();
+            g.insert_meeting(1_000, None, None).unwrap()
+        };
+        let mut session = MeetingSession::new(
+            meeting_id,
+            db.clone(),
+            Arc::new(FakeTranscriber), // always emits a segment if reached
+            false,
+            dir.path().join("m.opus"),
+            dir.path().join("s.opus"),
+        )
+        .unwrap();
+
+        // Silent system window: gated out before the transcriber runs.
+        session
+            .process_window(&AudioWindow {
+                source: AudioSource::System,
+                start_sample: 0,
+                samples: vec![0.0; 320],
+            })
+            .unwrap();
+        // Voiced mic window: transcribed.
+        session
+            .process_window(&AudioWindow {
+                source: AudioSource::Mic,
+                start_sample: 0,
+                samples: vec![0.2; 320],
+            })
+            .unwrap();
+
+        let segs = db.lock().unwrap().get_meeting_segments(meeting_id).unwrap();
+        assert_eq!(segs.len(), 1, "silent window must not produce a segment");
+        assert_eq!(segs[0].source, "mic");
     }
 
     #[test]
