@@ -406,6 +406,35 @@ fn search_transcripts(
         .map_err(|e| format!("db error: {e}"))
 }
 
+/// Read a meeting's `.opus` audio and return its raw bytes. WebKitGTK's `<audio>`
+/// element can't load Tauri's `asset://` protocol (its GStreamer media backend
+/// bypasses custom scheme handlers), so the UI fetches bytes over IPC and plays
+/// them via a Blob URL. Sandboxed to the meetings directory (canonicalized so
+/// `..`/symlinks can't escape it) and restricted to `.opus`.
+#[tauri::command]
+fn read_meeting_audio(
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<tauri::ipc::Response, String> {
+    let meetings_dir = {
+        let cfg = state.config.lock().map_err(|e| format!("config lock: {e}"))?;
+        cfg.meetings_dir().map_err(|e| format!("meetings dir: {e}"))?
+    };
+    let canon_dir = meetings_dir
+        .canonicalize()
+        .map_err(|e| format!("meetings dir: {e}"))?;
+    let canon = std::path::Path::new(&path)
+        .canonicalize()
+        .map_err(|e| format!("audio file: {e}"))?;
+    if !canon.starts_with(&canon_dir)
+        || canon.extension().and_then(|e| e.to_str()) != Some("opus")
+    {
+        return Err("audio path is outside the meetings directory".into());
+    }
+    let bytes = std::fs::read(&canon).map_err(|e| format!("read audio: {e}"))?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
 #[tauri::command]
 async fn start_meeting(state: State<'_, AppState>, title: String) -> Result<i64, String> {
     let reply = state
@@ -2098,6 +2127,7 @@ pub fn run() {
             get_meeting_segments,
             delete_meeting,
             search_transcripts,
+            read_meeting_audio,
             start_meeting,
             stop_meeting,
             list_audio_sources,
