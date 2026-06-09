@@ -1,4 +1,5 @@
 mod ask_stream;
+mod audio_server;
 mod chat_commands;
 mod chat_context;
 mod claude_code;
@@ -43,6 +44,7 @@ struct AppState {
     config: Mutex<AppConfig>,
     embedding_client: Option<EmbeddingClient>,
     claude_pids: Arc<tokio::sync::Mutex<HashMap<String, u32>>>,
+    audio_server: Option<audio_server::AudioServer>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -419,16 +421,14 @@ fn search_transcripts(
         .map_err(|e| format!("db error: {e}"))
 }
 
-/// Read a meeting's `.opus` audio and return its raw bytes. WebKitGTK's `<audio>`
-/// element can't load Tauri's `asset://` protocol (its GStreamer media backend
-/// bypasses custom scheme handlers), so the UI fetches bytes over IPC and plays
-/// them via a Blob URL. Sandboxed to the meetings directory (canonicalized so
-/// `..`/symlinks can't escape it) and restricted to `.opus`.
+/// Return a `http://127.0.0.1:<port>/audio/<id>` URL for a meeting recording.
+/// WebKitGTK's `<audio>` hands playback to GStreamer, which cannot read
+/// `blob:` URLs or Tauri's `asset://` protocol — loopback HTTP is the one
+/// delivery path it supports (see `audio_server`). Sandboxed to the meetings
+/// directory (canonicalized so `..`/symlinks can't escape it) and restricted
+/// to `.opus`.
 #[tauri::command]
-fn read_meeting_audio(
-    state: State<'_, AppState>,
-    path: String,
-) -> Result<tauri::ipc::Response, String> {
+fn get_meeting_audio_url(state: State<'_, AppState>, path: String) -> Result<String, String> {
     let meetings_dir = {
         let cfg = state.config.lock().map_err(|e| format!("config lock: {e}"))?;
         cfg.meetings_dir().map_err(|e| format!("meetings dir: {e}"))?
@@ -444,59 +444,11 @@ fn read_meeting_audio(
     {
         return Err("audio path is outside the meetings directory".into());
     }
-    let bytes = std::fs::read(&canon).map_err(|e| format!("read audio: {e}"))?;
-    // WebKitGTK's media backend can't decode Ogg-Opus, so transcode to WAV
-    // (PCM), which every <audio> element plays.
-    let wav = opus_ogg_to_wav(&bytes).map_err(|e| format!("decode audio: {e}"))?;
-    Ok(tauri::ipc::Response::new(wav))
-}
-
-/// Decode an Ogg-Opus stream (16 kHz mono, as written by the meeting encoder)
-/// into a 16-bit PCM WAV byte buffer.
-fn opus_ogg_to_wav(ogg_bytes: &[u8]) -> Result<Vec<u8>, String> {
-    const RATE: u32 = 16_000;
-    let mut reader = ogg::PacketReader::new(std::io::Cursor::new(ogg_bytes));
-    let mut decoder =
-        opus::Decoder::new(RATE, opus::Channels::Mono).map_err(|e| format!("opus init: {e}"))?;
-    let mut pcm: Vec<i16> = Vec::new();
-    let mut frame = vec![0i16; 5760]; // ≥ any single opus frame at 48 kHz
-    while let Some(packet) = reader.read_packet().map_err(|e| format!("ogg read: {e}"))? {
-        // Skip the OpusHead / OpusTags header packets; decode the rest.
-        if packet.data.starts_with(b"OpusHead") || packet.data.starts_with(b"OpusTags") {
-            continue;
-        }
-        let n = decoder
-            .decode(&packet.data, &mut frame, false)
-            .map_err(|e| format!("opus decode: {e}"))?;
-        pcm.extend_from_slice(&frame[..n]);
-    }
-    Ok(pcm_to_wav(&pcm, RATE, 1))
-}
-
-/// Wrap mono/stereo 16-bit PCM samples in a canonical 44-byte WAV header.
-fn pcm_to_wav(pcm: &[i16], sample_rate: u32, channels: u16) -> Vec<u8> {
-    let bits_per_sample: u16 = 16;
-    let block_align = channels * bits_per_sample / 8;
-    let byte_rate = sample_rate * block_align as u32;
-    let data_len = (pcm.len() * 2) as u32;
-    let mut out = Vec::with_capacity(44 + pcm.len() * 2);
-    out.extend_from_slice(b"RIFF");
-    out.extend_from_slice(&(36 + data_len).to_le_bytes());
-    out.extend_from_slice(b"WAVE");
-    out.extend_from_slice(b"fmt ");
-    out.extend_from_slice(&16u32.to_le_bytes()); // PCM fmt chunk size
-    out.extend_from_slice(&1u16.to_le_bytes()); // audio format = PCM
-    out.extend_from_slice(&channels.to_le_bytes());
-    out.extend_from_slice(&sample_rate.to_le_bytes());
-    out.extend_from_slice(&byte_rate.to_le_bytes());
-    out.extend_from_slice(&block_align.to_le_bytes());
-    out.extend_from_slice(&bits_per_sample.to_le_bytes());
-    out.extend_from_slice(b"data");
-    out.extend_from_slice(&data_len.to_le_bytes());
-    for s in pcm {
-        out.extend_from_slice(&s.to_le_bytes());
-    }
-    out
+    let server = state
+        .audio_server
+        .as_ref()
+        .ok_or("audio server is not running")?;
+    Ok(server.register(canon))
 }
 
 #[tauri::command]
@@ -1915,12 +1867,21 @@ pub fn run() {
                 None
             };
 
+            let audio_server = match audio_server::AudioServer::start() {
+                Ok(s) => Some(s),
+                Err(e) => {
+                    warn!("meeting-audio server failed to start: {e}");
+                    None
+                }
+            };
+
             app.manage(AppState {
                 dbus,
                 db: Mutex::new(db),
                 config: Mutex::new(config),
                 embedding_client,
                 claude_pids: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+                audio_server,
             });
 
             // Register Ctrl+Shift+Space global shortcut
@@ -2192,7 +2153,7 @@ pub fn run() {
             delete_meeting,
             rename_meeting,
             search_transcripts,
-            read_meeting_audio,
+            get_meeting_audio_url,
             start_meeting,
             stop_meeting,
             list_audio_sources,
@@ -2260,26 +2221,3 @@ pub fn run() {
         .expect("error while running tauri application");
 }
 
-#[cfg(test)]
-mod tests {
-    use super::pcm_to_wav;
-
-    #[test]
-    fn pcm_to_wav_writes_a_canonical_header() {
-        // 3 mono samples @ 16 kHz → 6 bytes of data, 44-byte header.
-        let wav = pcm_to_wav(&[0, 1, -1], 16_000, 1);
-        assert_eq!(&wav[0..4], b"RIFF");
-        assert_eq!(&wav[8..12], b"WAVE");
-        assert_eq!(&wav[12..16], b"fmt ");
-        assert_eq!(&wav[36..40], b"data");
-        // fmt: PCM(1), 1 channel, 16000 Hz, 16-bit.
-        assert_eq!(u16::from_le_bytes([wav[20], wav[21]]), 1);
-        assert_eq!(u16::from_le_bytes([wav[22], wav[23]]), 1);
-        assert_eq!(u32::from_le_bytes([wav[24], wav[25], wav[26], wav[27]]), 16_000);
-        assert_eq!(u16::from_le_bytes([wav[34], wav[35]]), 16);
-        // data chunk length + total size.
-        assert_eq!(u32::from_le_bytes([wav[40], wav[41], wav[42], wav[43]]), 6);
-        assert_eq!(wav.len(), 44 + 6);
-        assert_eq!(u32::from_le_bytes([wav[4], wav[5], wav[6], wav[7]]), 36 + 6);
-    }
-}
