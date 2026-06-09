@@ -9,10 +9,18 @@ import { invoke } from "@tauri-apps/api/core";
 
 export interface AudioHandle { seekTo: (seconds: number) => void; }
 
+// HTMLMediaElement.error.code → human label, so a failure points at the cause.
+const MEDIA_ERR: Record<number, string> = {
+  1: "load aborted",
+  2: "network error",
+  3: "decode error",
+  4: "format not supported",
+};
+
 export const AudioPlayer = forwardRef<AudioHandle, { path: string }>(({ path }, ref) => {
   const el = useRef<HTMLAudioElement>(null);
   const [src, setSrc] = useState<string | null>(null);
-  const [error, setError] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useImperativeHandle(ref, () => ({
     seekTo: (seconds: number) => {
@@ -26,7 +34,7 @@ export const AudioPlayer = forwardRef<AudioHandle, { path: string }>(({ path }, 
   useEffect(() => {
     let alive = true;
     let url: string | null = null;
-    setError(false);
+    setError(null);
     setSrc(null);
     invoke<ArrayBuffer>("read_meeting_audio", { path })
       .then((bytes) => {
@@ -34,8 +42,8 @@ export const AudioPlayer = forwardRef<AudioHandle, { path: string }>(({ path }, 
         url = URL.createObjectURL(new Blob([bytes], { type: "audio/ogg" }));
         setSrc(url);
       })
-      .catch(() => {
-        if (alive) setError(true);
+      .catch((e) => {
+        if (alive) setError(`read failed — ${String(e)}`);
       });
     return () => {
       alive = false;
@@ -44,11 +52,22 @@ export const AudioPlayer = forwardRef<AudioHandle, { path: string }>(({ path }, 
   }, [path]);
 
   if (error) {
-    return <div className="text-xs text-signal-error">Couldn't load audio.</div>;
+    return <div className="text-xs text-signal-error">Audio error: {error}</div>;
   }
   if (!src) {
     return <div className="text-xs text-text-muted">Loading audio…</div>;
   }
-  return <audio ref={el} src={src} controls className="w-full" />;
+  return (
+    <audio
+      ref={el}
+      src={src}
+      controls
+      className="w-full"
+      onError={() => {
+        const code = el.current?.error?.code;
+        setError(`playback ${code ? (MEDIA_ERR[code] ?? `code ${code}`) : "failed"}`);
+      }}
+    />
+  );
 });
 AudioPlayer.displayName = "AudioPlayer";
