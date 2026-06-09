@@ -9,7 +9,7 @@
 
 use std::io::{ErrorKind, Read};
 use std::process::{Child, ChildStdout, Command, Stdio};
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
@@ -285,6 +285,11 @@ pub struct AudioCapture {
     should_stop: Arc<AtomicBool>,
     children: Vec<Child>,
     threads: Vec<JoinHandle<()>>,
+    /// Total raw bytes read from the mic `pw-cat` so far. Stays 0 when the
+    /// capture stream never starts streaming (wedged PipeWire / dead device),
+    /// which the controller uses to fail a meeting fast instead of recording
+    /// silence.
+    mic_bytes: Arc<AtomicU64>,
 }
 
 impl AudioCapture {
@@ -294,10 +299,12 @@ impl AudioCapture {
     pub fn start(mic_source: Option<String>) -> Result<(Self, Receiver<AudioWindow>), CaptureError> {
         let (tx, rx) = mpsc::channel::<AudioWindow>();
         let should_stop = Arc::new(AtomicBool::new(false));
+        let mic_bytes = Arc::new(AtomicU64::new(0));
         let mut cap = Self {
             should_stop: should_stop.clone(),
             children: Vec::new(),
             threads: Vec::new(),
+            mic_bytes: mic_bytes.clone(),
         };
 
         let sources = [
@@ -319,11 +326,17 @@ impl AudioCapture {
                 )));
             };
 
+            // Only the mic counter gates the meeting; the system reader gets its
+            // own throwaway counter so the codepath stays uniform.
+            let bytes = match source {
+                AudioSource::Mic => mic_bytes.clone(),
+                AudioSource::System => Arc::new(AtomicU64::new(0)),
+            };
             let tx = tx.clone();
             let stop = should_stop.clone();
             let thread = thread::Builder::new()
                 .name(format!("rewindos-audio-{}", source.as_str()))
-                .spawn(move || read_capture_stream(stdout, source, tx, stop))
+                .spawn(move || read_capture_stream(stdout, source, tx, stop, bytes))
                 .map_err(|e| {
                     cap.kill_all();
                     CaptureError::PipeWire(format!("spawn reader ({}): {e}", source.as_str()))
@@ -334,6 +347,12 @@ impl AudioCapture {
         // The original `tx` drops here; only the per-thread clones remain, so the
         // receiver closes once both reader threads exit.
         Ok((cap, rx))
+    }
+
+    /// Total raw bytes captured from the mic so far. `0` means the mic stream
+    /// has produced nothing — the device or PipeWire graph isn't delivering.
+    pub fn mic_bytes(&self) -> u64 {
+        self.mic_bytes.load(Ordering::Relaxed)
     }
 
     /// Kill the capture children (closing their stdout) and join the readers.
@@ -358,11 +377,12 @@ impl AudioCapture {
 /// Read raw S16 PCM from a capture child's stdout, VAD-window it, and forward
 /// completed windows. Returns on stdout EOF (child exited) or when `stop` is set,
 /// performing a tail flush first.
-fn read_capture_stream(
-    mut stdout: ChildStdout,
+fn read_capture_stream<R: Read>(
+    mut stdout: R,
     source: AudioSource,
     tx: Sender<AudioWindow>,
     stop: Arc<AtomicBool>,
+    bytes: Arc<AtomicU64>,
 ) {
     let mut windower = Windower::new(source);
     let mut carry = Vec::new();
@@ -372,6 +392,7 @@ fn read_capture_stream(
         match stdout.read(&mut buf) {
             Ok(0) => break, // EOF — child exited
             Ok(n) => {
+                bytes.fetch_add(n as u64, Ordering::Relaxed);
                 let samples = drain_samples(&mut carry, &buf[..n]);
                 out.clear();
                 windower.push(&samples, &mut out);
@@ -547,6 +568,24 @@ mod tests {
         let s2 = drain_samples(&mut carry, &[0x22]);
         assert_eq!(s2.len(), 1);
         assert!(carry.is_empty());
+    }
+
+    #[test]
+    fn read_capture_stream_counts_every_byte_read() {
+        use std::io::Cursor;
+        // The byte counter is what the controller's fail-fast gate reads, so it
+        // must track all bytes drained from the stream regardless of content.
+        let pcm = vec![0u8; 5000];
+        let (tx, _rx) = mpsc::channel();
+        let bytes = Arc::new(AtomicU64::new(0));
+        read_capture_stream(
+            Cursor::new(pcm.clone()),
+            AudioSource::Mic,
+            tx,
+            Arc::new(AtomicBool::new(false)),
+            bytes.clone(),
+        );
+        assert_eq!(bytes.load(Ordering::Relaxed), pcm.len() as u64);
     }
 
     fn loud(secs: f32) -> Vec<f32> {

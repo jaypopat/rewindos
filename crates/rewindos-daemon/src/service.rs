@@ -283,6 +283,13 @@ impl DaemonService {
         } else {
             Some(title.to_string())
         };
+        // A live preview monitor holds its own pw-cat on the mic; leaving it
+        // running would contend with capture for the device (and leak the
+        // process past the meeting). Stop it before recording starts.
+        let prev_monitor = self.mic_monitor.lock().unwrap_or_else(|e| e.into_inner()).take();
+        if let Some(p) = prev_monitor {
+            tokio::task::spawn_blocking(move || p.stop());
+        }
         let (reply_tx, reply_rx) = oneshot::channel();
         self.meeting_tx
             .send(MeetingCmd::Start { title, reply: reply_tx })

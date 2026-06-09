@@ -5,6 +5,7 @@
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
 
 use rewindos_core::config::AppConfig;
 use rewindos_core::db::Database;
@@ -15,6 +16,17 @@ use crate::capture::audio::AudioCapture;
 use crate::meeting::postprocess;
 use crate::meeting::session::{MeetingSession, Transcribe};
 use crate::meeting::whisper::{ensure_model_available, WhisperTranscriber};
+
+/// How long to wait for the mic to produce its first bytes before declaring the
+/// capture dead. Working devices stream within a few hundred ms; this only
+/// delays the *failure* case, not normal recording.
+const CAPTURE_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// Shown to the user when capture produces no audio at all.
+const MIC_NO_AUDIO_MSG: &str =
+    "No audio from the selected microphone. The input device or PipeWire graph \
+     isn't delivering audio — pick a different mic, or restart the audio stack \
+     (systemctl --user restart wireplumber pipewire pipewire-pulse).";
 
 /// Shared, lock-free view of meeting state for `get_status`. `0` means "none".
 #[derive(Default)]
@@ -108,6 +120,9 @@ async fn start(
     };
     let mic_path = meetings_dir.join(format!("{id}-mic.opus"));
     let sys_path = meetings_dir.join(format!("{id}-system.opus"));
+    // Writers create these files up front; keep paths to clean them up if setup
+    // fails (e.g. the capture gate trips) so empty headers don't accumulate.
+    let cleanup_paths = [mic_path.clone(), sys_path.clone()];
     let n_threads = std::thread::available_parallelism()
         .map(|n| n.get() as i32)
         .unwrap_or(4);
@@ -129,6 +144,20 @@ async fn start(
         )
         .map_err(|e| e.to_string())?;
         let (capture, rx_windows) = AudioCapture::start(mic_source).map_err(|e| e.to_string())?;
+
+        // Fail fast if the mic delivers nothing. A working device starts
+        // streaming within a few hundred ms; if no bytes arrive at all, the
+        // PipeWire graph is wedged or the device is dead — recording would just
+        // produce an empty file and a blank transcript. Surface that instead.
+        let deadline = Instant::now() + CAPTURE_PROBE_TIMEOUT;
+        while capture.mic_bytes() == 0 {
+            if Instant::now() >= deadline {
+                capture.stop();
+                return Err(MIC_NO_AUDIO_MSG.to_string());
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+
         let worker = std::thread::spawn(move || -> MeetingSession {
             let mut session = session;
             while let Ok(window) = rx_windows.recv() {
@@ -145,8 +174,11 @@ async fn start(
     let (capture, worker) = match setup {
         Ok(cw) => cw,
         Err(e) => {
-            // Recording never started — remove the empty meeting row so it
-            // doesn't linger as a permanently-unfinished meeting.
+            // Recording never started — remove the empty meeting row and any
+            // empty audio files the writers created so neither lingers.
+            for p in &cleanup_paths {
+                let _ = std::fs::remove_file(p);
+            }
             let db = db.clone();
             let _ = tokio::task::spawn_blocking(move || {
                 let db = db.lock().unwrap_or_else(|err| err.into_inner());
