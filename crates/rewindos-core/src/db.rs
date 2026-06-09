@@ -520,6 +520,42 @@ impl Database {
         Ok(out)
     }
 
+    /// Transcript segments whose absolute time (meeting start + offset) falls
+    /// inside `[start, end]` unix seconds, with the owning meeting's title and
+    /// start time. Used to give time-scoped chat queries conversation context.
+    /// Returns `(meeting_id, title, meeting_started_at, start_ms, speaker_label, text)`.
+    #[allow(clippy::type_complexity)]
+    pub fn get_transcript_segments_in_range(
+        &self,
+        start: i64,
+        end: i64,
+        limit: i64,
+    ) -> Result<Vec<(i64, Option<String>, i64, i64, String, String)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT s.meeting_id, m.title, m.started_at, s.start_ms, s.speaker_label, s.text
+             FROM transcript_segments s
+             JOIN meetings m ON m.id = s.meeting_id
+             WHERE (m.started_at + s.start_ms / 1000) BETWEEN ?1 AND ?2
+             ORDER BY m.started_at, s.start_ms
+             LIMIT ?3",
+        )?;
+        let rows = stmt.query_map(params![start, end, limit], |row| {
+            Ok((
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+                row.get(5)?,
+            ))
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
     /// Insert a transcript segment into both the table and the FTS index.
     /// Wrapped in a transaction so both stay in sync on crash (mirror of insert_ocr_text).
     pub fn insert_transcript_segment(
@@ -3760,6 +3796,38 @@ mod tests {
         assert_eq!(got.started_at, 1_000);
 
         assert!(db.get_meeting(999_999).unwrap().is_none());
+    }
+
+    #[test]
+    fn transcript_segments_in_range_resolve_absolute_time() {
+        let db = make_test_db();
+        let mid = db.insert_meeting(1_000, Some("Standup"), None).unwrap();
+        let seg = |start_ms, speaker: &str, text: &str| crate::schema::NewTranscriptSegment {
+            start_ms,
+            end_ms: start_ms + 1_000,
+            source: "mic".to_string(),
+            speaker_label: speaker.to_string(),
+            text: text.to_string(),
+        };
+        // Absolute times: 1000 + 5 = 1005 and 1000 + 65 = 1065.
+        db.insert_transcript_segment(mid, &seg(5_000, "You", "first"))
+            .unwrap();
+        db.insert_transcript_segment(mid, &seg(65_000, "Remote", "second"))
+            .unwrap();
+
+        let early = db.get_transcript_segments_in_range(1_000, 1_010, 10).unwrap();
+        assert_eq!(early.len(), 1);
+        assert_eq!(early[0].1.as_deref(), Some("Standup"));
+        assert_eq!(early[0].5, "first");
+
+        let all = db.get_transcript_segments_in_range(1_000, 2_000, 10).unwrap();
+        assert_eq!(all.len(), 2);
+        assert_eq!(all[1].4, "Remote");
+
+        assert!(db
+            .get_transcript_segments_in_range(2_000, 3_000, 10)
+            .unwrap()
+            .is_empty());
     }
 
     #[test]

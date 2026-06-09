@@ -30,14 +30,19 @@ pub async fn build(
 
     let max_context_tokens = config.chat.max_context_tokens;
 
-    let (context, references) = match intent.category {
-        IntentCategory::Recall | IntentCategory::General | IntentCategory::AppSpecific => {
-            let search_query = if intent.search_terms.is_empty() {
-                query.to_string()
-            } else {
-                intent.search_terms.join(" ")
-            };
+    let search_query = if intent.search_terms.is_empty() {
+        query.to_string()
+    } else {
+        intent.search_terms.join(" ")
+    };
+    // One embedding shared by screenshot and transcript retrieval.
+    let query_embedding = match embedding_client {
+        Some(c) => c.embed(&search_query).await.ok().flatten(),
+        None => None,
+    };
 
+    let (mut context, references) = match intent.category {
+        IntentCategory::Recall | IntentCategory::General | IntentCategory::AppSpecific => {
             let filters = SearchFilters {
                 query: search_query.clone(),
                 start_time: intent.time_range.map(|(s, _)| s),
@@ -48,12 +53,9 @@ pub async fn build(
             };
 
             let mut search_response = None;
-            if let Some(embed_client) = embedding_client {
-                let embedding = embed_client.embed(&search_query).await.ok().flatten();
-                if let Some(emb) = embedding {
-                    let db = db.lock().map_err(|e| format!("db lock: {e}"))?;
-                    search_response = db.hybrid_search(&filters, Some(&emb)).ok();
-                }
+            if let Some(emb) = &query_embedding {
+                let db = db.lock().map_err(|e| format!("db lock: {e}"))?;
+                search_response = db.hybrid_search(&filters, Some(emb)).ok();
             }
 
             let result_count = search_response
@@ -167,6 +169,46 @@ pub async fn build(
         }
     };
 
+    // Blend in meeting-transcript context: semantic/keyword search for content
+    // queries, time-window lookup for time-scoped ones. Best-effort — chat
+    // still works if transcript search fails.
+    let transcripts = {
+        let db = db.lock().map_err(|e| format!("db lock: {e}"))?;
+        match intent.category {
+            IntentCategory::TimeBased | IntentCategory::Productivity => {
+                let (start, end) = intent.time_range.unwrap_or_else(|| {
+                    let now = chrono::Local::now().timestamp();
+                    (now - 86400, now)
+                });
+                db.get_transcript_segments_in_range(start, end, 30)
+                    .unwrap_or_default()
+            }
+            _ => db
+                .search_transcripts(&search_query, query_embedding.as_deref(), 12)
+                .map(|hits| {
+                    let mut rows: Vec<_> = hits
+                        .iter()
+                        .map(|h| {
+                            let meeting = db.get_meeting(h.meeting_id).ok().flatten();
+                            (
+                                h.meeting_id,
+                                meeting.as_ref().and_then(|m| m.title.clone()),
+                                meeting.map(|m| m.started_at).unwrap_or_default(),
+                                h.start_ms,
+                                h.speaker_label.clone(),
+                                h.text.clone(),
+                            )
+                        })
+                        .collect();
+                    // Group by meeting, in conversation order, for readability.
+                    rows.sort_by_key(|r| (r.2, r.0, r.3));
+                    rows
+                })
+                .unwrap_or_default(),
+        }
+    };
+    context.push_str(&format_transcripts(&transcripts));
+
     let intent_category = match intent.category {
         IntentCategory::Recall => "recall",
         IntentCategory::TimeBased => "time_based",
@@ -181,4 +223,79 @@ pub async fn build(
         references,
         intent_category,
     })
+}
+
+/// Render transcript rows `(meeting_id, title, meeting_started_at, start_ms,
+/// speaker, text)` as a markdown block, grouped per meeting with [mm:ss]
+/// offsets. Empty input renders nothing, so screenshot-only answers are
+/// unaffected.
+fn format_transcripts(rows: &[(i64, Option<String>, i64, i64, String, String)]) -> String {
+    if rows.is_empty() {
+        return String::new();
+    }
+    let mut out =
+        String::from("\n\n## Meeting transcripts (conversations the user recorded)\n");
+    let mut last_meeting = i64::MIN;
+    for (meeting_id, title, started_at, start_ms, speaker, text) in rows {
+        if *meeting_id != last_meeting {
+            let when = chrono::DateTime::from_timestamp(*started_at, 0)
+                .map(|dt| {
+                    dt.with_timezone(&chrono::Local)
+                        .format("%Y-%m-%d %H:%M")
+                        .to_string()
+                })
+                .unwrap_or_default();
+            let title = title.as_deref().unwrap_or("Untitled meeting");
+            out.push_str(&format!("\n### Meeting \"{title}\" — {when}\n"));
+            last_meeting = *meeting_id;
+        }
+        let mins = start_ms / 60_000;
+        let secs = (start_ms / 1_000) % 60;
+        let snippet: String = text.chars().take(300).collect();
+        out.push_str(&format!("[{mins:02}:{secs:02}] {speaker}: {snippet}\n"));
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_transcripts;
+
+    #[test]
+    fn format_transcripts_groups_by_meeting_and_skips_when_empty() {
+        assert_eq!(format_transcripts(&[]), "");
+
+        let rows = vec![
+            (
+                1,
+                Some("Standup".to_string()),
+                1_700_000_000,
+                5_000,
+                "You".to_string(),
+                "hello".to_string(),
+            ),
+            (
+                1,
+                Some("Standup".to_string()),
+                1_700_000_000,
+                65_000,
+                "Remote".to_string(),
+                "hi back".to_string(),
+            ),
+            (
+                2,
+                None,
+                1_700_100_000,
+                0,
+                "You".to_string(),
+                "next call".to_string(),
+            ),
+        ];
+        let out = format_transcripts(&rows);
+        assert_eq!(out.matches("### Meeting").count(), 2, "one header per meeting");
+        assert!(out.contains("Meeting \"Standup\""));
+        assert!(out.contains("Untitled meeting"));
+        assert!(out.contains("[00:05] You: hello"));
+        assert!(out.contains("[01:05] Remote: hi back"));
+    }
 }
