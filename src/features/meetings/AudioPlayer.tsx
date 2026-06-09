@@ -28,9 +28,9 @@ export const AudioPlayer = forwardRef<AudioHandle, { path: string }>(({ path }, 
     },
   }));
 
-  // WebKitGTK's <audio> can't load Tauri's asset:// protocol — its GStreamer
-  // media backend bypasses custom scheme handlers — so fetch the bytes over IPC
-  // and play them via a Blob URL, which WebKit handles natively.
+  // WebKitGTK can neither load Tauri's asset:// protocol for media nor decode
+  // Ogg-Opus, so the backend reads the file and transcodes it to WAV; we play
+  // those PCM bytes via a Blob URL, which WebKit handles natively.
   useEffect(() => {
     let alive = true;
     let url: string | null = null;
@@ -39,7 +39,7 @@ export const AudioPlayer = forwardRef<AudioHandle, { path: string }>(({ path }, 
     invoke<ArrayBuffer>("read_meeting_audio", { path })
       .then((bytes) => {
         if (!alive) return;
-        url = URL.createObjectURL(new Blob([bytes], { type: "audio/ogg" }));
+        url = URL.createObjectURL(new Blob([bytes], { type: "audio/wav" }));
         setSrc(url);
       })
       .catch((e) => {

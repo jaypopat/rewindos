@@ -32,3 +32,7 @@ regex-lite = "0.1"
 which = "7"
 dirs = "6"
 nix = { version = "0.29", features = ["signal"] }
+# Decode stored Ogg-Opus meeting audio to WAV for playback — WebKitGTK's media
+# backend can't decode opus, but plays PCM/WAV natively.
+ogg = "0.9"
+opus = "0.3"
