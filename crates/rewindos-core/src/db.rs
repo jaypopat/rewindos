@@ -424,6 +424,15 @@ impl Database {
         Ok(())
     }
 
+    /// Rename a meeting. `None` clears the title (shown as "Untitled meeting").
+    pub fn rename_meeting(&self, id: i64, title: Option<&str>) -> Result<()> {
+        self.conn.execute(
+            "UPDATE meetings SET title = ?2 WHERE id = ?1",
+            params![id, title],
+        )?;
+        Ok(())
+    }
+
     /// Store the post-meeting summary.
     pub fn set_meeting_summary(&self, id: i64, summary: &str) -> Result<()> {
         self.conn.execute(
@@ -3751,5 +3760,20 @@ mod tests {
         assert_eq!(got.started_at, 1_000);
 
         assert!(db.get_meeting(999_999).unwrap().is_none());
+    }
+
+    #[test]
+    fn rename_meeting_updates_and_clears_title() {
+        let db = make_test_db();
+        let id = db.insert_meeting(1_000, Some("Untitled"), None).unwrap();
+
+        db.rename_meeting(id, Some("Q3 Planning")).unwrap();
+        assert_eq!(
+            db.get_meeting(id).unwrap().unwrap().title.as_deref(),
+            Some("Q3 Planning")
+        );
+
+        db.rename_meeting(id, None).unwrap();
+        assert_eq!(db.get_meeting(id).unwrap().unwrap().title, None);
     }
 }

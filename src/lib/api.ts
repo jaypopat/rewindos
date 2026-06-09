@@ -674,6 +674,10 @@ export async function deleteMeeting(meetingId: number): Promise<void> {
   return invoke("delete_meeting", { meetingId });
 }
 
+export async function renameMeeting(meetingId: number, title: string): Promise<void> {
+  return invoke("rename_meeting", { meetingId, title });
+}
+
 export async function searchTranscripts(query: string, limit = 50): Promise<TranscriptSearchResult[]> {
   return invoke("search_transcripts", { query, limit });
 }

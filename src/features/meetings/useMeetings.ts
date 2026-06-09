@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { queryKeys } from "@/lib/query-keys";
 import {
-  listMeetings, deleteMeeting, startMeeting, stopMeeting, getDaemonStatus,
+  listMeetings, deleteMeeting, renameMeeting, startMeeting, stopMeeting, getDaemonStatus,
 } from "@/lib/api";
 
 export function useMeetingsList() {
@@ -41,5 +41,9 @@ export function useMeetingActions() {
     mutationFn: (id: number) => deleteMeeting(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["meetings"] }),
   });
-  return { start, stop, remove };
+  const rename = useMutation({
+    mutationFn: ({ id, title }: { id: number; title: string }) => renameMeeting(id, title),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["meetings"] }),
+  });
+  return { start, stop, remove, rename };
 }

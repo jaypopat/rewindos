@@ -395,6 +395,19 @@ fn delete_meeting(state: State<'_, AppState>, meeting_id: i64) -> Result<(), Str
 }
 
 #[tauri::command]
+fn rename_meeting(
+    state: State<'_, AppState>,
+    meeting_id: i64,
+    title: String,
+) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+    let trimmed = title.trim();
+    let title = if trimmed.is_empty() { None } else { Some(trimmed) };
+    db.rename_meeting(meeting_id, title)
+        .map_err(|e| format!("db error: {e}"))
+}
+
+#[tauri::command]
 fn search_transcripts(
     state: State<'_, AppState>,
     query: String,
@@ -2126,6 +2139,7 @@ pub fn run() {
             get_meeting,
             get_meeting_segments,
             delete_meeting,
+            rename_meeting,
             search_transcripts,
             read_meeting_audio,
             start_meeting,
