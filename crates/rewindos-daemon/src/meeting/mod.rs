@@ -4,7 +4,10 @@
 //! `whisper` transcribes the same PCM windows into text segments;
 //! `session` runs the per-meeting encode + transcribe + index loop.
 //! `controller` drives recording in response to D-Bus Start/Stop commands.
+//! `echo_cancel` routes meeting capture through PipeWire AEC so speaker
+//! output doesn't bleed into the mic track.
 pub mod controller;
+pub mod echo_cancel;
 pub mod encode;
 pub mod postprocess;
 pub mod session;

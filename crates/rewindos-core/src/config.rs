@@ -149,6 +149,10 @@ pub struct MeetingConfig {
     /// PipeWire `node.name` of the mic to capture. Empty = system default.
     #[serde(default)]
     pub mic_source: String,
+    /// Capture the mic through a PipeWire echo-cancelled source during
+    /// meetings, so remote audio playing on the speakers doesn't bleed into
+    /// the "You" track. Falls back to the raw mic if setup fails.
+    pub echo_cancel: bool,
 }
 
 impl Default for MeetingConfig {
@@ -164,6 +168,7 @@ impl Default for MeetingConfig {
             hotkey: "Ctrl+Shift+M".to_string(),
             sample_rate: 16000,
             mic_source: String::new(),
+            echo_cancel: true,
         }
     }
 }

@@ -63,5 +63,6 @@ export interface AppConfig {
     hotkey: string;
     sample_rate: number;
     mic_source: string;
+    echo_cancel: boolean;
   };
 }

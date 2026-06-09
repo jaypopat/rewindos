@@ -13,6 +13,7 @@ use tokio::sync::{mpsc, oneshot};
 use tracing::{info, warn};
 
 use crate::capture::audio::AudioCapture;
+use crate::meeting::echo_cancel::{self, EchoCancelGuard};
 use crate::meeting::postprocess;
 use crate::meeting::session::{MeetingSession, Transcribe};
 use crate::meeting::whisper::{ensure_model_available, WhisperTranscriber};
@@ -51,6 +52,7 @@ struct ActiveMeeting {
     meeting_id: i64,
     capture: AudioCapture,
     worker: JoinHandle<MeetingSession>,
+    ec_guard: Option<EchoCancelGuard>,
 }
 
 fn now_unix() -> i64 {
@@ -93,6 +95,85 @@ async fn start(
     if active.is_some() {
         return Err("a meeting is already being recorded".to_string());
     }
+
+    let configured_mic = {
+        let m = config.meeting.mic_source.clone();
+        if m.is_empty() {
+            None
+        } else {
+            Some(m)
+        }
+    };
+
+    // Best-effort echo cancellation: capture the mic through a PipeWire AEC
+    // source so speaker output (the remote party) doesn't bleed into the
+    // "You" track. Any failure falls back to the raw mic.
+    let mut ec_guard: Option<EchoCancelGuard> = None;
+    if config.meeting.echo_cancel {
+        let master = configured_mic.clone();
+        match tokio::task::spawn_blocking(move || EchoCancelGuard::setup(master.as_deref()))
+            .await
+        {
+            Ok(Ok(guard)) => ec_guard = Some(guard),
+            Ok(Err(e)) => warn!(error = %e, "echo-cancel unavailable, recording raw mic"),
+            Err(e) => warn!(error = %e, "echo-cancel setup task panicked"),
+        }
+    }
+    let mic_source = if ec_guard.is_some() {
+        Some(echo_cancel::EC_SOURCE.to_string())
+    } else {
+        configured_mic.clone()
+    };
+
+    let mut attempt = start_attempt(db, config, title.clone(), mic_source).await;
+
+    // If the echo-cancelled source produced no audio (AEC graphs can wedge),
+    // tear it down and retry once with the raw mic rather than failing the
+    // meeting outright.
+    if ec_guard.is_some() {
+        if let Err(e) = &attempt {
+            if e == MIC_NO_AUDIO_MSG {
+                warn!("echo-cancel source delivered no audio; retrying with raw mic");
+                if let Some(guard) = ec_guard.take() {
+                    let _ = tokio::task::spawn_blocking(move || guard.teardown()).await;
+                }
+                attempt = start_attempt(db, config, title, configured_mic).await;
+            }
+        }
+    }
+
+    let (id, capture, worker, started_at) = match attempt {
+        Ok(parts) => parts,
+        Err(e) => {
+            if let Some(guard) = ec_guard.take() {
+                let _ = tokio::task::spawn_blocking(move || guard.teardown()).await;
+            }
+            return Err(e);
+        }
+    };
+
+    *active = Some(ActiveMeeting {
+        meeting_id: id,
+        capture,
+        worker,
+        ec_guard,
+    });
+    state.active.store(true, Ordering::Release);
+    state.meeting_id.store(id, Ordering::Release);
+    state.started_at.store(started_at, Ordering::Release);
+    info!(meeting_id = id, "meeting recording started");
+    Ok(id)
+}
+
+/// One attempt to bring up a recording: meeting row, whisper model, writers,
+/// capture (with the no-audio gate), and the drain worker. On failure the
+/// meeting row and any empty audio files are cleaned up.
+async fn start_attempt(
+    db: &Arc<Mutex<Database>>,
+    config: &Arc<AppConfig>,
+    title: Option<String>,
+    mic_source: Option<String>,
+) -> Result<(i64, AudioCapture, JoinHandle<MeetingSession>, i64), String> {
     let model_path = ensure_model_available(config).map_err(|e| e.to_string())?;
     let meetings_dir = config.meetings_dir().map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&meetings_dir).map_err(|e| e.to_string())?;
@@ -110,14 +191,6 @@ async fn start(
     };
 
     let keep_audio = config.meeting.keep_audio;
-    let mic_source = {
-        let m = config.meeting.mic_source.clone();
-        if m.is_empty() {
-            None
-        } else {
-            Some(m)
-        }
-    };
     let mic_path = meetings_dir.join(format!("{id}-mic.opus"));
     let sys_path = meetings_dir.join(format!("{id}-system.opus"));
     // Writers create these files up front; keep paths to clean them up if setup
@@ -189,16 +262,7 @@ async fn start(
         }
     };
 
-    *active = Some(ActiveMeeting {
-        meeting_id: id,
-        capture,
-        worker,
-    });
-    state.active.store(true, Ordering::Release);
-    state.meeting_id.store(id, Ordering::Release);
-    state.started_at.store(started_at, Ordering::Release);
-    info!(meeting_id = id, "meeting recording started");
-    Ok(id)
+    Ok((id, capture, worker, started_at))
 }
 
 async fn stop(
@@ -207,16 +271,23 @@ async fn stop(
     state: &Arc<MeetingState>,
     active: &mut Option<ActiveMeeting>,
 ) -> Result<(), String> {
-    let meeting = active.take().ok_or("no meeting is being recorded")?;
-    let meeting_id = meeting.meeting_id;
+    let ActiveMeeting {
+        meeting_id,
+        capture,
+        worker,
+        ec_guard,
+    } = active.take().ok_or("no meeting is being recorded")?;
     let ended_at = now_unix();
 
     // Stopping capture closes the window channel, ending the worker; join it to
-    // recover the session, then finalize. All blocking.
+    // recover the session, then finalize. Echo-cancel teardown happens in the
+    // same blocking task so the audio graph is restored before we return.
     let finalize = tokio::task::spawn_blocking(move || -> Result<(), String> {
-        meeting.capture.stop();
-        let session = meeting
-            .worker
+        capture.stop();
+        if let Some(guard) = ec_guard {
+            guard.teardown();
+        }
+        let session = worker
             .join()
             .map_err(|_| "meeting worker thread panicked".to_string())?;
         session.finalize(ended_at).map_err(|e| e.to_string())
