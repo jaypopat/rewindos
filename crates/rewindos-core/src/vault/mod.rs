@@ -3,6 +3,7 @@
 pub mod emit_logseq;
 pub mod emit_obsidian;
 pub mod gather;
+pub mod write;
 
 pub use gather::DayMemory;
 
