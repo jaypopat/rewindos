@@ -600,16 +600,19 @@ impl Database {
     }
 
     /// Insert a transcript segment embedding and mark the segment done.
+    /// Transactional for the same reason as `insert_embedding`.
     pub fn insert_transcript_embedding(&self, segment_id: i64, embedding: &[f32]) -> Result<()> {
         let blob: Vec<u8> = embedding.iter().flat_map(|f| f.to_le_bytes()).collect();
-        self.conn.execute(
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute(
             "INSERT INTO transcript_embeddings (segment_id, embedding) VALUES (?1, ?2)",
             params![segment_id, blob],
         )?;
-        self.conn.execute(
+        tx.execute(
             "UPDATE transcript_segments SET embedding_status = 'done' WHERE id = ?1",
             params![segment_id],
         )?;
+        tx.commit()?;
         Ok(())
     }
 
@@ -1396,18 +1399,22 @@ impl Database {
     }
 
     /// Insert an embedding for a screenshot into the vector table.
+    /// Transactional: the vector row and the status flag must move together,
+    /// or a crash leaves the screenshot permanently 'pending' with a vector
+    /// row already present — the backfill loop then UNIQUE-conflicts forever.
     pub fn insert_embedding(&self, screenshot_id: i64, embedding: &[f32]) -> Result<()> {
         let blob: Vec<u8> = embedding.iter().flat_map(|f| f.to_le_bytes()).collect();
-
-        self.conn.execute(
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute(
             "INSERT INTO ocr_embeddings (screenshot_id, embedding)
              VALUES (?1, ?2)",
             params![screenshot_id, blob],
         )?;
-        self.conn.execute(
+        tx.execute(
             "UPDATE screenshots SET embedding_status = 'done' WHERE id = ?1",
             params![screenshot_id],
         )?;
+        tx.commit()?;
         Ok(())
     }
 
@@ -3858,5 +3865,30 @@ mod tests {
 
         db.rename_meeting(id, None).unwrap();
         assert_eq!(db.get_meeting(id).unwrap().unwrap().title, None);
+    }
+
+    #[test]
+    fn insert_embedding_marks_status_done() {
+        let db = Database::open_in_memory().unwrap();
+        let id = db.insert_screenshot(&make_screenshot(1000)).unwrap();
+        db.insert_ocr_text(id, "hello world", 2).unwrap();
+        db.update_ocr_status(id, OcrStatus::Done).unwrap();
+
+        db.insert_embedding(id, &[0.1_f32; 768]).unwrap();
+
+        let pending = db.get_pending_embeddings(10).unwrap();
+        assert!(
+            !pending.iter().any(|(pid, _)| *pid == id),
+            "screenshot must leave the pending queue once embedded"
+        );
+        let count: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM ocr_embeddings WHERE screenshot_id = ?1",
+                rusqlite::params![id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
     }
 }
