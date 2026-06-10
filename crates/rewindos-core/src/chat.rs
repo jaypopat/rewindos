@@ -83,6 +83,97 @@ pub const SYSTEM_PROMPT: &str = r#"You are RewindOS, a local AI assistant with a
 - No filler phrases like "Based on the provided context" or "Let me analyze".
 - NEVER just rephrase or repeat the user's question back."#;
 
+// -- OpenAI-compatible wire parsing --
+
+/// One parsed line from an OpenAI-compatible SSE stream.
+#[allow(dead_code)] // consumed by the ChatClient rewrite (next commit)
+#[derive(Debug, PartialEq)]
+enum SseEvent {
+    /// Delta chunk: token text (may be empty) and whether the stream finished
+    /// (non-null `finish_reason` — some servers never send `[DONE]`).
+    Chunk { token: String, done: bool },
+    /// The `data: [DONE]` terminator.
+    Done,
+    /// Anything ignorable: blank lines, comments, `event:` lines, malformed JSON.
+    Skip,
+}
+
+#[allow(dead_code)] // consumed by the ChatClient rewrite (next commit)
+fn parse_sse_line(line: &str) -> SseEvent {
+    let Some(payload) = line.trim().strip_prefix("data:") else {
+        return SseEvent::Skip;
+    };
+    let payload = payload.trim();
+    if payload == "[DONE]" {
+        return SseEvent::Done;
+    }
+    match serde_json::from_str::<serde_json::Value>(payload) {
+        Ok(json) => {
+            let choice = &json["choices"][0];
+            let token = choice["delta"]["content"].as_str().unwrap_or("").to_string();
+            let done = !choice["finish_reason"].is_null();
+            SseEvent::Chunk { token, done }
+        }
+        Err(e) => {
+            tracing::warn!("failed to parse sse chunk: {e}, line: {payload}");
+            SseEvent::Skip
+        }
+    }
+}
+
+/// Accumulates raw network bytes and emits complete `\n`-terminated lines,
+/// so SSE payloads split across chunk boundaries reassemble correctly.
+#[allow(dead_code)] // consumed by the ChatClient rewrite (next commit)
+struct SseLineBuffer {
+    buffer: String,
+}
+
+impl SseLineBuffer {
+    #[allow(dead_code)] // consumed by the ChatClient rewrite (next commit)
+    fn new() -> Self {
+        Self { buffer: String::new() }
+    }
+
+    #[allow(dead_code)] // consumed by the ChatClient rewrite (next commit)
+    fn push(&mut self, bytes: &[u8]) -> Vec<String> {
+        self.buffer.push_str(&String::from_utf8_lossy(bytes));
+        let mut lines = Vec::new();
+        while let Some(pos) = self.buffer.find('\n') {
+            lines.push(self.buffer[..pos].to_string());
+            self.buffer = self.buffer[pos + 1..].to_string();
+        }
+        lines
+    }
+}
+
+/// Pull a human-readable message out of a provider error body
+/// (OpenAI-style `{"error":{"message":…}}`), falling back to the raw body.
+#[allow(dead_code)] // consumed by the ChatClient rewrite (next commit)
+fn extract_error_message(body: &str) -> String {
+    serde_json::from_str::<serde_json::Value>(body)
+        .ok()
+        .and_then(|v| v["error"]["message"].as_str().map(String::from))
+        .unwrap_or_else(|| body.to_string())
+        .chars()
+        .take(500)
+        .collect()
+}
+
+/// Model ids from a `GET /models` response (`data[].id`), sorted.
+#[allow(dead_code)] // consumed by the ChatClient rewrite (next commit)
+fn parse_model_ids(v: &serde_json::Value) -> Vec<String> {
+    let mut ids: Vec<String> = v["data"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|m| m["id"].as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+    ids.sort();
+    ids
+}
+
 // -- Ollama client --
 
 pub struct OllamaChatClient {
@@ -987,5 +1078,81 @@ mod tests {
         assert!(context.contains("firefox"));
         assert_eq!(refs.len(), 1);
         assert_eq!(refs[0].id, 1);
+    }
+
+    #[test]
+    fn sse_parse_content_chunk() {
+        let line = r#"data: {"choices":[{"delta":{"content":"hel"},"finish_reason":null}]}"#;
+        assert_eq!(
+            parse_sse_line(line),
+            SseEvent::Chunk { token: "hel".to_string(), done: false }
+        );
+    }
+
+    #[test]
+    fn sse_parse_role_only_delta_yields_empty_token() {
+        let line = r#"data: {"choices":[{"delta":{"role":"assistant"},"finish_reason":null}]}"#;
+        assert_eq!(
+            parse_sse_line(line),
+            SseEvent::Chunk { token: String::new(), done: false }
+        );
+    }
+
+    #[test]
+    fn sse_parse_finish_reason_marks_done() {
+        let line = r#"data: {"choices":[{"delta":{},"finish_reason":"stop"}]}"#;
+        assert_eq!(
+            parse_sse_line(line),
+            SseEvent::Chunk { token: String::new(), done: true }
+        );
+    }
+
+    #[test]
+    fn sse_parse_done_terminator() {
+        assert_eq!(parse_sse_line("data: [DONE]"), SseEvent::Done);
+    }
+
+    #[test]
+    fn sse_parse_skips_noise() {
+        assert_eq!(parse_sse_line(""), SseEvent::Skip);
+        assert_eq!(parse_sse_line(": keep-alive comment"), SseEvent::Skip);
+        assert_eq!(parse_sse_line("event: message"), SseEvent::Skip);
+        assert_eq!(parse_sse_line("data: {not json"), SseEvent::Skip);
+    }
+
+    #[test]
+    fn sse_line_buffer_handles_split_payloads() {
+        let mut buf = SseLineBuffer::new();
+        // Payload arrives split mid-JSON across two network chunks.
+        assert!(buf.push(br#"data: {"choices":[{"delta":{"con"#).is_empty());
+        let lines = buf.push(b"tent\":\"hi\"},\"finish_reason\":null}]}\n\n");
+        assert_eq!(lines.len(), 2); // the data line + the blank SSE separator
+        assert_eq!(
+            parse_sse_line(&lines[0]),
+            SseEvent::Chunk { token: "hi".to_string(), done: false }
+        );
+        assert_eq!(parse_sse_line(&lines[1]), SseEvent::Skip);
+    }
+
+    #[test]
+    fn extract_error_message_prefers_openai_shape() {
+        let body = r#"{"error":{"message":"Invalid API key","type":"auth"}}"#;
+        assert_eq!(extract_error_message(body), "Invalid API key");
+    }
+
+    #[test]
+    fn extract_error_message_falls_back_to_raw_body_truncated() {
+        assert_eq!(extract_error_message("plain text error"), "plain text error");
+        let long = "x".repeat(900);
+        assert_eq!(extract_error_message(&long).chars().count(), 500);
+    }
+
+    #[test]
+    fn parse_model_ids_reads_data_array() {
+        let v: serde_json::Value = serde_json::from_str(
+            r#"{"object":"list","data":[{"id":"qwen2.5:7b"},{"id":"llama3"},{"object":"x"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(parse_model_ids(&v), vec!["llama3".to_string(), "qwen2.5:7b".to_string()]);
     }
 }
