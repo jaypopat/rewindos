@@ -192,6 +192,11 @@ pub struct ChatSearchHit {
 }
 
 pub fn search_chats(db: &Database, query: &str, limit: i64) -> Result<Vec<ChatSearchHit>> {
+    // Raw user text — quote it or FTS5 treats operators ("", AND, *) as syntax.
+    let quoted = crate::db::fts5_quote(query);
+    if quoted.is_empty() {
+        return Ok(Vec::new());
+    }
     let conn = db.conn();
     let mut stmt = conn.prepare(
         "SELECT m.chat_id, c.title, m.id,
@@ -204,7 +209,7 @@ pub fn search_chats(db: &Database, query: &str, limit: i64) -> Result<Vec<ChatSe
          ORDER BY m.created_at DESC
          LIMIT ?2",
     )?;
-    let rows = stmt.query_map(rusqlite::params![query, limit], |r| {
+    let rows = stmt.query_map(rusqlite::params![quoted, limit], |r| {
         Ok(ChatSearchHit {
             chat_id: r.get(0)?,
             chat_title: r.get(1)?,
@@ -360,6 +365,27 @@ mod tests {
 
         let chat = get_chat(&db, id).unwrap().unwrap();
         assert_eq!(chat.claude_session_id, None);
+    }
+
+    #[test]
+    fn search_chats_survives_fts5_syntax() {
+        let db = Database::open_in_memory().unwrap();
+        let id = create_chat(&db, "t", ChatBackend::Claude, Some("s")).unwrap();
+        append_message(&db, id, ChatRole::User, BlockKind::Text,
+            r#"{"text":"crash and burn report"}"#, false).unwrap();
+
+        // Raw FTS5 operators must not surface as query syntax errors.
+        for q in [r#"he said "hi""#, "crash AND", "(unbalanced", "wild*card", "NOT"] {
+            let hits = search_chats(&db, q, 10);
+            assert!(hits.is_ok(), "query {q:?} errored: {:?}", hits.err());
+        }
+
+        // OR-joined tokens still find the message.
+        let hits = search_chats(&db, "crash AND burn", 10).unwrap();
+        assert_eq!(hits.len(), 1);
+
+        // Whitespace-only input returns empty, not an error.
+        assert_eq!(search_chats(&db, "   ", 10).unwrap().len(), 0);
     }
 
     #[test]

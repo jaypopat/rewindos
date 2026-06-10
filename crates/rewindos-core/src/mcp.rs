@@ -5,7 +5,7 @@
 //! the rmcp stdio server; keeping them here means they're testable
 //! without the MCP protocol.
 
-use crate::db::Database;
+use crate::db::{fts5_quote, Database};
 use crate::schema::SearchFilters;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -318,18 +318,6 @@ pub fn search_transcripts(
     Ok(out)
 }
 
-/// Make arbitrary user text safe for FTS5 MATCH: every token is wrapped in
-/// double quotes (embedded quotes escaped), so input like `he said "hi"` or
-/// `crash AND burn` matches literally instead of erroring as query syntax.
-/// Tokens are OR-joined: conversational LLM queries aren't boolean, and
-/// requiring every token (implicit AND) would let one stray word zero out the
-/// results — bm25 still ranks fuller matches first. Empty input returns "".
-fn fts5_quote(raw: &str) -> String {
-    raw.split_whitespace()
-        .map(|tok| format!("\"{}\"", tok.replace('"', "\"\"")))
-        .collect::<Vec<_>>()
-        .join(" OR ")
-}
 
 fn truncate_chars(s: &str, max: usize) -> String {
     if s.chars().count() > max {

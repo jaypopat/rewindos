@@ -293,6 +293,19 @@ pub fn tiptap_json_to_markdown(content: &str) -> String {
     result
 }
 
+/// Make arbitrary user text safe for FTS5 MATCH: every token is wrapped in
+/// double quotes (embedded quotes escaped), so input like `he said "hi"` or
+/// `crash AND burn` matches literally instead of erroring as query syntax.
+/// Tokens are OR-joined: conversational queries aren't boolean, and
+/// requiring every token (implicit AND) would let one stray word zero out the
+/// results — bm25 still ranks fuller matches first. Empty input returns "".
+pub fn fts5_quote(raw: &str) -> String {
+    raw.split_whitespace()
+        .map(|tok| format!("\"{}\"", tok.replace('"', "\"\"")))
+        .collect::<Vec<_>>()
+        .join(" OR ")
+}
+
 pub struct Database {
     conn: Connection,
 }
