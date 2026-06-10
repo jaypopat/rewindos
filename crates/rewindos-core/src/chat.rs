@@ -94,6 +94,8 @@ enum SseEvent {
     Chunk { token: String, done: bool },
     /// The `data: [DONE]` terminator.
     Done,
+    /// An in-stream provider error payload.
+    Error(String),
     /// Anything ignorable: blank lines, comments, `event:` lines, malformed JSON.
     Skip,
 }
@@ -109,38 +111,42 @@ fn parse_sse_line(line: &str) -> SseEvent {
     }
     match serde_json::from_str::<serde_json::Value>(payload) {
         Ok(json) => {
+            if !json["error"].is_null() {
+                return SseEvent::Error(extract_error_message(payload));
+            }
             let choice = &json["choices"][0];
             let token = choice["delta"]["content"].as_str().unwrap_or("").to_string();
             let done = !choice["finish_reason"].is_null();
             SseEvent::Chunk { token, done }
         }
         Err(e) => {
-            tracing::warn!("failed to parse sse chunk: {e}, line: {payload}");
+            tracing::warn!("failed to parse sse chunk: {e} ({} bytes)", payload.len());
             SseEvent::Skip
         }
     }
 }
 
-/// Accumulates raw network bytes and emits complete `\n`-terminated lines,
-/// so SSE payloads split across chunk boundaries reassemble correctly.
+/// Accumulates raw network bytes and emits complete `\n`-terminated lines.
+/// Buffers as bytes and decodes per complete line, so multibyte UTF-8
+/// sequences split across network chunks reassemble correctly.
 #[allow(dead_code)] // consumed by the ChatClient rewrite (next commit)
 struct SseLineBuffer {
-    buffer: String,
+    buffer: Vec<u8>,
 }
 
 impl SseLineBuffer {
     #[allow(dead_code)] // consumed by the ChatClient rewrite (next commit)
     fn new() -> Self {
-        Self { buffer: String::new() }
+        Self { buffer: Vec::new() }
     }
 
     #[allow(dead_code)] // consumed by the ChatClient rewrite (next commit)
     fn push(&mut self, bytes: &[u8]) -> Vec<String> {
-        self.buffer.push_str(&String::from_utf8_lossy(bytes));
+        self.buffer.extend_from_slice(bytes);
         let mut lines = Vec::new();
-        while let Some(pos) = self.buffer.find('\n') {
-            lines.push(self.buffer[..pos].to_string());
-            self.buffer = self.buffer[pos + 1..].to_string();
+        while let Some(pos) = self.buffer.iter().position(|&b| b == b'\n') {
+            let line: Vec<u8> = self.buffer.drain(..=pos).collect();
+            lines.push(String::from_utf8_lossy(&line[..line.len() - 1]).into_owned());
         }
         lines
     }
@@ -1132,6 +1138,38 @@ mod tests {
             SseEvent::Chunk { token: "hi".to_string(), done: false }
         );
         assert_eq!(parse_sse_line(&lines[1]), SseEvent::Skip);
+    }
+
+    #[test]
+    fn sse_line_buffer_reassembles_multibyte_utf8_split_across_chunks() {
+        let mut buf = SseLineBuffer::new();
+        // "café" — é is [0xC3, 0xA9]; split the byte sequence across two network chunks.
+        // Build the full payload as bytes, then split one byte into the é sequence.
+        let prefix = br#"data: {"choices":[{"delta":{"content":"caf"#;
+        let e_bytes: &[u8] = &[0xC3, 0xA9]; // é
+        let suffix = br#""},"finish_reason":null}]}"#;
+        let mut payload_bytes = Vec::new();
+        payload_bytes.extend_from_slice(prefix);
+        payload_bytes.extend_from_slice(e_bytes);
+        payload_bytes.extend_from_slice(suffix);
+
+        // Split after the first byte of é (0xC3), before the continuation byte (0xA9).
+        let split_at = prefix.len() + 1; // one byte into é
+        assert!(buf.push(&payload_bytes[..split_at]).is_empty());
+        let mut second_chunk = payload_bytes[split_at..].to_vec();
+        second_chunk.push(b'\n');
+        let lines = buf.push(&second_chunk);
+        assert_eq!(lines.len(), 1);
+        assert_eq!(
+            parse_sse_line(&lines[0]),
+            SseEvent::Chunk { token: "café".to_string(), done: false }
+        );
+    }
+
+    #[test]
+    fn sse_parse_in_stream_error_payload() {
+        let line = r#"data: {"error":{"message":"rate limited","code":429}}"#;
+        assert_eq!(parse_sse_line(line), SseEvent::Error("rate limited".to_string()));
     }
 
     #[test]
