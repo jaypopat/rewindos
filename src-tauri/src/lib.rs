@@ -416,8 +416,12 @@ fn search_transcripts(
     limit: Option<i64>,
 ) -> Result<Vec<rewindos_core::schema::TranscriptSearchResult>, String> {
     // Keyword-only from the UI (no query embedding); the daemon owns embeddings.
+    let quoted = rewindos_core::db::fts5_quote(&query);
+    if quoted.is_empty() {
+        return Ok(Vec::new());
+    }
     let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
-    db.search_transcripts(&query, None, limit.unwrap_or(50))
+    db.search_transcripts(&quoted, None, limit.unwrap_or(50))
         .map_err(|e| format!("db error: {e}"))
 }
 
@@ -1548,8 +1552,15 @@ fn search_journal(
     limit: Option<i64>,
     offset: Option<i64>,
 ) -> Result<JournalSearchResponse, String> {
+    let quoted = rewindos_core::db::fts5_quote(&query);
+    if quoted.is_empty() {
+        return Ok(JournalSearchResponse {
+            results: Vec::new(),
+            total_count: 0,
+        });
+    }
     let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
-    db.search_journal(&query, limit.unwrap_or(20), offset.unwrap_or(0))
+    db.search_journal(&quoted, limit.unwrap_or(20), offset.unwrap_or(0))
         .map_err(|e| format!("db error: {e}"))
 }
 

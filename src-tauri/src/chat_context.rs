@@ -44,7 +44,7 @@ pub async fn build(
     let (mut context, references) = match intent.category {
         IntentCategory::Recall | IntentCategory::General | IntentCategory::AppSpecific => {
             let filters = SearchFilters {
-                query: search_query.clone(),
+                query: rewindos_core::db::fts5_quote(&search_query),
                 start_time: intent.time_range.map(|(s, _)| s),
                 end_time: intent.time_range.map(|(_, e)| e),
                 app_name: intent.app_filter.clone(),
@@ -184,7 +184,11 @@ pub async fn build(
                     .unwrap_or_default()
             }
             _ => db
-                .search_transcripts(&search_query, query_embedding.as_deref(), 12)
+                .search_transcripts(
+                    &rewindos_core::db::fts5_quote(&search_query),
+                    query_embedding.as_deref(),
+                    12,
+                )
                 .map(|hits| {
                     let mut rows: Vec<_> = hits
                         .iter()

@@ -5,7 +5,7 @@ use std::time::Instant;
 use rewindos_core::config::AppConfig;
 use rewindos_core::db::Database;
 use rewindos_core::embedding::OllamaClient;
-use rewindos_core::schema::{DaemonStatus, QueueDepths, SearchFilters};
+use rewindos_core::schema::{DaemonStatus, QueueDepths, SearchFilters, SearchResponse};
 use tokio::sync::{mpsc, oneshot};
 use tracing::{info, warn};
 use zbus::interface;
@@ -160,7 +160,20 @@ impl DaemonService {
             serde_json::from_str(filters_json)
                 .map_err(|e| zbus::fdo::Error::InvalidArgs(format!("invalid filters: {e}")))?
         };
-        filters.query = query.to_string();
+        // Quote raw user text so FTS5 operators (", (, AND, *) match literally
+        // instead of erroring as query syntax. Embedding below still uses the
+        // raw `query` — vector search wants natural language, not quoted tokens.
+        let fts_query = rewindos_core::db::fts5_quote(query);
+        if fts_query.is_empty() {
+            let empty = SearchResponse {
+                results: Vec::new(),
+                total_count: 0,
+                search_mode: None,
+            };
+            return serde_json::to_string(&empty)
+                .map_err(|e| zbus::fdo::Error::Failed(format!("serialize error: {e}")));
+        }
+        filters.query = fts_query;
 
         // Embed the query if Ollama is available
         let query_embedding = if let Some(ref client) = self.ollama_client {

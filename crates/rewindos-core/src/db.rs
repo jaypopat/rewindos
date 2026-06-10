@@ -3618,6 +3618,23 @@ mod tests {
         assert_eq!(attached[0].screenshot_id, ss_id2);
     }
 
+    #[test]
+    fn search_journal_raw_operators_error_but_quoted_dont() {
+        let db = make_test_db();
+        // Seed one journal entry so FTS has content.
+        db.upsert_journal_entry(&crate::schema::UpsertJournalEntry {
+            date: "2025-05-01".to_string(),
+            content: "the quarterly report mentioned a crash".to_string(),
+        })
+        .unwrap();
+
+        // Raw operator input is a syntax error at the FTS layer:
+        assert!(db.search_journal("\"unbalanced", 10, 0).is_err());
+        // Quoted via the shared helper, the same input is safe:
+        let quoted = crate::db::fts5_quote("\"unbalanced");
+        assert!(db.search_journal(&quoted, 10, 0).is_ok());
+    }
+
     // ── Chat table migration tests ──────────────────────────────────
 
     #[test]
