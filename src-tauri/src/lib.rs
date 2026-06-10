@@ -1452,13 +1452,30 @@ fn get_carry_forward_todos(
 }
 
 #[tauri::command]
-fn open_in_viewer(app: tauri::AppHandle, file_path: String) -> Result<(), String> {
+fn open_in_viewer(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    file_path: String,
+) -> Result<(), String> {
     use tauri_plugin_opener::OpenerExt;
-    if !std::path::Path::new(&file_path).is_file() {
-        return Err(format!("file not found: {file_path}"));
+    // Sandbox to the data directory (canonicalized so `..`/symlinks can't
+    // escape it) — this command takes a frontend-supplied path and hands it
+    // to the OS opener, which would otherwise launch anything on disk.
+    let base_dir = {
+        let cfg = state.config.lock().map_err(|e| format!("config lock: {e}"))?;
+        cfg.base_dir().map_err(|e| format!("base dir: {e}"))?
+    };
+    let canon_dir = base_dir
+        .canonicalize()
+        .map_err(|e| format!("base dir: {e}"))?;
+    let canon = std::path::Path::new(&file_path)
+        .canonicalize()
+        .map_err(|e| format!("file not found: {e}"))?;
+    if !canon.starts_with(&canon_dir) {
+        return Err("path is outside the RewindOS data directory".into());
     }
     app.opener()
-        .open_path(file_path, None::<&str>)
+        .open_path(canon.to_string_lossy(), None::<&str>)
         .map_err(|e| format!("failed to open image: {e}"))
 }
 
