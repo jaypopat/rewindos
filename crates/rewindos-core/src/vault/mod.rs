@@ -30,7 +30,7 @@ pub(crate) fn hh_mm_label(ts: i64) -> String {
         .unwrap_or_else(|| "00:00".into())
 }
 
-/// Duration in seconds → human-friendly label (e.g. 3661 → "1h01m", 90 → "1h30m", 45 → "45m").
+/// Duration in seconds → human-friendly label (e.g. 3661 → "1h01m", 5400 → "1h30m", 300 → "5m").
 pub(crate) fn dur_label(secs: i64) -> String {
     let m = secs / 60;
     if m >= 60 {
@@ -44,6 +44,22 @@ pub(crate) fn dur_label(secs: i64) -> String {
 pub(crate) fn mmss(ms: i64) -> String {
     let s = ms / 1000;
     format!("{}:{:02}", s / 60, s % 60)
+}
+
+/// Re-prefix every line of (possibly multi-line) content so it stays inside a
+/// structured block: prefix each line after the first with `cont_prefix`.
+pub(crate) fn continuation_safe(s: &str, cont_prefix: &str) -> String {
+    let mut lines = s.lines();
+    let mut out = String::new();
+    if let Some(first) = lines.next() {
+        out.push_str(first);
+    }
+    for l in lines {
+        out.push('\n');
+        out.push_str(cont_prefix);
+        out.push_str(l);
+    }
+    out
 }
 
 /// Which note app we're emitting for.

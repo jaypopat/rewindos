@@ -1,6 +1,6 @@
 use crate::vault::{
     gather::DayMemory,
-    dur_label, hh_mm_label, hhmm, mmss, Emitter, RenderedDay, ThumbnailCopy,
+    continuation_safe, dur_label, hh_mm_label, hhmm, mmss, Emitter, RenderedDay, ThumbnailCopy,
 };
 use std::path::PathBuf;
 
@@ -42,14 +42,14 @@ impl Emitter for ObsidianEmitter {
                 let dur = dur_label(m.duration_secs);
                 md.push_str(&format!("> [!note]- {} — {} · {}\n", m.title, time, dur));
                 if let Some(mins) = &m.minutes {
-                    md.push_str(&format!("> minutes: {}\n", mins));
+                    md.push_str(&format!("> minutes: {}\n", continuation_safe(mins, "> ")));
                 }
                 for seg in &m.transcript {
                     md.push_str(&format!(
                         "> **{}** {} — {}\n",
                         seg.speaker_label,
                         mmss(seg.start_ms),
-                        seg.text
+                        continuation_safe(&seg.text, "> ")
                     ));
                 }
                 md.push('\n');
@@ -61,6 +61,7 @@ impl Emitter for ObsidianEmitter {
             md.push_str("## Key moments\n");
             for moment in &mem.moments {
                 let time = hh_mm_label(moment.timestamp);
+                // Namespaced by the companion dir, so no prefix needed here.
                 let fname = format!("{}-{}.webp", mem.date_key, hhmm(moment.timestamp));
 
                 if copy_thumbnails {
@@ -79,7 +80,7 @@ impl Emitter for ObsidianEmitter {
                 }
 
                 md.push_str(&format!(
-                    "{} · {} — [open full →](file://{})\n",
+                    "{} · {} — [open full →](<file://{}>)\n",
                     time,
                     moment.app_name,
                     moment.full_res_abs.display()
@@ -169,5 +170,36 @@ mod tests {
         assert!(r.markdown.contains("shipped the export"), "journal leads");
         assert_eq!(r.thumbnails.len(), 1);
         assert!(r.thumbnails[0].dest_rel.starts_with("_rewindos/img"));
+    }
+
+    #[test]
+    fn obsidian_file_link_uses_angle_brackets() {
+        let r = ObsidianEmitter.render(&sample(), "_rewindos", false);
+        assert!(
+            r.markdown.contains("[open full →](<file://"),
+            "angle-bracket file link for space-safe paths"
+        );
+    }
+
+    #[test]
+    fn obsidian_multiline_minutes_stay_in_callout() {
+        let mut mem = sample();
+        mem.meetings[0].minutes = Some("line1\nline2".into());
+        let r = ObsidianEmitter.render(&mem, "_rewindos", false);
+        // Every line between the callout open and the next blank line must start with "> "
+        let callout_start = r.markdown.find("> [!note]-").expect("callout present");
+        let block = &r.markdown[callout_start..];
+        // The blank line ends the callout block
+        let block_end = block.find("\n\n").unwrap_or(block.len());
+        let block_body = &block[..block_end];
+        for line in block_body.lines() {
+            assert!(
+                line.starts_with("> "),
+                "callout line does not start with '> ': {:?}",
+                line
+            );
+        }
+        // Confirm line2 is present and prefixed correctly
+        assert!(r.markdown.contains("> line2"), "continuation line prefixed");
     }
 }

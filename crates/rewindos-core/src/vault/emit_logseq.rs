@@ -1,6 +1,6 @@
 use crate::vault::{
     gather::DayMemory,
-    dur_label, hh_mm_label, hhmm, mmss, Emitter, RenderedDay, ThumbnailCopy,
+    continuation_safe, dur_label, hh_mm_label, hhmm, mmss, Emitter, RenderedDay, ThumbnailCopy,
 };
 use std::path::PathBuf;
 
@@ -27,7 +27,8 @@ impl Emitter for LogseqEmitter {
         // --- Recap ---
         if let Some(recap) = &mem.recap {
             md.push_str("- ## Today\n");
-            md.push_str(&format!("  - {}\n", recap));
+            // continuation prefix matches the 4-space content indent of a "  - " bullet
+            md.push_str(&format!("  - {}\n", continuation_safe(recap, "    ")));
         }
 
         // --- Meetings ---
@@ -39,14 +40,16 @@ impl Emitter for LogseqEmitter {
                 md.push_str(&format!("  - **{}** {} · {}\n", m.title, time, dur));
                 md.push_str("    collapsed:: true\n");
                 if let Some(mins) = &m.minutes {
-                    md.push_str(&format!("    - > minutes: {}\n", mins));
+                    // continuation prefix: 6 spaces to stay inside the "    - " bullet
+                    md.push_str(&format!("    - > minutes: {}\n", continuation_safe(mins, "      ")));
                 }
                 for seg in &m.transcript {
+                    // continuation prefix: 6 spaces to stay inside the "    - " bullet
                     md.push_str(&format!(
                         "    - **{}** {} — {}\n",
                         seg.speaker_label,
                         mmss(seg.start_ms),
-                        seg.text
+                        continuation_safe(&seg.text, "      ")
                     ));
                 }
             }
@@ -57,6 +60,7 @@ impl Emitter for LogseqEmitter {
             md.push_str("- ## Key moments\n");
             for moment in &mem.moments {
                 let time = hh_mm_label(moment.timestamp);
+                // Prefixed with "rewindos-" to avoid collisions with user attachments in shared assets/.
                 let fname = format!(
                     "rewindos-{}-{}.webp",
                     mem.date_key,
@@ -77,7 +81,7 @@ impl Emitter for LogseqEmitter {
                 }
 
                 md.push_str(&format!(
-                    "    [open full →](file://{})\n",
+                    "    [open full →](<file://{}>)\n",
                     moment.full_res_abs.display()
                 ));
             }
@@ -163,5 +167,36 @@ mod tests {
         assert!(r.markdown.contains("shipped the export"));
         assert_eq!(r.thumbnails.len(), 1);
         assert!(r.thumbnails[0].dest_rel.starts_with("assets"));
+    }
+
+    #[test]
+    fn logseq_file_link_uses_angle_brackets() {
+        let r = LogseqEmitter.render(&sample(), "_rewindos", false);
+        assert!(
+            r.markdown.contains("[open full →](<file://"),
+            "angle-bracket file link for space-safe paths"
+        );
+    }
+
+    #[test]
+    fn logseq_multiline_recap_is_indented() {
+        let mut mem = sample();
+        mem.recap = Some("r1\nr2".into());
+        let r = LogseqEmitter.render(&mem, "_rewindos", false);
+        // The continuation line "r2" must not appear at column 0 (unindented)
+        for line in r.markdown.lines() {
+            assert!(
+                line != "r2",
+                "recap continuation 'r2' must not appear as an unindented line"
+            );
+        }
+        // And it should be present with its indentation
+        assert!(r.markdown.contains("r2"), "r2 must appear in output");
+        let r2_line = r.markdown.lines().find(|l| l.contains("r2")).unwrap();
+        assert!(
+            r2_line.starts_with(' '),
+            "line containing 'r2' must start with whitespace, got: {:?}",
+            r2_line
+        );
     }
 }
