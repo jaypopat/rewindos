@@ -3890,5 +3890,50 @@ mod tests {
             )
             .unwrap();
         assert_eq!(count, 1);
+        let status: String = db
+            .conn()
+            .query_row(
+                "SELECT embedding_status FROM screenshots WHERE id = ?1",
+                rusqlite::params![id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(status, "done");
+    }
+
+    #[test]
+    fn insert_transcript_embedding_marks_status_done() {
+        let db = make_test_db();
+        let mid = db.insert_meeting(1000, None, None).unwrap();
+        let seg = crate::schema::NewTranscriptSegment {
+            start_ms: 0,
+            end_ms: 10,
+            source: "mic".into(),
+            speaker_label: "You".into(),
+            text: "status check item".into(),
+        };
+        let sid = db.insert_transcript_segment(mid, &seg).unwrap();
+
+        db.insert_transcript_embedding(sid, &[0.1_f32; 768]).unwrap();
+
+        assert!(db.get_pending_transcript_embeddings(10).unwrap().is_empty());
+        let count: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM transcript_embeddings WHERE segment_id = ?1",
+                rusqlite::params![sid],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
+        let status: String = db
+            .conn()
+            .query_row(
+                "SELECT embedding_status FROM transcript_segments WHERE id = ?1",
+                rusqlite::params![sid],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(status, "done");
     }
 }
