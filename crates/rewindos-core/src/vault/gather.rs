@@ -1,7 +1,8 @@
 use crate::db::Database;
 use crate::error::Result;
+use crate::hasher::PerceptualHasher;
 use crate::schema::TranscriptSegment;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 const CAPTURE_INTERVAL_SECS: i64 = 5; // matches default capture cadence
@@ -155,14 +156,97 @@ pub fn tiptap_plain_text(json: &str) -> String {
     out.trim().to_string()
 }
 
-/// Temporary stub — Task 4 replaces with context-based selection.
+/// Hamming distance threshold for treating two frames as a real context switch.
+/// Deliberately above the scene-dedup threshold (5) so only genuine app changes
+/// are flagged as scene boundaries.
+const SCENE_DISTANCE: u32 = 6;
+
+/// Pick up to `max` representative frames for the day, in chronological order.
+/// Priority: bookmarked frames > meeting-boundary frames > scene-change frames.
+/// Dedup by id and by perceptual-hash hamming proximity (≤ 5).
 fn select_key_moments(
-    _db: &Database,
-    _day_start: i64,
-    _day_end: i64,
-    _max: u32,
+    db: &Database,
+    day_start: i64,
+    day_end: i64,
+    max: u32,
 ) -> Result<Vec<MomentMemory>> {
-    Ok(Vec::new())
+    // All frames for the day, sorted chronologically.
+    // 20k covers a full day at 5s cadence (~17,280 frames); query is DESC so a too-small limit would drop mornings.
+    let mut frames = db.browse_screenshots(Some(day_start), Some(day_end), None, 20_000, 0)?;
+    frames.sort_by_key(|s| s.timestamp);
+    // Ensure all day-boundary semantics agree on [start, end) — the query's upper bound is inclusive,
+    // but bookmark/meeting filters use exclusive < day_end.
+    frames.retain(|s| s.timestamp < day_end);
+    if frames.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // Priority signals.
+    let bookmarked: HashSet<i64> = db
+        .list_bookmarks(1000, 0)?
+        .into_iter()
+        .filter(|(_, s)| s.timestamp >= day_start && s.timestamp < day_end)
+        .map(|(_, s)| s.id)
+        .collect();
+    let meeting_starts: Vec<i64> = db
+        .list_meetings(500, 0)?
+        .into_iter()
+        .filter(|m| m.started_at >= day_start && m.started_at < day_end)
+        .map(|m| m.started_at)
+        .collect();
+
+    // Build candidates in priority order:
+    // 1. bookmarked frames
+    // 2. first frame at or after each meeting start
+    // 3. scene-change frames (hamming distance ≥ SCENE_DISTANCE from previous)
+    let mut candidates: Vec<&crate::schema::Screenshot> = Vec::new();
+    candidates.extend(frames.iter().filter(|s| bookmarked.contains(&s.id)));
+    for start in &meeting_starts {
+        if let Some(f) = frames.iter().find(|s| s.timestamp >= *start) {
+            candidates.push(f);
+        }
+    }
+    let mut prev: Option<&Vec<u8>> = None;
+    for f in &frames {
+        let changed = match prev {
+            None => true,
+            Some(p) => PerceptualHasher::hamming_distance(p, &f.perceptual_hash) >= SCENE_DISTANCE,
+        };
+        if changed {
+            candidates.push(f);
+            prev = Some(&f.perceptual_hash);
+        }
+    }
+
+    // Dedup by id and by hamming proximity, preserving priority order.
+    let mut picked: Vec<&crate::schema::Screenshot> = Vec::new();
+    let mut seen_ids: HashSet<i64> = HashSet::new();
+    for c in candidates {
+        if !seen_ids.insert(c.id) {
+            continue;
+        }
+        let near = picked
+            .iter()
+            .any(|p| PerceptualHasher::hamming_distance(&p.perceptual_hash, &c.perceptual_hash) <= 5);
+        if !near {
+            picked.push(c);
+            if picked.len() as u32 >= max {
+                break;
+            }
+        }
+    }
+    picked.sort_by_key(|s| s.timestamp);
+
+    Ok(picked
+        .into_iter()
+        .map(|s| MomentMemory {
+            timestamp: s.timestamp,
+            app_name: s.app_name.clone().unwrap_or_else(|| "unknown".into()),
+            window_title: s.window_title.clone(),
+            thumbnail_abs: s.thumbnail_path.as_ref().map(PathBuf::from),
+            full_res_abs: PathBuf::from(&s.file_path),
+        })
+        .collect())
 }
 
 #[cfg(test)]
@@ -187,6 +271,37 @@ mod tests {
     fn tiptap_plain_text_handles_hard_break() {
         let doc = r#"{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"line one"},{"type":"hardBreak"},{"type":"text","text":"line two"}]}]}"#;
         assert!(tiptap_plain_text(doc).contains("line one\nline two"));
+    }
+
+    #[test]
+    fn moments_dedup_near_identical_frames() {
+        let db = Database::open_in_memory().unwrap();
+        // Two near-identical frames (same hash) + one different — expect ≤2 picked,
+        // never the duplicate twice.
+        let h1 = vec![0u8; 8];
+        let mut h2 = vec![0u8; 8];
+        h2[0] = 0xFF; // far hash
+        for (ts, hash) in [(100, &h1), (105, &h1), (4000, &h2)] {
+            db.insert_screenshot(&crate::schema::NewScreenshot {
+                timestamp: ts,
+                timestamp_ms: ts * 1000,
+                app_name: Some("VS Code".into()),
+                window_title: Some("x".into()),
+                window_class: None,
+                file_path: format!("/f/{ts}.webp"),
+                thumbnail_path: Some(format!("/t/{ts}.webp")),
+                width: 1920,
+                height: 1080,
+                file_size_bytes: 1,
+                perceptual_hash: hash.clone(),
+            })
+            .unwrap();
+        }
+        let moments = select_key_moments(&db, 0, 10_000, 6).unwrap();
+        // the two identical frames collapse to one representative
+        assert!(moments.len() <= 2, "got {}", moments.len());
+        let ts: Vec<i64> = moments.iter().map(|m| m.timestamp).collect();
+        assert!(ts.contains(&4000), "the distinct frame must be picked");
     }
 
     #[test]
