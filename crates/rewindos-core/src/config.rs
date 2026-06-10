@@ -87,7 +87,12 @@ pub struct SemanticConfig {
 #[serde(default)]
 pub struct ChatConfig {
     pub enabled: bool,
-    pub ollama_url: String,
+    /// UI hint only: "ollama" | "lmstudio" | "openai" | "openrouter" | "custom".
+    pub provider: String,
+    /// OpenAI-style API base, e.g. "http://localhost:11434/v1".
+    pub base_url: String,
+    /// Bearer token; empty = no Authorization header.
+    pub api_key: String,
     pub model: String,
     pub max_context_tokens: usize,
     pub max_history_messages: usize,
@@ -201,7 +206,9 @@ impl Default for ChatConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            ollama_url: "http://localhost:11434".to_string(),
+            provider: "ollama".to_string(),
+            base_url: "http://localhost:11434/v1".to_string(),
+            api_key: String::new(),
             model: "qwen2.5:7b".to_string(),
             max_context_tokens: 6144,
             max_history_messages: 20,
@@ -329,7 +336,7 @@ impl AppConfig {
             config.ensure_dirs()?;
             let toml_str = toml::to_string_pretty(&config)
                 .map_err(|e| CoreError::Config(format!("failed to serialize config: {e}")))?;
-            fs::write(&config_path, toml_str)?;
+            write_config_file(&config_path, &toml_str)?;
             Ok(config)
         }
     }
@@ -402,6 +409,15 @@ impl AppConfig {
 /// Expand `~` to the user's home directory (public version for other modules).
 pub fn resolve_tilde_pub(path: &str) -> Result<PathBuf> {
     resolve_tilde(path)
+}
+
+/// Write a config TOML file with owner-only (0600) permissions — the chat
+/// section may contain an API key.
+pub fn write_config_file(path: &Path, toml_str: &str) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    fs::write(path, toml_str)?;
+    fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
+    Ok(())
 }
 
 /// Expand `~` to the user's home directory.
@@ -533,5 +549,40 @@ tesseract_lang = "deu"
         // defaults for fields not specified
         assert_eq!(config.storage.screenshot_quality, 80);
         assert_eq!(config.ui.theme, "system");
+    }
+
+    #[test]
+    fn chat_config_defaults_to_ollama_preset() {
+        let c = ChatConfig::default();
+        assert_eq!(c.provider, "ollama");
+        assert_eq!(c.base_url, "http://localhost:11434/v1");
+        assert!(c.api_key.is_empty());
+    }
+
+    #[test]
+    fn chat_config_ignores_removed_ollama_url_key() {
+        // Old configs containing the removed `ollama_url` key must still parse,
+        // falling back to the new defaults.
+        let toml_content = r#"
+[chat]
+ollama_url = "http://somewhere-else:11434"
+model = "llama3"
+"#;
+        let mut f = NamedTempFile::new().unwrap();
+        f.write_all(toml_content.as_bytes()).unwrap();
+
+        let config = AppConfig::load_from(f.path()).unwrap();
+        assert_eq!(config.chat.model, "llama3");
+        assert_eq!(config.chat.base_url, "http://localhost:11434/v1");
+    }
+
+    #[test]
+    fn config_file_written_with_owner_only_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        write_config_file(&path, "x = 1\n").unwrap();
+        let mode = fs::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
     }
 }

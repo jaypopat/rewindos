@@ -268,7 +268,7 @@ pub async fn resolve_recap(
         }
     }
     if let Some(generated) =
-        generate_summary_ollama(prompt, &chat.ollama_url, &chat.model).await
+        generate_summary_ollama(prompt, &chat.base_url, &chat.model).await
     {
         return (generated, true);
     }

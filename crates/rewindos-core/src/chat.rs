@@ -102,7 +102,7 @@ impl OllamaChatClient {
             .unwrap_or_default();
         Self {
             client,
-            base_url: config.ollama_url.trim_end_matches('/').to_string(),
+            base_url: config.base_url.trim_end_matches('/').to_string(),
             model: config.model.clone(),
             temperature: config.temperature,
         }

@@ -923,7 +923,7 @@ async fn get_daily_summary(
             .lock()
             .map_err(|e| format!("config lock: {e}"))?;
         (
-            format!("{}/api/generate", cfg.chat.ollama_url.trim_end_matches('/')),
+            format!("{}/api/generate", cfg.chat.base_url.trim_end_matches('/')),
             cfg.chat.model.clone(),
         )
     };
@@ -1653,7 +1653,7 @@ async fn generate_journal_summary(
             .lock()
             .map_err(|e| format!("config lock: {e}"))?;
         (
-            format!("{}/api/generate", cfg.chat.ollama_url.trim_end_matches('/')),
+            format!("{}/api/generate", cfg.chat.base_url.trim_end_matches('/')),
             cfg.chat.model.clone(),
         )
     };
