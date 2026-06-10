@@ -183,14 +183,17 @@ export function DashboardView({
     [categoryEntries],
   );
 
-  const recentFrames = useMemo(
-    () =>
-      [...screenshots]
-        .filter((s) => s.thumbnail_path)
-        .sort((a, b) => b.timestamp - a.timestamp)
-        .slice(0, 12),
-    [screenshots],
-  );
+  // Sampled evenly across the day, not most-recent: consecutive captures are
+  // near-duplicates, so the last N frames would all show the same minute.
+  const dayFrames = useMemo(() => {
+    const withThumbs = screenshots
+      .filter((s) => s.thumbnail_path)
+      .sort((a, b) => a.timestamp - b.timestamp);
+    const count = 12;
+    if (withThumbs.length <= count) return withThumbs;
+    const step = (withThumbs.length - 1) / (count - 1);
+    return Array.from({ length: count }, (_, i) => withThumbs[Math.round(i * step)]);
+  }, [screenshots]);
 
   const now = Math.floor(Date.now() / 1000);
   const dateLine = new Date().toLocaleDateString(undefined, {
@@ -397,23 +400,23 @@ export function DashboardView({
           </div>
         </div>
 
-        {/* Recent frames */}
-        {recentFrames.length > 0 && (
+        {/* The day in frames */}
+        {dayFrames.length > 0 && (
           <div className="mt-14">
             <Rise i={12} className="flex items-baseline gap-3.5 mb-6">
-              <h2 className="font-display text-[23px] tracking-tight">Recent frames</h2>
+              <h2 className="font-display text-[23px] tracking-tight">The day in frames</h2>
               <div className="ml-auto font-mono text-[11px] text-text-muted">
-                last captures · click to open
+                sampled across today · click to open
               </div>
             </Rise>
             <div className="grid grid-cols-6 gap-3.5">
-              {recentFrames.map((c, idx) => (
+              {dayFrames.map((c, idx) => (
                 <Rise
                   key={c.id}
                   i={13 + idx}
                   className="cursor-pointer group"
                   onClick={() =>
-                    onSelectScreenshot(c.id, recentFrames.map((f) => f.id))
+                    onSelectScreenshot(c.id, dayFrames.map((f) => f.id))
                   }
                 >
                   <div className="h-[100px] rounded-[6px] overflow-hidden bg-panel border border-black/40 group-hover:border-line-hi transition-colors">
