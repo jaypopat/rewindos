@@ -129,7 +129,11 @@ pub fn register_mcp() -> Result<(), String> {
         .insert("rewindos".to_string(), entry);
 
     let pretty = serde_json::to_string_pretty(&json).map_err(|e| format!("serialize: {e}"))?;
-    std::fs::write(&path, pretty).map_err(|e| format!("write: {e}"))?;
+    // Write-then-rename: the Claude CLI reads this file on every invocation,
+    // and a torn write here would break every MCP server it has registered.
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, &pretty).map_err(|e| format!("write: {e}"))?;
+    std::fs::rename(&tmp, &path).map_err(|e| format!("rename: {e}"))?;
     Ok(())
 }
 
