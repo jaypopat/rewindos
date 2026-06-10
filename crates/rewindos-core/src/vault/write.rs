@@ -86,7 +86,9 @@ pub fn write_memory(cfg: &VaultExportConfig, mem: &DayMemory) -> Result<()> {
         if let Some(parent) = dest.parent() {
             std::fs::create_dir_all(parent).ok();
         }
-        let _ = std::fs::copy(&t.src, &dest);
+        if let Err(e) = std::fs::copy(&t.src, &dest) {
+            tracing::warn!(src = %t.src.display(), dest = %dest.display(), "vault thumbnail copy failed: {e}");
+        }
     }
     Ok(())
 }
