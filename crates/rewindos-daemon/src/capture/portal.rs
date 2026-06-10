@@ -166,8 +166,11 @@ impl PortalCaptureBackend {
         let handle = std::thread::Builder::new()
             .name("rewindos-pipewire".into())
             .spawn(move || {
-                if let Err(e) = run_pipewire_loop(pw_raw_fd, node_id, shared, should_stop) {
+                if let Err(e) = run_pipewire_loop(pw_raw_fd, node_id, shared.clone(), should_stop) {
                     error!("PipeWire thread exited with error: {e}");
+                    // Surface the failure: the stall watchdog reconnects off `dead`,
+                    // otherwise the daemon would keep running while capturing nothing.
+                    shared.dead.store(true, Ordering::Release);
                 }
             })
             .map_err(|e| {
@@ -414,7 +417,7 @@ fn run_pipewire_loop(
 
     // Build format parameters for stream connection
     let mut params_buf = vec![0u8; 1024];
-    let params_pod = build_video_params(&mut params_buf);
+    let params_pod = build_video_params(&mut params_buf)?;
 
     stream
         .connect(
@@ -614,7 +617,7 @@ fn convert_spa_to_rgba(
 }
 
 /// Build SPA video format parameters pod for stream connection.
-fn build_video_params(buf: &mut [u8]) -> &pipewire::spa::pod::Pod {
+fn build_video_params(buf: &mut [u8]) -> Result<&pipewire::spa::pod::Pod, String> {
     use pipewire::spa::pod::serialize::PodSerializer;
     use pipewire::spa::pod::{ChoiceValue, Object, Property, PropertyFlags, Value};
     use pipewire::spa::utils::{Choice, ChoiceEnum, ChoiceFlags, Fraction, Id, Rectangle};
@@ -690,13 +693,11 @@ fn build_video_params(buf: &mut [u8]) -> &pipewire::spa::pod::Pod {
         ],
     });
 
-    let (result, _) = PodSerializer::serialize(std::io::Cursor::new(buf), &obj)
-        .expect("failed to serialize video params pod");
-
-    unsafe {
-        let ptr = result.into_inner().as_ptr();
-        &*(ptr as *const pipewire::spa::pod::Pod)
-    }
+    let (cursor, len) = PodSerializer::serialize(std::io::Cursor::new(&mut *buf), &obj)
+        .map_err(|e| format!("failed to serialize video params pod: {e:?}"))?;
+    let written = &cursor.into_inner()[..len as usize];
+    pipewire::spa::pod::Pod::from_bytes(written)
+        .ok_or_else(|| "serialized video params are not a valid pod".to_string())
 }
 
 /// Return a DE-specific hint about which xdg-desktop-portal backend to install.
