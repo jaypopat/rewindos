@@ -367,11 +367,10 @@ impl ChatClient {
         let content = if content.is_empty() { "{}".to_string() } else { content };
 
         // Strip <think>...</think> blocks (reasoning models like deepseek-r1)
-        let clean = if let Ok(re) = regex_lite::Regex::new(r"(?s)<think>.*?</think>") {
-            re.replace_all(&content, "").trim().to_string()
-        } else {
-            content.clone()
-        };
+        let clean = crate::summary::think_re()
+            .replace_all(&content, "")
+            .trim()
+            .to_string();
 
         // Strip markdown code fences if present
         let clean = clean.trim();

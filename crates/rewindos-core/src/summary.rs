@@ -4,6 +4,7 @@
 use std::sync::OnceLock;
 
 use crate::config::ChatConfig;
+use crate::error::Result;
 use crate::vault::gather::DayMemory;
 
 /// Shared instruction header for the daily-summary prompts. Wording matches the
@@ -221,43 +222,43 @@ pub fn build_daily_prompt_from_memory(mem: &DayMemory) -> String {
 /// Compiled once at first use; avoids per-call regex construction.
 static THINK_RE: OnceLock<regex_lite::Regex> = OnceLock::new();
 
-fn think_re() -> &'static regex_lite::Regex {
+pub(crate) fn think_re() -> &'static regex_lite::Regex {
     THINK_RE.get_or_init(|| {
         regex_lite::Regex::new(r"(?s)<think>.*?</think>").expect("static regex is valid")
     })
 }
 
-/// Clean raw LLM output: trim, strip `<think>` blocks (an unclosed `<think>`
-/// discards the entire response). Returns `None` when nothing usable remains.
+/// Clean raw LLM output: strip all closed <think>…</think> blocks, truncate at
+/// any unclosed <think> (reasoning that never ended), trim. Returns None when
+/// nothing usable remains.
 fn clean_summary_text(raw: &str) -> Option<String> {
-    let raw = raw.trim();
-    if raw.is_empty() {
-        return None;
-    }
-    // Strip <think>...</think> blocks emitted by reasoning models.
-    // An unclosed <think> tag (no </think>) discards the entire response —
-    // there is no usable text to return.
-    let cleaned = if let Some(after) = raw.strip_prefix("<think>") {
-        after
-            .find("</think>")
-            .map(|end| after[end + 8..].trim())
-            .unwrap_or("")
-            .to_string()
-    } else {
-        think_re().replace_all(raw, "").trim().to_string()
+    let stripped = think_re().replace_all(raw, "");
+    let visible = match stripped.find("<think>") {
+        Some(pos) => &stripped[..pos],
+        None => &stripped,
     };
-    if cleaned.is_empty() {
-        return None;
+    let visible = visible.trim();
+    if visible.is_empty() {
+        None
+    } else {
+        Some(visible.to_string())
     }
-    Some(cleaned)
 }
 
-/// Generate a summary via the configured chat provider. Returns `None` on any
-/// failure (graceful degradation — callers fall back to the digest).
-pub async fn generate_summary(prompt: &str, chat: &ChatConfig) -> Option<String> {
+/// Generate a summary via the configured chat provider.
+/// `Err` = provider/transport error (actionable: bad key, model missing, down).
+/// `Ok(None)` = the model responded but produced nothing usable.
+pub async fn try_generate_summary(prompt: &str, chat: &ChatConfig) -> Result<Option<String>> {
     let client = crate::chat::ChatClient::new(chat);
-    match client.complete(prompt, 512, 0.7).await {
-        Ok(text) => clean_summary_text(&text),
+    let text = client.complete(prompt, 512, 0.7).await?;
+    Ok(clean_summary_text(&text))
+}
+
+/// Best-effort variant: returns None on any failure (callers fall back to the
+/// digest).
+pub async fn generate_summary(prompt: &str, chat: &ChatConfig) -> Option<String> {
+    match try_generate_summary(prompt, chat).await {
+        Ok(opt) => opt,
         Err(e) => {
             tracing::warn!("summary generation failed: {e}");
             None
@@ -316,6 +317,22 @@ mod tests {
         assert_eq!(clean_summary_text(""), None);
         assert_eq!(clean_summary_text("   \n  "), None);
         assert_eq!(clean_summary_text("<think>x</think>   "), None);
+    }
+
+    #[test]
+    fn clean_summary_text_strips_interior_think_blocks_after_prefix_block() {
+        assert_eq!(
+            clean_summary_text("<think>a</think>middle<think>b</think>end"),
+            Some("middleend".to_string())
+        );
+    }
+
+    #[test]
+    fn clean_summary_text_truncates_at_trailing_unclosed_think() {
+        assert_eq!(
+            clean_summary_text("the answer <think>oops never closed"),
+            Some("the answer".to_string())
+        );
     }
 
     #[test]

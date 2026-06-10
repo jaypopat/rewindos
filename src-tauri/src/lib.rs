@@ -1592,9 +1592,10 @@ async fn generate_journal_summary(
         cfg.chat.clone()
     };
 
-    let summary_text = rewindos_core::summary::generate_summary(&prompt, &chat_cfg)
+    let summary_text = rewindos_core::summary::try_generate_summary(&prompt, &chat_cfg)
         .await
-        .ok_or_else(|| "Summary generation failed".to_string())?;
+        .map_err(|e| e.to_string())?
+        .ok_or("model returned an empty summary")?;
 
     let entry_count = entries.len() as i64;
     let generated_at = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
