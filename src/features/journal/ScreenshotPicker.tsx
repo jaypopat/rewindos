@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { browseScreenshots, search, getImageUrl, type TimelineEntry, type AppUsageStat } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
@@ -32,52 +32,63 @@ export function ScreenshotPicker({
   const [searchOffset, setSearchOffset] = useState(0);
   const [accumulated, setAccumulated] = useState<TimelineEntry[]>([]);
 
-  // Browse mode query
-  const { data: browseData = [], isLoading: browseLoading, isFetching: browseFetching } = useQuery({
+  // Browse mode query — pure fetcher; accumulation happens in the effect
+  // below. Side effects in queryFn double rows on any refetch.
+  const { data: browseData, isLoading: browseLoading, isFetching: browseFetching } = useQuery({
     queryKey: [...queryKeys.journalPicker(dayStart, dayEnd), appFilter, browseOffset],
-    queryFn: async () => {
-      const results = await browseScreenshots(dayStart, dayEnd, appFilter, PAGE_SIZE, browseOffset);
-      if (browseOffset === 0) {
-        setAccumulated(results);
-      } else {
-        setAccumulated((prev) => [...prev, ...results]);
-      }
-      return results;
-    },
+    queryFn: () => browseScreenshots(dayStart, dayEnd, appFilter, PAGE_SIZE, browseOffset),
     enabled: mode === "browse",
   });
 
+  useEffect(() => {
+    if (!browseData) return;
+    if (browseOffset === 0) {
+      setAccumulated(browseData);
+    } else {
+      setAccumulated((prev) => {
+        const seen = new Set(prev.map((e) => e.id));
+        return [...prev, ...browseData.filter((e) => !seen.has(e.id))];
+      });
+    }
+  }, [browseData, browseOffset]);
+
   // Search mode query
   const [searchResults, setSearchResults] = useState<TimelineEntry[]>([]);
-  const { isLoading: searchLoading, isFetching: searchFetching } = useQuery({
+  const { data: searchData, isLoading: searchLoading, isFetching: searchFetching } = useQuery({
     queryKey: ["screenshot-picker-search", searchQuery, searchOffset],
     queryFn: async () => {
       const resp = await search(searchQuery, {
         limit: PAGE_SIZE,
         offset: searchOffset,
       });
-      const entries: TimelineEntry[] = resp.results.map((r) => ({
+      return resp.results.map((r) => ({
         id: r.id,
         timestamp: r.timestamp,
         app_name: r.app_name,
         window_title: r.window_title,
         thumbnail_path: r.thumbnail_path,
         file_path: r.file_path,
-      }));
-      if (searchOffset === 0) {
-        setSearchResults(entries);
-      } else {
-        setSearchResults((prev) => [...prev, ...entries]);
-      }
-      return entries;
+      })) satisfies TimelineEntry[];
     },
     enabled: mode === "search" && searchQuery.trim().length > 0,
   });
 
+  useEffect(() => {
+    if (!searchData) return;
+    if (searchOffset === 0) {
+      setSearchResults(searchData);
+    } else {
+      setSearchResults((prev) => {
+        const seen = new Set(prev.map((e) => e.id));
+        return [...prev, ...searchData.filter((e) => !seen.has(e.id))];
+      });
+    }
+  }, [searchData, searchOffset]);
+
   const displayItems = mode === "browse" ? accumulated : searchResults;
   const isLoading = mode === "browse" ? browseLoading : searchLoading;
   const isFetching = mode === "browse" ? browseFetching : searchFetching;
-  const lastBatchFull = (mode === "browse" ? browseData : searchResults).length >= PAGE_SIZE;
+  const lastBatchFull = (mode === "browse" ? (browseData ?? []) : searchResults).length >= PAGE_SIZE;
 
   const attachedSet = new Set(attachedIds);
 
