@@ -55,7 +55,8 @@ function SelectContent({
         position="popper"
         sideOffset={4}
         className={cn(
-          "z-50 min-w-[var(--radix-select-trigger-width)] overflow-hidden bg-surface-raised border border-border/60 shadow-lg animate-fade-in",
+          "z-50 min-w-[var(--radix-select-trigger-width)] overflow-hidden bg-surface-raised border border-border/60 shadow-lg",
+          "data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 ease-quiet",
           className,
         )}
         {...props}

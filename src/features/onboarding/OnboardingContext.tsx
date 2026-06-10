@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
 
 const STORAGE_KEY = "rewindos-onboarding-completed";
 
@@ -21,8 +21,10 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
     setIsOpen(false);
   }, []);
 
+  const value = useMemo(() => ({ isOpen, open, complete }), [isOpen, open, complete]);
+
   return (
-    <OnboardingContext.Provider value={{ isOpen, open, complete }}>
+    <OnboardingContext.Provider value={value}>
       {children}
     </OnboardingContext.Provider>
   );

@@ -197,7 +197,7 @@ export function HourGroupRow({
 
       {/* Expanded grid */}
       {isOpen && (
-        <div className="px-4 pb-3 pt-1">
+        <div className="px-4 pb-3 pt-1 animate-in fade-in slide-in-from-top-1 duration-200 ease-quiet">
           <div className="grid grid-cols-4 xl:grid-cols-6 gap-2">
             {visible.map((entry) => (
               <button type="button"

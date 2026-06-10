@@ -46,7 +46,7 @@ function groupByRecency(chats: Chat[]): Bucket[] {
   return buckets.filter((b) => b.chats.length > 0);
 }
 
-export function ChatSidebar({ onClose }: { onClose: () => void }) {
+export function ChatSidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { activeChatId, selectChat, startNewChat } = useAskChat();
   const qc = useQueryClient();
   const [query, setQuery] = useState("");
@@ -98,7 +98,12 @@ export function ChatSidebar({ onClose }: { onClose: () => void }) {
   return (
     <aside
       aria-label="Chat history"
-      className="absolute left-0 top-12 bottom-0 z-20 w-64 flex flex-col min-h-0 bg-surface-raised border-r border-line shadow-[16px_0_40px_-20px_rgba(0,0,0,0.7)] animate-slide-in-left"
+      inert={!open}
+      className={cn(
+        "absolute left-0 top-12 bottom-0 z-20 w-64 flex flex-col min-h-0 bg-surface-raised border-r border-line shadow-[16px_0_40px_-20px_rgba(0,0,0,0.7)]",
+        "transition-[transform,opacity] duration-200 ease-quiet",
+        open ? "translate-x-0 opacity-100" : "-translate-x-3 opacity-0 pointer-events-none",
+      )}
     >
       {/* Header */}
       <div className="p-3 border-b border-line space-y-2.5">

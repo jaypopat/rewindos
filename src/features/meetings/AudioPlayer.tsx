@@ -49,17 +49,25 @@ export const AudioPlayer = forwardRef<AudioHandle, { path: string }>(({ path }, 
   }, [path]);
 
   if (error) {
-    return <div className="text-xs text-signal-error">Audio error: {error}</div>;
+    return (
+      <div className="font-mono text-[11px] tracking-[0.02em] text-signal-error">
+        Audio error: {error}
+      </div>
+    );
   }
   if (!src) {
-    return <div className="text-xs text-text-muted">Loading audio…</div>;
+    return (
+      <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-text-muted">
+        Loading audio…
+      </div>
+    );
   }
   return (
     <audio
       ref={el}
       src={src}
       controls
-      className="w-full"
+      className="w-full max-w-110 rounded-lg"
       onError={() => {
         const code = el.current?.error?.code;
         setError(`playback ${code ? (MEDIA_ERR[code] ?? `code ${code}`) : "failed"}`);

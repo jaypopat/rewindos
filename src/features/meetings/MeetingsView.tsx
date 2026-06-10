@@ -21,22 +21,37 @@ export function MeetingsView({ onJumpToTime }: { onJumpToTime?: (unixSecs: numbe
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
-      <header className="flex flex-col gap-2 px-4 py-3 border-b border-border/50">
-        <div className="flex items-center justify-between">
-          <h1 className="text-sm font-medium text-text-primary">Meetings</h1>
+      <header className="flex flex-col gap-3.5 px-7 py-[18px] border-b border-line shrink-0">
+        <div className="flex items-center justify-between gap-4">
+          <div className="font-mono text-[11px] uppercase tracking-[0.16em] text-text-muted">
+            Recorder
+            <span className="mx-2 text-text-ghost">/</span>
+            <span className="text-text-secondary">
+              {meetings.length} {meetings.length === 1 ? "session" : "sessions"}
+            </span>
+          </div>
           <RecordingControls />
         </div>
         <MicPicker active={active} />
       </header>
       <div className="flex-1 flex min-h-0">
-        <div className="w-80 border-r border-border/50 overflow-y-auto">
-          <MeetingsList onSelect={setSelected} />
+        <div className="w-[300px] border-r border-line overflow-y-auto shrink-0">
+          <MeetingsList onSelect={setSelected} selectedId={liveSelected?.id ?? null} />
         </div>
         <div className="flex-1 overflow-y-auto">
           {liveSelected ? (
             <MeetingDetail meeting={liveSelected} onJumpToTime={onJumpToTime} />
           ) : (
-            <div className="p-6 text-sm text-text-muted">Select a meeting to view its transcript.</div>
+            <div className="flex h-full items-center justify-center px-8">
+              <div className="text-center">
+                <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-text-faint">
+                  No session selected
+                </div>
+                <p className="mt-3 font-display text-[19px] tracking-tight text-text-secondary">
+                  Pick a meeting to read its transcript.
+                </p>
+              </div>
+            </div>
           )}
         </div>
       </div>

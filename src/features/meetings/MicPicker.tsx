@@ -86,16 +86,18 @@ export function MicPicker({ active }: { active: boolean }) {
   const hasSignal = fillWidth >= 3;
 
   return (
-    <div className="flex items-center gap-2 text-xs text-text-secondary">
-      <Mic className="size-3.5 shrink-0 text-text-muted" />
-      <span className="shrink-0">Microphone</span>
+    <div className="flex items-center gap-2.5 text-[13px] text-text-secondary">
+      <Mic className="size-3.5 shrink-0 text-text-muted" strokeWidth={1.7} />
+      <span className="shrink-0 font-mono text-[10px] uppercase tracking-[0.14em] text-text-faint">
+        Microphone
+      </span>
 
       <Select
         value={selected === "" ? DEFAULT : selected}
         onValueChange={(v) => save.mutate(v === DEFAULT ? "" : v)}
         disabled={save.isPending}
       >
-        <SelectTrigger className="h-7 w-56 text-xs">
+        <SelectTrigger className="h-8 w-56 text-[13px]">
           <SelectValue placeholder="System default" />
         </SelectTrigger>
         <SelectContent>
@@ -109,17 +111,20 @@ export function MicPicker({ active }: { active: boolean }) {
       </Select>
 
       {active ? (
-        <span className="text-text-muted">recording…</span>
+        <span className="inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.1em] text-signal-error">
+          <span className="size-1.5 rounded-full bg-signal-error animate-led-pulse" />
+          recording
+        </span>
       ) : (
-        <div className="flex items-center gap-2">
-          {/* Visible track even at zero (bordered, lighter than the surface). */}
-          <div className="h-2.5 w-32 overflow-hidden rounded-full border border-border/60 bg-text-muted/20">
+        <div className="flex items-center gap-2.5">
+          {/* Visible track even at zero (hairline border, raised surface). */}
+          <div className="h-1.5 w-32 overflow-hidden rounded-full border border-line-hi bg-line-2">
             <div
               className="h-full rounded-full bg-signal-active transition-[width] duration-75"
               style={{ width: `${fillWidth}%` }}
             />
           </div>
-          <span className="text-text-muted">
+          <span className="font-mono text-[10px] uppercase tracking-[0.08em] text-text-faint">
             {hasSignal ? "input detected" : "speak to test"}
           </span>
         </div>

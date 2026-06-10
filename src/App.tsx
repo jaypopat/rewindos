@@ -254,6 +254,9 @@ function App() {
           <DaemonPanel />
         </header>
 
+        {/* keyed on view so switching views crossfades the content region */}
+        <div key={view} className="flex-1 flex flex-col min-h-0 animate-in fade-in duration-200 ease-quiet">
+
         {view === "search" && subView === "list" && (
           <div className="flex-1 flex flex-col min-h-0">
             <SearchBar
@@ -352,6 +355,8 @@ function App() {
             <SettingsView />
           </ViewSuspense>
         )}
+
+        </div>
       </div>
 
       {showSaveMoment && <SaveMomentDialog onClose={() => setShowSaveMoment(false)} />}

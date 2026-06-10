@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import {
@@ -36,6 +36,15 @@ export function RecallPalette({ open, onClose, onOpenResult, onRewindTo }: Recal
   const [selectedValue, setSelectedValue] = useState("");
   const debouncedQuery = useDebounce(query, 150);
 
+  // Start each opening with an empty query. Adjusted during render (not in an
+  // effect) so there's no stale frame, and so it fires for every open path
+  // including the ⌘K toggle, which closes the dialog without an onOpenChange.
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) setQuery("");
+  }
+
   const { data: appNames = [] } = useQuery({
     queryKey: queryKeys.appNames(),
     queryFn: getAppNames,
@@ -68,10 +77,6 @@ export function RecallPalette({ open, onClose, onOpenResult, onRewindTo }: Recal
     placeholderData: (prev) => prev,
   });
   const results = hasQuery ? (data?.results ?? []) : [];
-
-  useEffect(() => {
-    if (open) setQuery("");
-  }, [open]);
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>

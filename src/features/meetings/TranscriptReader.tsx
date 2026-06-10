@@ -1,3 +1,4 @@
+import { cn } from "@/lib/utils";
 import type { TranscriptSegment, Meeting } from "@/lib/api";
 
 function mmss(ms: number) {
@@ -14,35 +15,49 @@ export function TranscriptReader({
   onJumpToTime?: (unixSecs: number) => void;
 }) {
   if (segments.length === 0)
-    return <div className="p-4 text-sm text-text-muted">No transcript yet.</div>;
+    return (
+      <div className="px-7 py-6">
+        <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-text-faint">
+          Transcript
+        </div>
+        <p className="mt-2.5 text-[13px] text-text-muted">No transcript yet.</p>
+      </div>
+    );
 
   return (
-    <div className="space-y-2 p-4">
+    <div className="px-7 py-6 max-w-[74ch]">
       {segments.map((seg) => {
         const isYou = seg.speaker_label === "You";
         return (
-          <div key={seg.id} className={`flex ${isYou ? "justify-end" : "justify-start"}`}>
-            <div className={`max-w-[75%] rounded-lg px-3 py-2 text-sm ${
-              isYou ? "bg-accent/15 text-text-primary" : "bg-surface-overlay text-text-secondary"
-            }`}>
-              <div className="flex items-center gap-2 text-[10px] text-text-muted mb-0.5">
-                <span>{seg.speaker_label}</span>
-                <button className="underline hover:text-accent" onClick={() => onSeek(seg.start_ms / 1000)}>
-                  {mmss(seg.start_ms)}
-                </button>
-                {onJumpToTime && (
-                  <button
-                    className="hover:text-accent"
-                    title="Jump to this moment in Rewind"
-                    aria-label="Jump to screenshot"
-                    onClick={() => onJumpToTime(meeting.started_at + Math.floor(seg.start_ms / 1000))}
-                  >
-                    ↪ screen
-                  </button>
+          <div key={seg.id} className="group mb-5 last:mb-0">
+            <div className="flex items-baseline gap-2.5">
+              <span
+                className={cn(
+                  "font-mono text-[10px] uppercase tracking-widest",
+                  isYou ? "text-accent-hi" : "text-text-muted",
                 )}
-              </div>
-              {seg.text}
+              >
+                {seg.speaker_label}
+              </span>
+              <button
+                className="font-mono text-[10px] tabular-nums text-text-faint transition-colors hover:text-accent"
+                onClick={() => onSeek(seg.start_ms / 1000)}
+                title="Play from here"
+              >
+                {mmss(seg.start_ms)}
+              </button>
+              {onJumpToTime && (
+                <button
+                  className="inline-flex items-center gap-1 font-mono text-[10px] uppercase tracking-[0.08em] text-text-faint opacity-0 transition-all hover:text-accent group-hover:opacity-100"
+                  title="Jump to this moment in Rewind"
+                  aria-label="Jump to screenshot"
+                  onClick={() => onJumpToTime(meeting.started_at + Math.floor(seg.start_ms / 1000))}
+                >
+                  ↪ screen
+                </button>
+              )}
             </div>
+            <p className="mt-1 text-[14px] leading-[1.68] text-text-secondary">{seg.text}</p>
           </div>
         );
       })}

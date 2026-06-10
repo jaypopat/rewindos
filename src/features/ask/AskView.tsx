@@ -116,16 +116,14 @@ export function AskView({ onSelectScreenshot }: AskViewProps) {
   return (
     <div className="flex-1 flex min-h-0 relative">
       {chatsOpen && (
-        <>
-          {/* click-away catcher — transparent, sits under the drawer */}
-          <div
-            className="absolute inset-x-0 top-12 bottom-0 z-10"
-            onClick={() => setChatsOpen(false)}
-            aria-hidden
-          />
-          <ChatSidebar onClose={() => setChatsOpen(false)} />
-        </>
+        // click-away catcher — transparent, sits under the drawer
+        <div
+          className="absolute inset-x-0 top-12 bottom-0 z-10"
+          onClick={() => setChatsOpen(false)}
+          aria-hidden
+        />
       )}
+      <ChatSidebar open={chatsOpen} onClose={() => setChatsOpen(false)} />
 
       <div className="flex-1 flex flex-col min-h-0">
         {/* Header */}

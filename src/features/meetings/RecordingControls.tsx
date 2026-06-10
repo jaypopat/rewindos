@@ -25,14 +25,15 @@ export function RecordingControls() {
     : null;
 
   return (
-    <div className="flex flex-col items-end gap-1">
+    <div className="flex flex-col items-end gap-1.5">
       {active ? (
         <button type="button"
           onClick={() => stop.mutate()}
           disabled={stop.isPending}
-          className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-red-500/15 text-red-400 text-sm hover:bg-red-500/25 disabled:opacity-50"
+          className="inline-flex items-center gap-2 h-9 px-[15px] rounded-lg text-[13px] font-semibold text-signal-error border border-[rgba(207,122,99,0.35)] bg-[rgba(207,122,99,0.1)] hover:bg-[rgba(207,122,99,0.18)] transition-colors disabled:opacity-50"
         >
-          <Square className="size-3.5" /> {stop.isPending ? "Stopping..." : "Stop recording"}
+          <Square className="size-[13px] fill-current" strokeWidth={0} />
+          {stop.isPending ? "Stopping…" : "Stop recording"}
         </button>
       ) : (
         <div className="flex items-center gap-2">
@@ -40,18 +41,19 @@ export function RecordingControls() {
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="Meeting title (optional)"
-            className="w-56 bg-surface text-sm"
+            className="h-9 w-56"
           />
           <button type="button"
             onClick={() => start.mutate(title || "Untitled meeting")}
             disabled={start.isPending}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-accent/15 text-accent text-sm hover:bg-accent/25 disabled:opacity-50"
+            className="inline-flex items-center gap-2 h-9 px-[15px] rounded-lg text-[13px] font-semibold bg-accent text-[#1c1208] border border-accent-deep hover:bg-accent-hi transition-colors disabled:opacity-50"
           >
-            <Mic className="size-3.5" /> {start.isPending ? "Starting..." : "Start recording"}
+            <Mic className="size-[15px]" strokeWidth={1.8} />
+            {start.isPending ? "Starting…" : "Start recording"}
           </button>
         </div>
       )}
-      {error && <p className="max-w-xs text-right text-xs text-red-400">{error}</p>}
+      {error && <p className="max-w-xs text-right text-xs text-signal-error">{error}</p>}
     </div>
   );
 }

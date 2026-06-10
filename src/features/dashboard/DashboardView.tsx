@@ -269,10 +269,10 @@ export function DashboardView({
 
   return (
     <div className="flex-1 min-h-0 relative">
-      <div ref={scrollRef} className="h-full overflow-y-auto">
-        <div className="px-14 pt-11 pb-24 max-w-[1320px] mx-auto w-full">
+      <div ref={scrollRef} className="@container h-full overflow-y-auto">
+        <div className="px-5 @4xl:px-14 pt-11 pb-24 max-w-[1320px] mx-auto w-full">
         {/* Hero — the daily briefing */}
-        <div className="grid grid-cols-[1.1fr_1fr] gap-16 items-end pb-9 border-b border-line">
+        <div className="grid grid-cols-1 @4xl:grid-cols-[1.1fr_1fr] gap-10 @4xl:gap-16 items-start @4xl:items-end pb-9 border-b border-line">
           <div>
             <Rise i={0}>
               <div className="font-mono text-[11.5px] uppercase tracking-[0.16em] text-text-muted mb-[18px]">
@@ -283,8 +283,7 @@ export function DashboardView({
               <CountNum
                 value={totalActiveTime}
                 format={(v) => (screenshotsLoading ? "—" : formatDuration(Math.round(v)))}
-                className="num whitespace-nowrap"
-                style={{ fontSize: 92, lineHeight: 0.85 }}
+                className="num whitespace-nowrap text-[64px] @4xl:text-[92px] leading-[0.85]"
               />
               <div className="pb-2">
                 <div className="font-display text-[21px] text-text-secondary">
@@ -386,7 +385,7 @@ export function DashboardView({
         )}
 
         {/* Top applications + captures per hour */}
-        <div className="grid grid-cols-[1fr_1.3fr] gap-14 mt-14">
+        <div className="grid grid-cols-1 @4xl:grid-cols-[1fr_1.3fr] gap-10 @4xl:gap-14 mt-14">
           <div>
             <Rise i={10} className="flex items-baseline mb-6">
               <h2 className="font-display text-[23px] tracking-tight">Top applications</h2>
@@ -422,7 +421,7 @@ export function DashboardView({
                 sampled across today · click to open
               </div>
             </Rise>
-            <div className="grid grid-cols-6 gap-3.5">
+            <div className="grid grid-cols-2 @lg:grid-cols-3 @4xl:grid-cols-6 gap-3.5">
               {dayFrames.map((c, idx) => (
                 <Rise
                   key={c.id}

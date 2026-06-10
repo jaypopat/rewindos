@@ -1,7 +1,8 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Pencil } from "lucide-react";
+import { ChevronRight, Pencil } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 import { queryKeys } from "@/lib/query-keys";
 import { getMeetingSegments, type Meeting } from "@/lib/api";
 import { AudioPlayer, type AudioHandle } from "./AudioPlayer";
@@ -25,7 +26,7 @@ function EditableTitle({ meeting }: { meeting: Meeting }) {
           if (e.key === "Escape") renaming.cancel();
         }}
         placeholder="Meeting title"
-        className="h-6 w-64 rounded bg-surface px-1.5 text-sm font-medium"
+        className="h-10 w-80 rounded-[7px] font-display text-[24px] tracking-tight"
       />
     );
   }
@@ -33,13 +34,13 @@ function EditableTitle({ meeting }: { meeting: Meeting }) {
   return (
     <button type="button"
       onClick={() => renaming.start(meeting.id, meeting.title ?? "")}
-      className="group flex items-center gap-1.5 text-left"
+      className="group flex items-center gap-2.5 text-left"
       title="Rename meeting"
     >
-      <h2 className="text-sm font-medium text-text-primary">
+      <h2 className="font-display text-[24px] tracking-tight text-text-primary">
         {meeting.title ?? "Untitled meeting"}
       </h2>
-      <Pencil className="size-3 text-text-muted opacity-0 group-hover:opacity-100 transition-opacity" />
+      <Pencil className="size-3.5 text-text-faint opacity-0 group-hover:opacity-100 transition-opacity" strokeWidth={1.7} />
     </button>
   );
 }
@@ -51,6 +52,7 @@ export function MeetingDetail({
   onJumpToTime?: (unixSecs: number) => void;
 }) {
   const audio = useRef<AudioHandle>(null);
+  const [minutesOpen, setMinutesOpen] = useState(false);
   const { data: segments = [] } = useQuery({
     queryKey: queryKeys.meetingSegments(meeting.id),
     queryFn: () => getMeetingSegments(meeting.id),
@@ -61,14 +63,45 @@ export function MeetingDetail({
 
   return (
     <div className="flex flex-col min-h-0 h-full">
-      <div className="px-4 py-3 border-b border-border/50">
+      {/* Pinned header: title + audio stay visible while the transcript scrolls */}
+      <div className="px-7 pt-7 pb-5 border-b border-line shrink-0">
         <EditableTitle meeting={meeting} />
-        {meeting.summary && (
-          <div className="mt-2 text-xs text-text-secondary whitespace-pre-wrap">{meeting.summary}</div>
-        )}
-        {audioPath && <div className="mt-3"><AudioPlayer ref={audio} path={audioPath} /></div>}
+        {audioPath && <div className="mt-4"><AudioPlayer ref={audio} path={audioPath} /></div>}
       </div>
-      <div className="flex-1 overflow-y-auto">
+
+      {/* Minutes — collapsed by default so the transcript is the focus on open.
+          Expanded, it's capped so a long summary can't swallow the viewport. */}
+      {meeting.summary && (
+        <div className="border-b border-line shrink-0">
+          <button
+            type="button"
+            onClick={() => setMinutesOpen((v) => !v)}
+            aria-expanded={minutesOpen}
+            className="flex w-full items-center gap-2 px-7 py-3 text-left transition-colors hover:bg-panel"
+          >
+            <ChevronRight
+              className={cn(
+                "size-3.5 text-text-faint transition-transform",
+                minutesOpen && "rotate-90",
+              )}
+              strokeWidth={1.7}
+            />
+            <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-text-muted">
+              Minutes
+            </span>
+          </button>
+          {minutesOpen && (
+            <div className="max-h-[40vh] overflow-y-auto px-7 pb-5">
+              <p className="max-w-[68ch] text-[13px] leading-[1.6] text-text-secondary whitespace-pre-wrap">
+                {meeting.summary}
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Transcript fills all remaining height regardless of summary length */}
+      <div className="flex-1 min-h-0 overflow-y-auto">
         <TranscriptReader
           meeting={meeting}
           segments={segments}
