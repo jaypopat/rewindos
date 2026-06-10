@@ -66,14 +66,16 @@ pub fn get_timeline(
     db: &Database,
     input: GetTimelineInput,
 ) -> crate::error::Result<Vec<TimelineEntry>> {
-    let sessions =
-        db.get_ocr_sessions_with_ids(input.start_time, input.end_time, input.limit)?;
+    // The app filter must apply inside the SQL LIMIT — filtering afterwards
+    // returns nothing when the first `limit` rows belong to other apps.
+    let sessions = db.get_ocr_sessions_with_ids(
+        input.start_time,
+        input.end_time,
+        input.limit.clamp(1, 500),
+        input.app_filter.as_deref(),
+    )?;
     Ok(sessions
         .into_iter()
-        .filter(|(_, app, _, _, _, _)| match &input.app_filter {
-            Some(f) => app.as_deref() == Some(f.as_str()),
-            None => true,
-        })
         .map(
             |(id, app_name, window_title, timestamp, _file_path, ocr_text)| TimelineEntry {
                 id,
@@ -184,12 +186,16 @@ pub fn search_screenshots(
     db: &Database,
     input: SearchScreenshotsInput,
 ) -> crate::error::Result<Vec<ScreenshotSummary>> {
+    let query = fts5_quote(&input.query);
+    if query.is_empty() {
+        return Ok(Vec::new());
+    }
     let filters = SearchFilters {
-        query: input.query,
+        query,
         start_time: input.start_time,
         end_time: input.end_time,
         app_name: input.app_filter,
-        limit: input.limit,
+        limit: input.limit.clamp(1, 500),
         offset: 0,
     };
     let response = db.search(&filters)?;
@@ -246,10 +252,12 @@ pub fn search_transcripts(
     input: SearchTranscriptsInput,
     now: i64,
 ) -> crate::error::Result<Vec<TranscriptHit>> {
-    if input.query.trim().is_empty() {
+    let limit = input.limit.clamp(1, 500);
+    let query = fts5_quote(&input.query);
+    if query.is_empty() {
         let start = input.start_time.unwrap_or(now - 7 * 86_400);
         let end = input.end_time.unwrap_or(now);
-        let rows = db.get_transcript_segments_in_range(start, end, input.limit)?;
+        let rows = db.get_transcript_segments_in_range(start, end, limit)?;
         return Ok(rows
             .into_iter()
             .map(
@@ -266,17 +274,28 @@ pub fn search_transcripts(
     }
 
     // Over-fetch when a time filter applies, since relevance ranking happens
-    // before the window is known.
+    // before the window is known. A window that excludes the 200 strongest
+    // matches comes back short — acceptable for a relevance tool.
     let has_window = input.start_time.is_some() || input.end_time.is_some();
-    let fetch = if has_window { 200 } else { input.limit };
-    let hits = db.search_transcripts(input.query.trim(), None, fetch)?;
+    let fetch = if has_window { 200 } else { limit };
+    let hits = db.search_transcripts(&query, None, fetch)?;
 
+    // Hits cluster in few meetings — memoize the lookups.
+    let mut meetings: std::collections::HashMap<i64, Option<(Option<String>, i64)>> =
+        std::collections::HashMap::new();
     let mut out = Vec::new();
     for h in hits {
-        let meeting = db.get_meeting(h.meeting_id)?;
-        let (title, started_at) = match meeting {
-            Some(m) => (m.title, m.started_at),
-            None => (None, 0),
+        let entry = match meetings.entry(h.meeting_id) {
+            std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
+            std::collections::hash_map::Entry::Vacant(v) => {
+                let m = db.get_meeting(h.meeting_id)?;
+                v.insert(m.map(|m| (m.title, m.started_at)))
+            }
+        };
+        // Meeting row gone (e.g. deleted mid-search): skip the orphaned
+        // segment rather than fabricating epoch-zero metadata.
+        let Some((title, started_at)) = entry.clone() else {
+            continue;
         };
         let timestamp = started_at + h.start_ms / 1000;
         if input.start_time.is_some_and(|s| timestamp < s)
@@ -292,11 +311,24 @@ pub fn search_transcripts(
             speaker: h.speaker_label,
             text: truncate_chars(&h.text, 400),
         });
-        if out.len() as i64 >= input.limit {
+        if out.len() as i64 >= limit {
             break;
         }
     }
     Ok(out)
+}
+
+/// Make arbitrary user text safe for FTS5 MATCH: every token is wrapped in
+/// double quotes (embedded quotes escaped), so input like `he said "hi"` or
+/// `crash AND burn` matches literally instead of erroring as query syntax.
+/// Tokens are OR-joined: conversational LLM queries aren't boolean, and
+/// requiring every token (implicit AND) would let one stray word zero out the
+/// results — bm25 still ranks fuller matches first. Empty input returns "".
+fn fts5_quote(raw: &str) -> String {
+    raw.split_whitespace()
+        .map(|tok| format!("\"{}\"", tok.replace('"', "\"\"")))
+        .collect::<Vec<_>>()
+        .join(" OR ")
 }
 
 fn truncate_chars(s: &str, max: usize) -> String {
@@ -563,6 +595,99 @@ mod tests {
 
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].meeting_id, recent);
+    }
+
+    #[test]
+    fn search_survives_fts5_syntax_in_queries() {
+        let db = Database::open_in_memory().unwrap();
+        let id = seed_screenshot(&db, "firefox", "A", "he said hello to everyone", 1_700_000_000);
+
+        // Quotes, operators, and stray syntax must match literally, not error.
+        for q in [r#"he said "hello""#, "said AND hello", "hello *", "(hello"] {
+            let results = search_screenshots(
+                &db,
+                SearchScreenshotsInput {
+                    query: q.to_string(),
+                    start_time: None,
+                    end_time: None,
+                    app_filter: None,
+                    limit: 10,
+                },
+            )
+            .unwrap();
+            assert_eq!(results.first().map(|r| r.id), Some(id), "query {q:?}");
+        }
+
+        // Empty / whitespace-only queries return nothing instead of erroring.
+        let empty = search_screenshots(
+            &db,
+            SearchScreenshotsInput {
+                query: "   ".to_string(),
+                start_time: None,
+                end_time: None,
+                app_filter: None,
+                limit: 10,
+            },
+        )
+        .unwrap();
+        assert!(empty.is_empty());
+    }
+
+    #[test]
+    fn timeline_app_filter_applies_inside_the_limit() {
+        let db = Database::open_in_memory().unwrap();
+        // 5 firefox rows first, then one slack row — with limit 5, a post-hoc
+        // filter would return nothing for slack.
+        for i in 0..5 {
+            seed_screenshot(&db, "firefox", "A", "firefox window text", 1_700_000_000 + i * 60);
+        }
+        seed_screenshot(&db, "slack", "B", "slack window text", 1_700_000_400);
+
+        let entries = get_timeline(
+            &db,
+            GetTimelineInput {
+                start_time: 0,
+                end_time: 2_000_000_000,
+                app_filter: Some("slack".to_string()),
+                limit: 5,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].app_name.as_deref(), Some("slack"));
+    }
+
+    #[test]
+    fn limits_are_clamped_to_a_sane_range() {
+        let db = Database::open_in_memory().unwrap();
+        seed_screenshot(&db, "firefox", "A", "some window text", 1_700_000_000);
+
+        // limit 0 / negative would otherwise return nothing or error.
+        let results = search_screenshots(
+            &db,
+            SearchScreenshotsInput {
+                query: "window".to_string(),
+                start_time: None,
+                end_time: None,
+                app_filter: None,
+                limit: 0,
+            },
+        )
+        .unwrap();
+        assert_eq!(results.len(), 1);
+
+        let entries = get_timeline(
+            &db,
+            GetTimelineInput {
+                start_time: 0,
+                end_time: 2_000_000_000,
+                app_filter: None,
+                limit: -5,
+            },
+        )
+        .unwrap();
+        assert_eq!(entries.len(), 1);
     }
 
     #[test]

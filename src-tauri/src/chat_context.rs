@@ -120,7 +120,7 @@ pub async fn build(
                 let now = chrono::Local::now().timestamp();
                 let (start, end) = intent.time_range.unwrap_or((now - 86400, now));
                 let db = db.lock().map_err(|e| format!("db lock: {e}"))?;
-                let sessions = db.get_ocr_sessions_with_ids(start, end, 80).unwrap_or_default();
+                let sessions = db.get_ocr_sessions_with_ids(start, end, 80, None).unwrap_or_default();
                 ContextAssembler::from_sessions_with_refs_budgeted(
                     &sessions,
                     max_context_tokens,
@@ -134,7 +134,7 @@ pub async fn build(
                 (now - 86400, now)
             });
             let db = db.lock().map_err(|e| format!("db lock: {e}"))?;
-            match db.get_ocr_sessions_with_ids(start, end, 80) {
+            match db.get_ocr_sessions_with_ids(start, end, 80, None) {
                 Ok(sessions) => ContextAssembler::from_sessions_with_refs_budgeted(
                     &sessions,
                     max_context_tokens,
@@ -153,7 +153,7 @@ pub async fn build(
             });
             let db = db.lock().map_err(|e| format!("db lock: {e}"))?;
             let stats = db.get_app_usage_stats(start, Some(end)).unwrap_or_default();
-            let sessions = db.get_ocr_sessions_with_ids(start, end, 80).unwrap_or_default();
+            let sessions = db.get_ocr_sessions_with_ids(start, end, 80, None).unwrap_or_default();
             let secs = config.capture.interval_seconds as f64;
             let stat_tuples: Vec<_> = stats
                 .iter()

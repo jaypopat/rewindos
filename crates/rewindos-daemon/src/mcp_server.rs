@@ -92,7 +92,11 @@ impl RewindosMcpServer {
         Self::ok_json(&out)
     }
 
-    #[tool(description = "Full OCR text and metadata for one screenshot.")]
+    #[tool(
+        description = "Full OCR text and metadata for one screenshot. file_path is a \
+                       local absolute path on the user's machine — usable for opening \
+                       the image locally, not something to quote in answers."
+    )]
     async fn get_screenshot_detail(
         &self,
         Parameters(input): Parameters<GetScreenshotDetailInput>,
@@ -107,7 +111,8 @@ impl RewindosMcpServer {
         description = "Search recorded meeting transcripts ('You' = the user, 'Remote' = the \
                        other party). With a query: relevance-ranked matches, optionally within \
                        a time window. Without a query: chronological segments from the window \
-                       (default last 7 days) — use for 'what was discussed in my last meeting?'."
+                       (default last 7 days) — use for 'what was discussed in my last \
+                       meeting?'. Time-windowed queries rank within the top 200 matches."
     )]
     async fn search_transcripts(
         &self,
