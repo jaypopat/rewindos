@@ -1,10 +1,10 @@
 import { useCallback, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Loader2, Paperclip } from "lucide-react";
+import { Loader2, Paperclip, PanelLeftClose, PanelLeftOpen, Plus } from "lucide-react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { cn } from "@/lib/utils";
 import { queryKeys } from "@/lib/query-keys";
-import { claudeDetect, getConfig, getScreenshotsByIds } from "@/lib/api";
+import { claudeDetect, getConfig, getScreenshotsByIds, listChats } from "@/lib/api";
 import { ollamaHealth } from "@/lib/ollama-chat";
 import { useAskChat } from "@/context/AskContext";
 import { AskMessages } from "./AskMessages";
@@ -31,11 +31,31 @@ interface AskViewProps {
   onSelectScreenshot: (id: number) => void;
 }
 
+const CHATS_OPEN_KEY = "rewindos-ask-chats-open";
+
 export function AskView({ onSelectScreenshot }: AskViewProps) {
-  const { messages, isStreaming, error, sendMessage, cancelStream } = useAskChat();
+  const { messages, isStreaming, error, sendMessage, cancelStream, startNewChat } = useAskChat();
   const [input, setInput] = useState("");
   const [attachedIds, setAttachedIds] = useState<number[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
+
+  // The chat list is navigation history, not always-on content — one sidebar
+  // at rest, two only on request.
+  const [chatsOpen, setChatsOpen] = useState(
+    () => typeof localStorage !== "undefined" && localStorage.getItem(CHATS_OPEN_KEY) === "1",
+  );
+  const toggleChats = () => {
+    setChatsOpen((c) => {
+      localStorage.setItem(CHATS_OPEN_KEY, c ? "0" : "1");
+      return !c;
+    });
+  };
+
+  const { data: chats = [] } = useQuery({
+    queryKey: queryKeys.chats(),
+    queryFn: () => listChats(200),
+    staleTime: 5_000,
+  });
 
   const { data: attachedShots = [] } = useQuery({
     queryKey: queryKeys.screenshotsByIds(attachedIds),
@@ -102,11 +122,27 @@ export function AskView({ onSelectScreenshot }: AskViewProps) {
 
   return (
     <div className="flex-1 flex min-h-0">
-      <ChatSidebar />
+      {chatsOpen && <ChatSidebar />}
 
       <div className="flex-1 flex flex-col min-h-0">
         {/* Header */}
-        <div className="flex items-center gap-3 px-7 h-12 border-b border-line shrink-0">
+        <div className="flex items-center gap-3 px-5 h-12 border-b border-line shrink-0">
+          <button
+            onClick={toggleChats}
+            title={chatsOpen ? "Hide chat history" : "Show chat history"}
+            className="flex items-center gap-2 h-8 px-2.5 rounded-[7px] text-text-muted hover:text-text-primary hover:bg-panel transition-colors"
+          >
+            {chatsOpen ? (
+              <PanelLeftClose className="size-4" strokeWidth={1.7} />
+            ) : (
+              <PanelLeftOpen className="size-4" strokeWidth={1.7} />
+            )}
+            <span className="text-[12.5px] font-[450]">Chats</span>
+            {chats.length > 0 && (
+              <span className="font-mono text-[10px] text-text-faint">{chats.length}</span>
+            )}
+          </button>
+          <span className="w-px h-4 bg-line-2" />
           <div
             className={cn(
               "size-1.5 rounded-full transition-colors",
@@ -116,9 +152,14 @@ export function AskView({ onSelectScreenshot }: AskViewProps) {
           <span className="kicker">Ask</span>
           <span className="text-text-ghost">·</span>
           <AskModelPicker />
-          <span className="ml-auto font-mono text-[10px] uppercase tracking-[0.14em] text-text-faint">
-            {usingClaude ? "claude · mcp" : "local · ollama"}
-          </span>
+          <button
+            onClick={startNewChat}
+            title="New chat"
+            className="ml-auto flex items-center gap-1.5 h-8 px-2.5 rounded-[7px] text-text-muted hover:text-text-primary hover:bg-panel transition-colors"
+          >
+            <Plus className="size-4" strokeWidth={1.7} />
+            <span className="text-[12.5px] font-[450]">New chat</span>
+          </button>
         </div>
 
         {/* Messages or empty state */}
