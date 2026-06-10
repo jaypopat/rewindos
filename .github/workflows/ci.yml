@@ -37,6 +37,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: swatinem/rust-cache@v2
 
+      # The tauri crate's build script bundles ../target/release/rewindos-daemon
+      # as a resource and fails if it's missing, so build it before any cargo
+      # invocation that compiles the tauri crate (same binary release.yml ships).
+      - name: Build daemon (bundled as a tauri resource)
+        run: cargo build -p rewindos-daemon --release
+
       - name: Test core and tauri crates
         run: cargo test --workspace --exclude rewindos-daemon
 
