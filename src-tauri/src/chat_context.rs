@@ -1,5 +1,5 @@
 use rewindos_core::chat::{
-    ContextAssembler, IntentCategory, IntentClassifier, OllamaChatClient, QueryConfidence,
+    ChatClient, ContextAssembler, IntentCategory, IntentClassifier, QueryConfidence,
     ScreenshotReference,
 };
 use rewindos_core::config::AppConfig;
@@ -21,7 +21,7 @@ pub async fn build(
     config: &AppConfig,
     query: &str,
 ) -> Result<ChatContext, String> {
-    let chat_client = OllamaChatClient::new(&config.chat);
+    let chat_client = ChatClient::new(&config.chat);
 
     let intent = match chat_client.analyze_query(query).await {
         Ok(i) => i,

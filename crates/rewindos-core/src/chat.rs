@@ -86,7 +86,6 @@ pub const SYSTEM_PROMPT: &str = r#"You are RewindOS, a local AI assistant with a
 // -- OpenAI-compatible wire parsing --
 
 /// One parsed line from an OpenAI-compatible SSE stream.
-#[allow(dead_code)] // consumed by the ChatClient rewrite (next commit)
 #[derive(Debug, PartialEq)]
 enum SseEvent {
     /// Delta chunk: token text (may be empty) and whether the stream finished
@@ -100,7 +99,6 @@ enum SseEvent {
     Skip,
 }
 
-#[allow(dead_code)] // consumed by the ChatClient rewrite (next commit)
 fn parse_sse_line(line: &str) -> SseEvent {
     let Some(payload) = line.trim().strip_prefix("data:") else {
         return SseEvent::Skip;
@@ -129,18 +127,15 @@ fn parse_sse_line(line: &str) -> SseEvent {
 /// Accumulates raw network bytes and emits complete `\n`-terminated lines.
 /// Buffers as bytes and decodes per complete line, so multibyte UTF-8
 /// sequences split across network chunks reassemble correctly.
-#[allow(dead_code)] // consumed by the ChatClient rewrite (next commit)
 struct SseLineBuffer {
     buffer: Vec<u8>,
 }
 
 impl SseLineBuffer {
-    #[allow(dead_code)] // consumed by the ChatClient rewrite (next commit)
     fn new() -> Self {
         Self { buffer: Vec::new() }
     }
 
-    #[allow(dead_code)] // consumed by the ChatClient rewrite (next commit)
     fn push(&mut self, bytes: &[u8]) -> Vec<String> {
         self.buffer.extend_from_slice(bytes);
         let mut lines = Vec::new();
@@ -154,7 +149,6 @@ impl SseLineBuffer {
 
 /// Pull a human-readable message out of a provider error body
 /// (OpenAI-style `{"error":{"message":…}}`), falling back to the raw body.
-#[allow(dead_code)] // consumed by the ChatClient rewrite (next commit)
 fn extract_error_message(body: &str) -> String {
     serde_json::from_str::<serde_json::Value>(body)
         .ok()
@@ -166,7 +160,6 @@ fn extract_error_message(body: &str) -> String {
 }
 
 /// Model ids from a `GET /models` response (`data[].id`), sorted.
-#[allow(dead_code)] // consumed by the ChatClient rewrite (next commit)
 fn parse_model_ids(v: &serde_json::Value) -> Vec<String> {
     let mut ids: Vec<String> = v["data"]
         .as_array()
@@ -180,16 +173,17 @@ fn parse_model_ids(v: &serde_json::Value) -> Vec<String> {
     ids
 }
 
-// -- Ollama client --
+// -- Chat client (OpenAI-compatible) --
 
-pub struct OllamaChatClient {
+pub struct ChatClient {
     client: reqwest::Client,
     base_url: String,
+    api_key: String,
     model: String,
     temperature: f32,
 }
 
-impl OllamaChatClient {
+impl ChatClient {
     pub fn new(config: &ChatConfig) -> Self {
         // Only set connect_timeout — no global timeout so streaming responses
         // aren't killed when generation takes longer than a fixed duration.
@@ -200,93 +194,101 @@ impl OllamaChatClient {
         Self {
             client,
             base_url: config.base_url.trim_end_matches('/').to_string(),
+            api_key: config.api_key.clone(),
             model: config.model.clone(),
             temperature: config.temperature,
         }
     }
 
+    fn with_auth(&self, req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        if self.api_key.is_empty() {
+            req
+        } else {
+            req.bearer_auth(&self.api_key)
+        }
+    }
+
+    /// Build a CoreError from a non-2xx response, surfacing the provider's
+    /// message so the UI can show "invalid API key" / "model not found".
+    async fn error_from_response(response: reqwest::Response) -> CoreError {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        CoreError::Chat(format!("provider returned {status}: {}", extract_error_message(&body)))
+    }
+
     pub async fn health_check(&self) -> Result<bool> {
-        let url = format!("{}/api/tags", self.base_url);
-        match self.client.get(&url).send().await {
+        let url = format!("{}/models", self.base_url);
+        match self.with_auth(self.client.get(&url)).send().await {
             Ok(resp) => Ok(resp.status().is_success()),
             Err(_) => Ok(false),
         }
+    }
+
+    /// List model ids from `GET {base_url}/models`. Errors propagate so the
+    /// Settings UI can fall back to free-text model entry.
+    pub async fn list_models(&self) -> Result<Vec<String>> {
+        let url = format!("{}/models", self.base_url);
+        let response = self
+            .with_auth(self.client.get(&url).timeout(std::time::Duration::from_secs(15)))
+            .send()
+            .await
+            .map_err(|e| CoreError::Chat(format!("list models failed: {e}")))?;
+        if !response.status().is_success() {
+            return Err(Self::error_from_response(response).await);
+        }
+        let v: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|e| CoreError::Chat(format!("parse models response: {e}")))?;
+        Ok(parse_model_ids(&v))
     }
 
     pub fn chat_stream(
         &self,
         messages: Vec<ChatMessage>,
     ) -> impl futures::Stream<Item = Result<ChatStreamChunk>> + '_ {
-        let url = format!("{}/api/chat", self.base_url);
-
-        let ollama_messages: Vec<serde_json::Value> = messages
-            .iter()
-            .map(|m| {
-                serde_json::json!({
-                    "role": m.role,
-                    "content": m.content,
-                })
-            })
-            .collect();
-
+        let url = format!("{}/chat/completions", self.base_url);
         let body = serde_json::json!({
             "model": self.model,
-            "messages": ollama_messages,
+            "messages": messages,
             "stream": true,
-            "options": {
-                "temperature": self.temperature,
-            }
+            "temperature": self.temperature,
         });
 
         async_stream::stream! {
             let response = self
-                .client
-                .post(&url)
-                .json(&body)
+                .with_auth(self.client.post(&url).json(&body))
                 .send()
                 .await
                 .map_err(|e| CoreError::Chat(format!("request failed: {e}")))?;
 
             if !response.status().is_success() {
-                let status = response.status();
-                let body_text = response.text().await.unwrap_or_default();
-                Err(CoreError::Chat(format!("ollama returned {status}: {body_text}")))?;
+                Err(Self::error_from_response(response).await)?;
                 return;
             }
 
             let mut stream = response.bytes_stream();
-            let mut buffer = String::new();
+            let mut buffer = SseLineBuffer::new();
 
             while let Some(chunk) = stream.next().await {
                 let bytes = chunk.map_err(|e| CoreError::Chat(format!("stream error: {e}")))?;
-                buffer.push_str(&String::from_utf8_lossy(&bytes));
-
-                // Process complete NDJSON lines
-                while let Some(newline_pos) = buffer.find('\n') {
-                    let line = buffer[..newline_pos].trim().to_string();
-                    buffer = buffer[newline_pos + 1..].to_string();
-
-                    if line.is_empty() {
-                        continue;
-                    }
-
-                    match serde_json::from_str::<serde_json::Value>(&line) {
-                        Ok(json) => {
-                            let done = json["done"].as_bool().unwrap_or(false);
-                            let token = json["message"]["content"]
-                                .as_str()
-                                .unwrap_or("")
-                                .to_string();
-
+                for line in buffer.push(&bytes) {
+                    match parse_sse_line(&line) {
+                        SseEvent::Chunk { token, done } => {
                             yield Ok(ChatStreamChunk { token, done });
-
                             if done {
                                 return;
                             }
                         }
-                        Err(e) => {
-                            tracing::warn!("failed to parse ollama chunk: {e}, line: {line}");
+                        SseEvent::Done => {
+                            yield Ok(ChatStreamChunk { token: String::new(), done: true });
+                            return;
                         }
+                        SseEvent::Error(msg) => {
+                            Err(CoreError::Chat(format!("provider stream error: {msg}")))?;
+                            return;
+                        }
+                        SseEvent::Skip => {}
                     }
                 }
             }
@@ -316,7 +318,7 @@ User: "how long on firefox this week?" → {"category":"productivity","search_te
 User: "that thing I was looking at" → {"category":"recall","search_terms":[],"time_range_seconds":86400,"app_filter":null,"confidence":"low"}
 User: "something about databases" → {"category":"recall","search_terms":["database","sql","postgres","mysql"],"time_range_seconds":2592000,"app_filter":null,"confidence":"medium"}"#;
 
-impl OllamaChatClient {
+impl ChatClient {
     /// Use the LLM to analyze a user query and extract structured search parameters.
     pub async fn analyze_query(&self, query: &str) -> Result<QueryIntent> {
         let prompt = format!("{QUERY_ANALYSIS_PROMPT}\n\nUser: \"{query}\"");
@@ -325,25 +327,24 @@ impl OllamaChatClient {
             "model": self.model,
             "messages": [{"role": "user", "content": prompt}],
             "stream": false,
-            "options": {
-                "temperature": 0.0,
-                "num_predict": 300,
-            }
+            "temperature": 0.0,
+            "max_tokens": 300,
         });
 
-        let url = format!("{}/api/chat", self.base_url);
+        let url = format!("{}/chat/completions", self.base_url);
         let response = self
-            .client
-            .post(&url)
-            .timeout(std::time::Duration::from_secs(120))
-            .json(&body)
+            .with_auth(
+                self.client
+                    .post(&url)
+                    .timeout(std::time::Duration::from_secs(120))
+                    .json(&body),
+            )
             .send()
             .await
             .map_err(|e| CoreError::Chat(format!("analyze_query request failed: {e}")))?;
 
         if !response.status().is_success() {
-            let status = response.status();
-            return Err(CoreError::Chat(format!("analyze_query failed: {status}")));
+            return Err(Self::error_from_response(response).await);
         }
 
         let resp_json: serde_json::Value = response
@@ -351,7 +352,9 @@ impl OllamaChatClient {
             .await
             .map_err(|e| CoreError::Chat(format!("parse analyze_query response: {e}")))?;
 
-        let content = resp_json["message"]["content"].as_str().unwrap_or("{}");
+        let content = resp_json["choices"][0]["message"]["content"]
+            .as_str()
+            .unwrap_or("{}");
 
         // Strip <think>...</think> blocks (reasoning models like deepseek-r1)
         let clean = if let Ok(re) = regex_lite::Regex::new(r"(?s)<think>.*?</think>") {
@@ -979,6 +982,25 @@ impl ContextAssembler {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn auth_header_present_iff_api_key_set() {
+        let config = ChatConfig::default(); // empty api_key
+        let client = ChatClient::new(&config);
+        let req = client
+            .with_auth(client.client.get("http://localhost/v1/models"))
+            .build()
+            .unwrap();
+        assert!(!req.headers().contains_key(reqwest::header::AUTHORIZATION));
+
+        let config = ChatConfig { api_key: "sk-test".to_string(), ..ChatConfig::default() };
+        let client = ChatClient::new(&config);
+        let req = client
+            .with_auth(client.client.get("http://localhost/v1/models"))
+            .build()
+            .unwrap();
+        assert_eq!(req.headers()[reqwest::header::AUTHORIZATION], "Bearer sk-test");
+    }
 
     #[test]
     fn test_classify_recall() {

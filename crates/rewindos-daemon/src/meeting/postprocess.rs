@@ -5,7 +5,7 @@
 use std::sync::{Arc, Mutex};
 
 use futures_util::{pin_mut, StreamExt};
-use rewindos_core::chat::{ChatMessage, ChatRole, OllamaChatClient};
+use rewindos_core::chat::{ChatClient, ChatMessage, ChatRole};
 use rewindos_core::config::AppConfig;
 use rewindos_core::db::Database;
 use rewindos_core::embedding::OllamaClient;
@@ -98,7 +98,7 @@ async fn summarize_meeting(db: &Arc<Mutex<Database>>, config: &AppConfig, meetin
         return;
     }
     let messages = build_summary_prompt(&segments);
-    let client = OllamaChatClient::new(&config.chat);
+    let client = ChatClient::new(&config.chat);
     let stream = client.chat_stream(messages);
     pin_mut!(stream);
     let mut summary = String::new();
