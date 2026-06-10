@@ -18,23 +18,23 @@ tauri-plugin-opener = "2"
 rewindos-core = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-zbus = "5"
+zbus = { workspace = true }
 tokio = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
 tauri-plugin-global-shortcut = "2.3.1"
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { workspace = true }
 uuid = { version = "1", features = ["v4"] }
-futures = "0.3"
+futures = { workspace = true }
 chrono = { workspace = true }
-toml = "0.8"
-regex-lite = "0.1"
+toml = { workspace = true }
+regex-lite = { workspace = true }
 which = "7"
-dirs = "6"
-nix = { version = "0.29", features = ["signal"] }
+dirs = { workspace = true }
+nix = { workspace = true, features = ["signal"] }
 # Meeting-audio playback: WebKitGTK's GStreamer backend can only fetch media
 # over file:// and http(s):// — never blob: or asset:// — so we decode the
 # stored Ogg-Opus to WAV and serve it from a loopback HTTP server.
-ogg = "0.9"
-opus = "0.3"
+ogg = { workspace = true }
+opus = { workspace = true }
 tiny_http = "0.12"
