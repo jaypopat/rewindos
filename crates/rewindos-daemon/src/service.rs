@@ -5,7 +5,12 @@ use std::time::Instant;
 use rewindos_core::config::AppConfig;
 use rewindos_core::db::Database;
 use rewindos_core::embedding::OllamaClient;
-use rewindos_core::schema::{DaemonStatus, QueueDepths, SearchFilters, SearchResponse};
+use rewindos_core::schema::{
+    CachedDailySummary, DaemonStatus, QueueDepths, SearchFilters, SearchResponse,
+};
+use rewindos_core::summary::{self, DigestInput};
+use rewindos_core::vault::gather::DayMemory;
+use rewindos_core::vault::write::write_memory;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{info, warn};
 use zbus::interface;
@@ -389,6 +394,29 @@ impl DaemonService {
         Ok(lvl as f64)
     }
 
+    /// Render + write one day's vault companion note. `date` is "YYYY-MM-DD" (local).
+    async fn export_day(&self, date: &str) -> zbus::fdo::Result<()> {
+        info!(date, "vault export day requested via D-Bus");
+        run_export(&self.db, &self.config, date)
+            .await
+            .map_err(|e| zbus::fdo::Error::Failed(format!("export {date}: {e}")))
+    }
+
+    /// Render + write each day in [start_date, end_date] inclusive (local dates).
+    async fn export_range(&self, start_date: &str, end_date: &str) -> zbus::fdo::Result<()> {
+        info!(start_date, end_date, "vault export range requested via D-Bus");
+        let dates = dates_inclusive(start_date, end_date);
+        if dates.is_empty() {
+            return Err(zbus::fdo::Error::Failed("invalid date range".into()));
+        }
+        for date in dates {
+            run_export(&self.db, &self.config, &date)
+                .await
+                .map_err(|e| zbus::fdo::Error::Failed(format!("export {date}: {e}")))?;
+        }
+        Ok(())
+    }
+
     #[zbus(property)]
     fn is_capturing(&self) -> bool {
         self.gate.wants_capture()
@@ -398,6 +426,134 @@ impl DaemonService {
     fn capture_interval(&self) -> u32 {
         self.config.capture.interval_seconds
     }
+}
+
+/// Run a full export of `date`: fresh config from disk, gather (blocking),
+/// three-tier recap (cached → AI → digest), cache AI recaps, write.
+///
+/// Reloads config.toml on every call: the UI edits the file without notifying
+/// the daemon, so "enable export in Settings → Write now" must work without a
+/// daemon restart. Falls back to `startup_config` only if the reload fails.
+///
+/// Shared by the D-Bus `ExportDay`/`ExportRange` methods and the end-of-day
+/// timer in main.rs.
+pub async fn run_export(
+    db: &Arc<Mutex<Database>>,
+    startup_config: &Arc<AppConfig>,
+    date: &str,
+) -> anyhow::Result<()> {
+    // Fresh config: the UI edits config.toml without notifying us.
+    let config = match AppConfig::load() {
+        Ok(c) => c,
+        Err(e) => {
+            warn!("config reload failed, using startup config: {e}");
+            (**startup_config).clone()
+        }
+    };
+    let cfg = config.vault_export.clone();
+    if !cfg.enabled || cfg.vault_path.is_empty() {
+        return Ok(());
+    }
+    let (day_start, day_end) = local_day_bounds(date)?;
+
+    // Gather: blocking DB work off the async thread.
+    let db_clone = db.clone();
+    let date_owned = date.to_string();
+    let max = cfg.max_moments;
+    let mut mem = tokio::task::spawn_blocking(move || {
+        let db = lock_db(&db_clone);
+        DayMemory::for_date(&db, &date_owned, day_start, day_end, max)
+    })
+    .await??;
+
+    if mem.is_empty() {
+        return Ok(());
+    }
+
+    // Three-tier recap: cached AI summary → generate via chat backend → digest.
+    let cached = {
+        let db = lock_db(db);
+        db.get_daily_summary_cache(date)
+            .ok()
+            .flatten()
+            .and_then(|c| c.summary_text)
+    };
+    let digest = DigestInput {
+        on_screen_secs: mem.stats.on_screen_secs,
+        peak_hour: mem.stats.peak_hour,
+        app_minutes: mem.stats.app_minutes.clone(),
+        meeting_count: mem.meetings.len(),
+    };
+    let prompt = summary::build_daily_prompt_from_memory(&mem);
+    let was_cached = cached.is_some();
+    let (recap, is_ai) = summary::resolve_recap(cached, &config.chat, &prompt, &digest).await;
+    if is_ai && !was_cached {
+        // Freshly generated — cache it so the app and re-renders reuse it.
+        // Never cache the digest tier: a cached digest would read as a
+        // non-upgradeable AI summary.
+        let db = lock_db(db);
+        let _ = db.set_daily_summary_cache(&CachedDailySummary {
+            date_key: date.to_string(),
+            summary_text: Some(recap.clone()),
+            app_breakdown: "[]".to_string(),
+            total_sessions: 0,
+            time_range: String::new(),
+            model_name: Some(config.chat.model.clone()),
+            generated_at: chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string(),
+            screenshot_count: 0,
+        });
+    }
+    mem.recap = Some(recap);
+
+    let cfg2 = cfg.clone();
+    tokio::task::spawn_blocking(move || write_memory(&cfg2, &mem)).await??;
+    Ok(())
+}
+
+/// Local timestamp of `d`'s midnight; `None` if midnight does not exist
+/// locally (DST gap) — callers fall back or error.
+fn local_midnight_ts(d: chrono::NaiveDate) -> Option<i64> {
+    use chrono::TimeZone;
+    let dt = d.and_hms_opt(0, 0, 0)?;
+    chrono::Local
+        .from_local_datetime(&dt)
+        .earliest()
+        .map(|t| t.timestamp())
+}
+
+/// Local-day `[start, end)` unix-second bounds for a "YYYY-MM-DD" date.
+/// `end` is the NEXT day's local midnight (DST-correct day length), falling
+/// back to start + 86 400 if that midnight is unrepresentable.
+pub fn local_day_bounds(date: &str) -> anyhow::Result<(i64, i64)> {
+    let d = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
+        .map_err(|e| anyhow::anyhow!("invalid date {date:?}: {e}"))?;
+    let start = local_midnight_ts(d)
+        .ok_or_else(|| anyhow::anyhow!("no local midnight for {date:?}"))?;
+    let end = d
+        .succ_opt()
+        .and_then(local_midnight_ts)
+        .unwrap_or(start + 86_400);
+    Ok((start, end))
+}
+
+/// Inclusive list of "YYYY-MM-DD" between `start` and `end`; empty on parse
+/// failure or start > end.
+pub fn dates_inclusive(start: &str, end: &str) -> Vec<String> {
+    let (Ok(mut d), Ok(e)) = (
+        chrono::NaiveDate::parse_from_str(start, "%Y-%m-%d"),
+        chrono::NaiveDate::parse_from_str(end, "%Y-%m-%d"),
+    ) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    while d <= e {
+        out.push(d.format("%Y-%m-%d").to_string());
+        match d.succ_opt() {
+            Some(next) => d = next,
+            None => break,
+        }
+    }
+    out
 }
 
 /// Walk a directory and sum file sizes.
@@ -415,4 +571,48 @@ fn dir_size(path: &std::path::Path) -> u64 {
             }
         })
         .sum()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dates_inclusive_spans_range() {
+        let d = dates_inclusive("2026-06-01", "2026-06-03");
+        assert_eq!(d, vec!["2026-06-01", "2026-06-02", "2026-06-03"]);
+    }
+
+    #[test]
+    fn dates_inclusive_single_day() {
+        assert_eq!(dates_inclusive("2026-06-01", "2026-06-01"), vec!["2026-06-01"]);
+    }
+
+    #[test]
+    fn dates_inclusive_empty_on_garbage() {
+        assert!(dates_inclusive("garbage", "2026-06-03").is_empty());
+        assert!(dates_inclusive("2026-06-01", "nope").is_empty());
+        assert!(dates_inclusive("2026-02-30", "2026-03-01").is_empty());
+    }
+
+    #[test]
+    fn dates_inclusive_empty_when_start_after_end() {
+        assert!(dates_inclusive("2026-06-05", "2026-06-01").is_empty());
+    }
+
+    #[test]
+    fn local_day_bounds_covers_one_local_day() {
+        let (start, end) = local_day_bounds("2026-06-10").unwrap();
+        assert!(end > start);
+        let len = end - start;
+        // 23h–25h tolerance: DST transition days are not 86 400 s long.
+        assert!((82_800..=90_000).contains(&len), "day length was {len}s");
+    }
+
+    #[test]
+    fn local_day_bounds_errors_on_garbage() {
+        assert!(local_day_bounds("not-a-date").is_err());
+        assert!(local_day_bounds("2026-13-40").is_err());
+        assert!(local_day_bounds("").is_err());
+    }
 }
