@@ -107,7 +107,8 @@ impl DayMemory {
             .collect();
 
         // moments: Task 4 implements select_key_moments; stub returns empty
-        let moments = select_key_moments(db, day_start, day_end, max_moments)?;
+        let meeting_starts: Vec<i64> = meetings.iter().map(|m| m.started_at).collect();
+        let moments = select_key_moments(db, day_start, day_end, max_moments, &meeting_starts)?;
 
         Ok(DayMemory {
             date_key: date_key.to_string(),
@@ -169,7 +170,12 @@ fn select_key_moments(
     day_start: i64,
     day_end: i64,
     max: u32,
+    meeting_starts: &[i64],
 ) -> Result<Vec<MomentMemory>> {
+    if max == 0 {
+        return Ok(Vec::new());
+    }
+
     // All frames for the day, sorted chronologically.
     // 20k covers a full day at 5s cadence (~17,280 frames); query is DESC so a too-small limit would drop mornings.
     let mut frames = db.browse_screenshots(Some(day_start), Some(day_end), None, 20_000, 0)?;
@@ -182,17 +188,12 @@ fn select_key_moments(
     }
 
     // Priority signals.
+    // Scans the most recent 1000 bookmarks; heavy bookmarkers may miss older days. TODO: date-range query.
     let bookmarked: HashSet<i64> = db
         .list_bookmarks(1000, 0)?
         .into_iter()
         .filter(|(_, s)| s.timestamp >= day_start && s.timestamp < day_end)
         .map(|(_, s)| s.id)
-        .collect();
-    let meeting_starts: Vec<i64> = db
-        .list_meetings(500, 0)?
-        .into_iter()
-        .filter(|m| m.started_at >= day_start && m.started_at < day_end)
-        .map(|m| m.started_at)
         .collect();
 
     // Build candidates in priority order:
@@ -201,11 +202,12 @@ fn select_key_moments(
     // 3. scene-change frames (hamming distance ≥ SCENE_DISTANCE from previous)
     let mut candidates: Vec<&crate::schema::Screenshot> = Vec::new();
     candidates.extend(frames.iter().filter(|s| bookmarked.contains(&s.id)));
-    for start in &meeting_starts {
+    for start in meeting_starts {
         if let Some(f) = frames.iter().find(|s| s.timestamp >= *start) {
             candidates.push(f);
         }
     }
+    // Keyframe-style: each frame is compared to the last accepted scene boundary, not the previous frame — slow cumulative drift within SCENE_DISTANCE never triggers.
     let mut prev: Option<&Vec<u8>> = None;
     for f in &frames {
         let changed = match prev {
@@ -297,7 +299,7 @@ mod tests {
             })
             .unwrap();
         }
-        let moments = select_key_moments(&db, 0, 10_000, 6).unwrap();
+        let moments = select_key_moments(&db, 0, 10_000, 6, &[]).unwrap();
         // the two identical frames collapse to one representative
         assert!(moments.len() <= 2, "got {}", moments.len());
         let ts: Vec<i64> = moments.iter().map(|m| m.timestamp).collect();
@@ -313,5 +315,83 @@ mod tests {
         }).unwrap();
         let mem = DayMemory::for_date(&db, "2026-06-10", 0, 10_000_000_000, 6).unwrap();
         assert!(mem.journal_text.as_deref().unwrap_or("").contains("shipped the export"));
+    }
+
+    /// Bookmarked frame wins dedup even when it arrives later in time.
+    /// Two frames share near-identical hashes (hamming distance 1, ≤ 5 dedup
+    /// threshold): ts=100 (plain) and ts=200 (bookmarked). The bookmark on
+    /// ts=200 means it is inserted first into the candidate list (priority 1),
+    /// so when ts=100 is encountered as a scene-change candidate it is dropped
+    /// as "near" an already-picked frame. Result: exactly one of the pair
+    /// survives and it must be the bookmarked ts=200 frame.
+    #[test]
+    fn bookmarked_frame_wins_near_hash_dedup() {
+        let db = Database::open_in_memory().unwrap();
+
+        // hash_a and hash_b differ by exactly 1 bit → hamming distance 1 (≤ 5)
+        let hash_a = vec![0u8; 8];
+        let mut hash_b = vec![0u8; 8];
+        hash_b[0] = 0x01; // flip 1 bit
+
+        let id_100 = db
+            .insert_screenshot(&crate::schema::NewScreenshot {
+                timestamp: 100,
+                timestamp_ms: 100_000,
+                app_name: Some("App".into()),
+                window_title: Some("win".into()),
+                window_class: None,
+                file_path: "/f/100.webp".into(),
+                thumbnail_path: Some("/t/100.webp".into()),
+                width: 1920,
+                height: 1080,
+                file_size_bytes: 1,
+                perceptual_hash: hash_a,
+            })
+            .unwrap();
+
+        let id_200 = db
+            .insert_screenshot(&crate::schema::NewScreenshot {
+                timestamp: 200,
+                timestamp_ms: 200_000,
+                app_name: Some("App".into()),
+                window_title: Some("win".into()),
+                window_class: None,
+                file_path: "/f/200.webp".into(),
+                thumbnail_path: Some("/t/200.webp".into()),
+                width: 1920,
+                height: 1080,
+                file_size_bytes: 1,
+                perceptual_hash: hash_b,
+            })
+            .unwrap();
+
+        // Bookmark only the later frame (ts=200).
+        db.toggle_bookmark(id_200, None).unwrap();
+
+        let moments = select_key_moments(&db, 0, 10_000, 6, &[]).unwrap();
+
+        // Exactly one of the near-identical pair should survive.
+        let timestamps: Vec<i64> = moments.iter().map(|m| m.timestamp).collect();
+        assert_eq!(
+            timestamps.iter().filter(|&&t| t == 100 || t == 200).count(),
+            1,
+            "near-identical pair should collapse to one; got {:?}",
+            timestamps
+        );
+        // The bookmarked frame (ts=200) must be the survivor.
+        assert!(
+            timestamps.contains(&200),
+            "bookmarked ts=200 must win dedup; got {:?}",
+            timestamps
+        );
+        // Sanity: the plain frame (ts=100) must NOT appear.
+        assert!(
+            !timestamps.contains(&100),
+            "plain ts=100 must be deduped away; got {:?}",
+            timestamps
+        );
+
+        // Suppress unused-variable warnings for the ids (we used them above).
+        let _ = id_100;
     }
 }
