@@ -92,9 +92,12 @@ export function useScrubber(
       const onMove = (ev: MouseEvent) => {
         if (!isDraggingRef.current) return;
         const newIdx = updateScrubVisuals(ev.clientX);
-        if (newIdx !== undefined && rangeMode && rangeSelection) {
+        // Read the selection through the functional updater, not the render
+        // closure — a drag that just created the selection (mousedown above)
+        // would otherwise see the stale pre-drag null forever.
+        if (newIdx !== undefined && rangeMode) {
           setRangeSelection((prev) =>
-            prev ? { ...prev, endIdx: newIdx } : null,
+            prev ? { ...prev, endIdx: newIdx } : prev,
           );
         }
       };
