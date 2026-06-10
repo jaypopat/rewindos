@@ -11,7 +11,10 @@ function ScrollArea({
   return (
     <ScrollAreaPrimitive.Root
       data-slot="scroll-area"
-      className={cn("relative", className)}
+      // overflow-hidden + min-h-0 so a flex-sized ScrollArea is actually
+      // bounded by its flex container — without them the root grows to its
+      // content and the whole document becomes scrollable.
+      className={cn("relative min-h-0 overflow-hidden", className)}
       {...props}
     >
       <ScrollAreaPrimitive.Viewport

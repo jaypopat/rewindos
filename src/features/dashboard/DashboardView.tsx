@@ -204,18 +204,14 @@ export function DashboardView({
 
   const stats: { label: string; value: React.ReactNode; note?: React.ReactNode }[] = [
     {
-      label: "On screen",
-      value: (
-        <span className="num text-3xl">
-          {screenshotsLoading ? "—" : formatDuration(totalActiveTime)}
-        </span>
-      ),
+      label: "Moments captured",
+      value: <CountNum value={capturesToday} className="num text-3xl" />,
       note:
-        baselineAverage > 0 && activeTimeTrend !== 0 ? (
+        capturesTrend != null && capturesTrend !== 0 ? (
           <span
-            className={`font-mono text-[10px] ${activeTimeTrend > 0 ? "text-signal-active" : "text-accent"}`}
+            className={`font-mono text-[10px] ${capturesTrend > 0 ? "text-signal-active" : "text-accent"}`}
           >
-            {activeTimeTrend > 0 ? "▲" : "▼"} {Math.abs(activeTimeTrend)}% {baselineLabel}
+            {capturesTrend > 0 ? "▲" : "▼"} {Math.abs(capturesTrend)}% vs your average
           </span>
         ) : undefined,
     },
@@ -266,19 +262,20 @@ export function DashboardView({
             </Rise>
             <Rise i={1} className="flex items-baseline gap-4">
               <CountNum
-                value={capturesToday}
-                className="num"
+                value={totalActiveTime}
+                format={(v) => (screenshotsLoading ? "—" : formatDuration(Math.round(v)))}
+                className="num whitespace-nowrap"
                 style={{ fontSize: 92, lineHeight: 0.85 }}
               />
               <div className="pb-2">
                 <div className="font-display text-[21px] text-text-secondary">
-                  moments captured
+                  on screen today
                 </div>
-                {capturesTrend != null && capturesTrend !== 0 && (
+                {baselineAverage > 0 && activeTimeTrend !== 0 && (
                   <div
-                    className={`font-mono text-[11px] mt-[3px] ${capturesTrend > 0 ? "text-signal-active" : "text-accent"}`}
+                    className={`font-mono text-[11px] mt-[3px] ${activeTimeTrend > 0 ? "text-signal-active" : "text-accent"}`}
                   >
-                    {capturesTrend > 0 ? "▲" : "▼"} {Math.abs(capturesTrend)}% vs your average
+                    {activeTimeTrend > 0 ? "▲" : "▼"} {Math.abs(activeTimeTrend)}% {baselineLabel}
                   </div>
                 )}
               </div>

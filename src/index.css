@@ -88,6 +88,9 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
+  /* Fixed app shell — views scroll internally; overflowing content must
+     never scroll the topbar/sidebar out of view. */
+  overflow: hidden;
 }
 
 #root {

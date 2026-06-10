@@ -2,7 +2,6 @@ import { useCallback, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Loader2, Paperclip, PanelLeftClose, PanelLeftOpen, Plus } from "lucide-react";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { cn } from "@/lib/utils";
 import { queryKeys } from "@/lib/query-keys";
 import { claudeDetect, getConfig, getScreenshotsByIds, listChats } from "@/lib/api";
 import { ollamaHealth } from "@/lib/ollama-chat";
@@ -143,14 +142,6 @@ export function AskView({ onSelectScreenshot }: AskViewProps) {
             )}
           </button>
           <span className="w-px h-4 bg-line-2" />
-          <div
-            className={cn(
-              "size-1.5 rounded-full transition-colors",
-              chatReady ? "bg-signal-active animate-led-pulse" : "bg-signal-error",
-            )}
-          />
-          <span className="kicker">Ask</span>
-          <span className="text-text-ghost">·</span>
           <AskModelPicker />
           <button
             onClick={startNewChat}
