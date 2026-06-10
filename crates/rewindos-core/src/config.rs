@@ -17,6 +17,7 @@ pub struct AppConfig {
     pub chat: ChatConfig,
     pub focus: FocusConfig,
     pub meeting: MeetingConfig,
+    pub vault_export: VaultExportConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -155,6 +156,29 @@ pub struct MeetingConfig {
     pub echo_cancel: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct VaultExportConfig {
+    /// Master switch. Stays false until vault_path is set and writable.
+    pub enabled: bool,
+    /// "obsidian" | "logseq"
+    pub format: String,
+    /// Absolute path to the vault (Obsidian) / graph (Logseq) root.
+    pub vault_path: String,
+    /// Obsidian: companion subdir; Logseq: companion page namespace.
+    pub companion_dir: String,
+    /// Which sections to emit: journal | summary | meetings | moments | stats
+    pub sections: Vec<String>,
+    pub max_moments: u32,
+    /// Copy thumbnails into the vault (durable). false = links only (fragile).
+    pub copy_thumbnails: bool,
+    /// Local hour (0-23) the daemon finalizes the completed day.
+    pub end_of_day_hour: u32,
+    /// Opt-in: create the user's daily note with the embed if it doesn't exist.
+    /// Creates only; never overwrites an existing note.
+    pub create_daily_note_if_absent: bool,
+}
+
 impl Default for MeetingConfig {
     fn default() -> Self {
         Self {
@@ -262,6 +286,28 @@ impl Default for SemanticConfig {
             ollama_url: "http://localhost:11434".to_string(),
             model: "nomic-embed-text".to_string(),
             embedding_dimensions: 768,
+        }
+    }
+}
+
+impl Default for VaultExportConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            format: "obsidian".to_string(),
+            vault_path: String::new(),
+            companion_dir: "_rewindos".to_string(),
+            sections: vec![
+                "journal".to_string(),
+                "summary".to_string(),
+                "meetings".to_string(),
+                "moments".to_string(),
+                "stats".to_string(),
+            ],
+            max_moments: 6,
+            copy_thumbnails: true,
+            end_of_day_hour: 23,
+            create_daily_note_if_absent: false,
         }
     }
 }
@@ -438,6 +484,26 @@ mod tests {
             c.whisper_model_path().unwrap(),
             std::path::PathBuf::from("/tmp/rwos-test/models/whisper/ggml-base.en.bin")
         );
+    }
+
+    #[test]
+    fn vault_export_config_defaults() {
+        let c = VaultExportConfig::default();
+        assert!(!c.enabled);
+        assert!(c.vault_path.is_empty());
+        assert_eq!(c.format, "obsidian");
+        assert_eq!(c.companion_dir, "_rewindos");
+        assert_eq!(c.max_moments, 6);
+        assert!(c.copy_thumbnails);
+        assert_eq!(c.end_of_day_hour, 23);
+        assert!(!c.create_daily_note_if_absent);
+        assert_eq!(c.sections, vec!["journal", "summary", "meetings", "moments", "stats"]);
+    }
+
+    #[test]
+    fn app_config_has_vault_export_default() {
+        let c = AppConfig::default();
+        assert!(!c.vault_export.enabled);
     }
 
     #[test]
