@@ -11,6 +11,8 @@ import { BookmarkButton } from "@/components/BookmarkButton";
 import { CollectionDetailView } from "./CollectionDetailView";
 import { SaveMomentDialog } from "./SaveMomentDialog";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
+import { Input } from "@/components/ui/input";
+import { useRename } from "@/hooks/useRename";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { ScreenshotCard } from "@/components/shared/ScreenshotCard";
@@ -30,8 +32,9 @@ interface SavedViewProps {
 export function SavedView({ onSelectScreenshot, onRewindToRange, selectedCollectionId, onSelectCollection }: SavedViewProps) {
   const [tab, setTab] = useState<SavedTab>("favorites");
   const [showNewMoment, setShowNewMoment] = useState(false);
-  const [renamingId, setRenamingId] = useState<number | null>(null);
-  const [renameValue, setRenameValue] = useState("");
+  const renaming = useRename<number>((id, value) => {
+    if (value.trim()) renameMutation.mutate({ id, name: value.trim() });
+  });
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
   const [momentSearch, setMomentSearch] = useState("");
   const queryClient = useQueryClient();
@@ -73,7 +76,6 @@ export function SavedView({ onSelectScreenshot, onRewindToRange, selectedCollect
       updateCollection(id, { name }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.collections() });
-      setRenamingId(null);
     },
   });
 
@@ -101,7 +103,7 @@ export function SavedView({ onSelectScreenshot, onRewindToRange, selectedCollect
           <h2 className="font-display text-xl text-text-primary">Saved</h2>
           <div className="flex gap-0.5 bg-surface-raised rounded-lg p-0.5">
             {(["favorites", "moments"] as const).map((t) => (
-              <button
+              <button type="button"
                 key={t}
                 onClick={() => setTab(t)}
                 className={cn(
@@ -117,7 +119,7 @@ export function SavedView({ onSelectScreenshot, onRewindToRange, selectedCollect
           </div>
         </div>
         {tab === "moments" && (
-          <button
+          <button type="button"
             onClick={() => setShowNewMoment(true)}
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-accent/10 text-accent hover:bg-accent/20 rounded-lg transition-colors"
           >
@@ -167,12 +169,12 @@ export function SavedView({ onSelectScreenshot, onRewindToRange, selectedCollect
             <div className="space-y-2">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-text-muted" strokeWidth={1.5} />
-                <input
+                <Input
                   type="text"
                   value={momentSearch}
                   onChange={(e) => setMomentSearch(e.target.value)}
                   placeholder="Search moments..."
-                  className="w-full pl-8 pr-3 py-1.5 text-xs bg-surface-raised border border-border/30 rounded-lg text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/40 transition-colors"
+                  className="rounded-lg pl-8 pr-3 text-xs"
                 />
               </div>
               {filteredMoments.length === 0 ? (
@@ -192,32 +194,29 @@ export function SavedView({ onSelectScreenshot, onRewindToRange, selectedCollect
                   key={col.id}
                   className="flex items-center gap-3 px-4 py-3 bg-surface-raised border border-border/30 hover:border-accent/30 rounded-lg transition-all group"
                 >
-                  <button
-                    onClick={() => renamingId !== col.id && onSelectCollection(col.id)}
+                  <button type="button"
+                    onClick={() => !renaming.isRenaming(col.id) && onSelectCollection(col.id)}
                     className="flex-1 min-w-0 flex items-center gap-3 text-left"
                   >
                     <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-accent/10 shrink-0">
                       <Clock className="size-4 text-accent" strokeWidth={1.5} />
                     </div>
                     <div className="flex-1 min-w-0">
-                      {renamingId === col.id ? (
+                      {renaming.isRenaming(col.id) ? (
                         <form
                           onSubmit={(e) => {
                             e.preventDefault();
-                            if (renameValue.trim()) {
-                              renameMutation.mutate({ id: col.id, name: renameValue.trim() });
-                            }
+                            renaming.commit();
                           }}
-                          onClick={(e) => e.stopPropagation()}
                           className="flex items-center gap-2"
                         >
-                          <input
+                          <Input
                             ref={(el) => el?.focus()}
-                            value={renameValue}
-                            onChange={(e) => setRenameValue(e.target.value)}
-                            onBlur={() => setRenamingId(null)}
-                            onKeyDown={(e) => { if (e.key === "Escape") setRenamingId(null); }}
-                            className="flex-1 text-sm bg-transparent border border-accent/40 rounded px-2 py-0.5 text-text-primary focus:outline-none focus:border-accent"
+                            value={renaming.value}
+                            onChange={(e) => renaming.setValue(e.target.value)}
+                            onBlur={renaming.cancel}
+                            onKeyDown={(e) => { if (e.key === "Escape") renaming.cancel(); }}
+                            className="h-6 flex-1 rounded border-accent/40 bg-transparent px-2 text-sm focus-visible:border-accent"
                           />
                         </form>
                       ) : (
@@ -243,18 +242,17 @@ export function SavedView({ onSelectScreenshot, onRewindToRange, selectedCollect
                       </span>
                     </div>
                   </button>
-                  <button
+                  <button type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      setRenamingId(col.id);
-                      setRenameValue(col.name);
+                      renaming.start(col.id, col.name);
                     }}
                     className="p-1.5 text-text-muted hover:text-text-primary opacity-0 group-hover:opacity-100 transition-all"
                     title="Rename moment"
                   >
                     <Pencil className="size-3.5" strokeWidth={1.5} />
                   </button>
-                  <button
+                  <button type="button"
                     onClick={(e) => {
                       e.stopPropagation();
                       setConfirmDeleteId(col.id);

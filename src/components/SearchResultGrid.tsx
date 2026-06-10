@@ -18,7 +18,7 @@ export function SearchResultGrid({ results, onSelectResult }: SearchResultGridPr
         <button
           key={result.id}
           onClick={() => onSelectResult(result.id)}
-          className="animate-fade-in-up group relative overflow-hidden bg-surface-raised border border-border/30 hover:border-accent/30 transition-all cursor-pointer text-left"
+          className="animate-in fade-in slide-in-from-bottom-2 duration-300 ease-quiet group relative overflow-hidden bg-surface-raised border border-border/30 hover:border-accent/30 transition-all cursor-pointer text-left"
           style={{ animationDelay: `${i * 30}ms` }}
         >
           {/* Thumbnail */}

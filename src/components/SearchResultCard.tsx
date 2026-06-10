@@ -16,7 +16,7 @@ export function SearchResultCard({ result, index, onClick }: SearchResultCardPro
   return (
     <button
       onClick={onClick}
-      className="animate-fade-in-up w-full grid grid-cols-[150px_1fr] gap-[22px] px-1 py-5 border-b border-line hover:bg-panel transition-colors cursor-pointer text-left group"
+      className="animate-in fade-in slide-in-from-bottom-2 duration-300 ease-quiet w-full grid grid-cols-[150px_1fr] gap-[22px] px-1 py-5 border-b border-line hover:bg-panel transition-colors cursor-pointer text-left group"
       style={{ animationDelay: `${Math.min(index, 12) * 40}ms` }}
     >
       {/* Thumbnail */}

@@ -1,19 +1,24 @@
-import { useState, useRef, useEffect, type ReactNode } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useHotkey } from "@tanstack/react-hotkeys";
 import { searchJournal } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import { useDebounce } from "@/hooks/useDebounce";
 import { Search, X } from "lucide-react";
+import { Input } from "@/components/ui/input";
 import { MOOD_EMOJIS } from "./constants";
 
-function renderSnippet(html: string): ReactNode {
+function Snippet({ html }: { html: string }) {
   const parts = html.split(/(<mark>[\s\S]*?<\/mark>)/g);
-  return parts.map((part) => {
-    const match = part.match(/^<mark>([\s\S]*)<\/mark>$/);
-    if (match) return <mark key={`m-${match[1]}`}>{match[1]}</mark>;
-    return part || null;
-  });
+  return (
+    <>
+      {parts.map((part) => {
+        const match = part.match(/^<mark>([\s\S]*)<\/mark>$/);
+        if (match) return <mark key={`m-${match[1]}`}>{match[1]}</mark>;
+        return part || null;
+      })}
+    </>
+  );
 }
 
 interface JournalSearchPanelProps {
@@ -43,14 +48,14 @@ export function JournalSearchPanel({ onNavigate, onClose }: JournalSearchPanelPr
       <div className="px-5 py-2">
         <div className="flex items-center gap-2">
           <Search className="size-3.5 text-text-muted shrink-0" strokeWidth={2} />
-          <input
+          <Input
             ref={inputRef}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search journal entries..."
-            className="flex-1 bg-transparent text-sm text-text-primary placeholder:text-text-muted/50 focus:outline-none"
+            className="h-auto flex-1 rounded-none border-0 bg-transparent p-0 text-sm placeholder:text-text-muted/50"
           />
-          <button onClick={onClose} className="text-text-muted hover:text-text-secondary transition-colors">
+          <button type="button" onClick={onClose} className="text-text-muted hover:text-text-secondary transition-colors">
             <X className="size-3.5" strokeWidth={2} />
           </button>
         </div>
@@ -65,7 +70,7 @@ export function JournalSearchPanel({ onNavigate, onClose }: JournalSearchPanelPr
           ) : results && results.results.length > 0 ? (
             <div className="py-1">
               {results.results.map((r) => (
-                <button
+                <button type="button"
                   key={r.entry_id}
                   onClick={() => onNavigate(r.date)}
                   className="w-full text-left px-5 py-2 hover:bg-surface-overlay/50 transition-colors"
@@ -78,7 +83,7 @@ export function JournalSearchPanel({ onNavigate, onClose }: JournalSearchPanelPr
                     <span className="text-[10px] text-text-muted font-mono">{r.word_count}w</span>
                   </div>
                   <div className="text-xs text-text-muted line-clamp-2 [&_mark]:bg-accent/30 [&_mark]:text-text-primary">
-                    {renderSnippet(r.snippet)}
+                    <Snippet html={r.snippet} />
                   </div>
                 </button>
               ))}

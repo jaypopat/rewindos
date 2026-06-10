@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Plus, Search, Pencil, Trash2, X, Download } from "lucide-react";
+import { Input } from "@/components/ui/input";
 import {
   deleteChat,
   exportChatMarkdown,
@@ -13,6 +14,7 @@ import {
 import { queryKeys } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
 import { useAskChat } from "@/context/AskContext";
+import { useRename } from "@/hooks/useRename";
 
 type Bucket = { label: string; chats: Chat[] };
 
@@ -44,12 +46,10 @@ function groupByRecency(chats: Chat[]): Bucket[] {
   return buckets.filter((b) => b.chats.length > 0);
 }
 
-export function ChatSidebar() {
+export function ChatSidebar({ onClose }: { onClose: () => void }) {
   const { activeChatId, selectChat, startNewChat } = useAskChat();
   const qc = useQueryClient();
   const [query, setQuery] = useState("");
-  const [renamingId, setRenamingId] = useState<number | null>(null);
-  const [renameValue, setRenameValue] = useState("");
 
   const { data: chats = [] } = useQuery<Chat[]>({
     queryKey: queryKeys.chats(),
@@ -68,6 +68,11 @@ export function ChatSidebar() {
     mutationFn: ({ id, title }: { id: number; title: string }) =>
       renameChat(id, title),
     onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.chats() }),
+  });
+
+  const renaming = useRename<number>((id, value) => {
+    const fallback = chats.find((c) => c.id === id)?.title ?? "";
+    rename.mutate({ id, title: value || fallback });
   });
 
   const del = useMutation({
@@ -91,7 +96,10 @@ export function ChatSidebar() {
   }, [hits]);
 
   return (
-    <div className="w-64 shrink-0 border-r border-line flex flex-col min-h-0">
+    <aside
+      aria-label="Chat history"
+      className="absolute left-0 top-12 bottom-0 z-20 w-64 flex flex-col min-h-0 bg-surface-raised border-r border-line shadow-[16px_0_40px_-20px_rgba(0,0,0,0.7)] animate-slide-in-left"
+    >
       {/* Header */}
       <div className="p-3 border-b border-line space-y-2.5">
         <div className="flex items-center gap-2">
@@ -103,8 +111,11 @@ export function ChatSidebar() {
             {chats.length}
           </span>
         </div>
-        <button
-          onClick={startNewChat}
+        <button type="button"
+          onClick={() => {
+            startNewChat();
+            onClose();
+          }}
           className="group w-full flex items-center justify-center gap-1.5 h-8 rounded-lg text-[12.5px] font-medium text-text-primary border border-line-2 hover:border-line-hi hover:bg-panel transition-colors"
         >
           <Plus className="size-3.5" strokeWidth={1.7} />
@@ -112,14 +123,14 @@ export function ChatSidebar() {
         </button>
         <div className="relative">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3 text-text-muted pointer-events-none" />
-          <input
+          <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search chats"
-            className="w-full pl-8 pr-7 py-1.5 rounded-[7px] bg-transparent border border-line-2 text-[12.5px] text-text-primary placeholder:text-text-muted outline-none focus:border-line-hi transition-colors"
+            className="bg-transparent pl-8 pr-7 text-[12.5px]"
           />
           {query && (
-            <button
+            <button type="button"
               onClick={() => setQuery("")}
               className="absolute right-2 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary"
               aria-label="clear search"
@@ -138,23 +149,20 @@ export function ChatSidebar() {
           ) : (
             <Section label={`matches (${dedupedHits.length})`}>
               {dedupedHits.map((h) => (
-                <button
+                <button type="button"
                   key={h.message_id}
-                  onClick={() => selectChat(h.chat_id)}
+                  onClick={() => {
+                    selectChat(h.chat_id);
+                    onClose();
+                  }}
                   className="group w-full px-3 py-2 text-left cursor-pointer hover:bg-panel border-l-2 border-transparent hover:border-line-hi transition-colors"
                 >
                   <div className="font-sans text-xs text-text-primary truncate group-hover:text-text-primary">
                     {h.chat_title}
                   </div>
-                  <div
-                    className="font-mono text-[10px] text-text-muted/70 mt-0.5 line-clamp-2"
-                    dangerouslySetInnerHTML={{
-                      __html: h.snippet.replace(
-                        /<mark>/g,
-                        '<mark class="bg-semantic/20 text-semantic">',
-                      ),
-                    }}
-                  />
+                  <div className="font-mono text-[10px] text-text-muted/70 mt-0.5 line-clamp-2">
+                    <SnippetText snippet={h.snippet} />
+                  </div>
                 </button>
               ))}
             </Section>
@@ -166,53 +174,62 @@ export function ChatSidebar() {
             <Section key={bucket.label} label={bucket.label}>
               {bucket.chats.map((c) => {
                 const active = activeChatId === c.id;
-                const isRenaming = renamingId === c.id;
+                const isRenaming = renaming.isRenaming(c.id);
                 return (
                   <div
                     key={c.id}
                     className={cn(
-                      "group px-3 py-2 cursor-pointer border-l-2 transition-colors",
+                      "group relative border-l-2 transition-colors",
                       active
                         ? "border-accent bg-panel"
                         : "border-transparent hover:bg-panel",
                     )}
-                    onClick={() => !isRenaming && selectChat(c.id)}
                   >
-                    <div className="flex items-center gap-1">
-                      {isRenaming ? (
-                        <input
+                    {isRenaming ? (
+                      <div className="px-3 py-2">
+                        <Input
                           autoFocus
-                          value={renameValue}
-                          onChange={(e) => setRenameValue(e.target.value)}
-                          onBlur={() => {
-                            rename.mutate({
-                              id: c.id,
-                              title: renameValue || c.title,
-                            });
-                            setRenamingId(null);
-                          }}
+                          value={renaming.value}
+                          onChange={(e) => renaming.setValue(e.target.value)}
+                          onBlur={renaming.commit}
                           onKeyDown={(e) => {
                             if (e.key === "Enter") e.currentTarget.blur();
-                            if (e.key === "Escape") setRenamingId(null);
+                            if (e.key === "Escape") {
+                              // cancel the rename only — don't let the
+                              // drawer's global Escape handler also fire
+                              e.stopPropagation();
+                              renaming.cancel();
+                            }
                           }}
-                          className="flex-1 bg-transparent border-b border-accent-line text-[12.5px] text-text-primary outline-none"
+                          className="h-auto w-full rounded-none border-0 border-b border-accent-line bg-transparent p-0 text-[12.5px]"
                         />
-                      ) : (
-                        <>
+                        <ChatMeta chat={c} />
+                      </div>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            selectChat(c.id);
+                            onClose();
+                          }}
+                          className="w-full px-3 py-2 text-left cursor-pointer"
+                        >
                           <span
                             className={cn(
-                              "flex-1 text-[12.5px] font-[450] truncate",
+                              "block truncate pr-16 text-[12.5px] font-[450]",
                               active ? "text-text-primary" : "text-text-secondary group-hover:text-text-primary",
                             )}
                           >
                             {c.title}
                           </span>
-                          <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <ChatMeta chat={c} />
+                        </button>
+                        <div className="absolute right-2 top-1.5 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
                             <IconButton
                               onClick={(e) => {
                                 e.stopPropagation();
-                                setRenamingId(c.id);
-                                setRenameValue(c.title);
+                                renaming.start(c.id, c.title);
                               }}
                               title="rename"
                               hoverClass="hover:text-text-primary"
@@ -246,21 +263,9 @@ export function ChatSidebar() {
                             >
                               <Trash2 className="size-3" />
                             </IconButton>
-                          </div>
-                        </>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-1.5 font-mono text-[10px] text-text-faint mt-1">
-                      <span
-                        className={cn(
-                          c.backend === "claude" ? "text-accent-hi/80" : "text-text-muted",
-                        )}
-                      >
-                        {c.backend}
-                      </span>
-                      <span className="text-border">·</span>
-                      <span>{relativeTime(c.last_activity_at)}</span>
-                    </div>
+                        </div>
+                      </>
+                    )}
                   </div>
                 );
               })}
@@ -268,7 +273,48 @@ export function ChatSidebar() {
           ))
         )}
       </div>
+    </aside>
+  );
+}
+
+function ChatMeta({ chat }: { chat: Chat }) {
+  return (
+    <div className="flex items-center gap-1.5 font-mono text-[10px] text-text-faint mt-1">
+      <span
+        className={cn(
+          chat.backend === "claude" ? "text-accent-hi/80" : "text-text-muted",
+        )}
+      >
+        {chat.backend}
+      </span>
+      <span className="text-border">·</span>
+      <span>{relativeTime(chat.last_activity_at)}</span>
     </div>
+  );
+}
+
+// FTS5 snippets arrive as text with <mark> delimiters; render them as React
+// children so no other markup in captured text can execute.
+function SnippetText({ snippet }: { snippet: string }) {
+  const segments: { text: string; mark: boolean; offset: number }[] = [];
+  let offset = 0;
+  for (const part of snippet.split(/(<mark>[\s\S]*?<\/mark>)/g)) {
+    const m = part.match(/^<mark>([\s\S]*)<\/mark>$/);
+    segments.push({ text: m ? m[1] : part, mark: !!m, offset });
+    offset += part.length;
+  }
+  return (
+    <>
+      {segments.map((s) =>
+        s.mark ? (
+          <mark key={s.offset} className="bg-semantic/20 text-semantic">
+            {s.text}
+          </mark>
+        ) : (
+          s.text || null
+        ),
+      )}
+    </>
   );
 }
 
@@ -305,7 +351,7 @@ function IconButton({
   hoverClass: string;
 }) {
   return (
-    <button
+    <button type="button"
       onClick={onClick}
       title={title}
       aria-label={title}

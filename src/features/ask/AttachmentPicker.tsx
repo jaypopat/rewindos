@@ -2,6 +2,7 @@ import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useDebounce } from "@/hooks/useDebounce";
 import { Check, Search } from "lucide-react";
+import { Input } from "@/components/ui/input";
 import {
   Dialog,
   DialogContent,
@@ -97,12 +98,12 @@ export function AttachmentPicker({ open, onClose, onAttach }: AttachmentPickerPr
 
         <div className="relative mb-3">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-text-muted pointer-events-none" />
-          <input
+          <Input
             autoFocus
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="search your screen history (empty = recent)"
-            className="w-full pl-9 pr-2 py-2 bg-surface-raised/30 border border-border/40 font-sans text-sm text-text-primary placeholder:text-text-muted/60 outline-none focus:border-semantic/40"
+            className="h-9 rounded-none border-border/40 bg-surface-raised/30 pl-9 pr-2 font-sans text-sm placeholder:text-text-muted/60 focus-visible:border-semantic/40"
           />
         </div>
 

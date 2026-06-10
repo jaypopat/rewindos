@@ -8,6 +8,7 @@
 @import "@fontsource-variable/inter";
 @import "@fontsource-variable/jetbrains-mono";
 @import "tailwindcss";
+@import "tw-animate-css";
 
 @theme {
   /* Surfaces — warm near-black, NOT blue-black */
@@ -71,6 +72,9 @@
 
   /* Highlight */
   --color-highlight-bg: rgba(232, 130, 90, 0.12);
+
+  /* Motion — the house easing for entrances and reveals */
+  --ease-quiet: cubic-bezier(0.22, 0.61, 0.36, 1);
 
   /* Typography */
   --font-display: "Newsreader Variable", Georgia, serif;
@@ -178,45 +182,9 @@ mark {
 
 /* --- Animations --- */
 
-/* Editorial ease-out everywhere */
-@keyframes fadeInUp {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.animate-fade-in-up {
-  animation: fadeInUp 0.3s cubic-bezier(0.22, 0.61, 0.36, 1) both;
-}
-
-@keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-.animate-fade-in {
-  animation: fadeIn 0.4s cubic-bezier(0.22, 0.61, 0.36, 1) both;
-}
-
-@keyframes slideInRight {
-  from {
-    opacity: 0;
-    transform: translateX(12px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
-}
-
-.animate-slide-in-right {
-  animation: slideInRight 0.3s cubic-bezier(0.22, 0.61, 0.36, 1) both;
-}
+/* Entrance animations come from tw-animate-css (animate-in fade-in
+   slide-in-from-* ... ease-quiet). Only bespoke signal effects with no
+   tw-animate equivalent live below. */
 
 @keyframes pulse-glow {
   0%, 100% { box-shadow: 0 0 0 0 rgba(232, 130, 90, 0.2); }
@@ -256,9 +224,6 @@ mark {
 
 /* Reduced motion */
 @media (prefers-reduced-motion: reduce) {
-  .animate-fade-in-up,
-  .animate-fade-in,
-  .animate-slide-in-right,
   .animate-pulse-glow,
   .animate-led-pulse,
   .animate-navmark {
@@ -269,6 +234,7 @@ mark {
   * {
     transition-duration: 0.01ms !important;
     animation-duration: 0.01ms !important;
+    animation-delay: 0.01ms !important;
   }
 }
 

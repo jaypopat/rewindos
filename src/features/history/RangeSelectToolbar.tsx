@@ -1,4 +1,5 @@
 import { Crosshair, FolderPlus, X } from "lucide-react";
+import { Input } from "@/components/ui/input";
 
 interface RangeSelectToolbarProps {
   rangeStart: number | null;
@@ -50,12 +51,12 @@ export function RangeSelectToolbar({
             }}
             className="flex items-center gap-2"
           >
-            <input
+            <Input
               ref={(el) => el?.focus()}
               value={rangeSaveName}
               onChange={(e) => setRangeSaveName(e.target.value)}
               placeholder="Collection name..."
-              className="text-xs bg-transparent border border-border/50 rounded px-2 py-1.5 w-44 text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50"
+              className="w-44 rounded bg-transparent px-2 text-xs"
             />
             <button
               type="submit"
@@ -74,7 +75,7 @@ export function RangeSelectToolbar({
           </form>
         ) : (
           <div className="flex items-center gap-2">
-            <button
+            <button type="button"
               onClick={() => {
                 if (rangeEnd !== null && rangeStart !== null) {
                   const sd = new Date(rangeStart * 1000);
@@ -90,13 +91,13 @@ export function RangeSelectToolbar({
               <FolderPlus className="size-3" />
               Save as Collection
             </button>
-            <button
+            <button type="button"
               onClick={onClear}
               className="px-2.5 py-1.5 text-xs text-text-muted hover:text-text-secondary transition-colors"
             >
               Clear
             </button>
-            <button
+            <button type="button"
               onClick={onExit}
               className="p-1.5 text-text-muted hover:text-text-secondary transition-colors"
               title="Exit range select"

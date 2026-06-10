@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Mic, Square } from "lucide-react";
+import { Input } from "@/components/ui/input";
 import { useMeetingActions, useMeetingStatus } from "./useMeetings";
 
 export function RecordingControls() {
@@ -26,7 +27,7 @@ export function RecordingControls() {
   return (
     <div className="flex flex-col items-end gap-1">
       {active ? (
-        <button
+        <button type="button"
           onClick={() => stop.mutate()}
           disabled={stop.isPending}
           className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-red-500/15 text-red-400 text-sm hover:bg-red-500/25 disabled:opacity-50"
@@ -35,13 +36,13 @@ export function RecordingControls() {
         </button>
       ) : (
         <div className="flex items-center gap-2">
-          <input
+          <Input
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="Meeting title (optional)"
-            className="px-2 py-1.5 text-sm rounded-md bg-surface border border-border/50"
+            className="w-56 bg-surface text-sm"
           />
-          <button
+          <button type="button"
             onClick={() => start.mutate(title || "Untitled meeting")}
             disabled={start.isPending}
             className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-accent/15 text-accent text-sm hover:bg-accent/25 disabled:opacity-50"

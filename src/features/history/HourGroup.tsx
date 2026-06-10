@@ -3,6 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { createCollection, getImageUrl } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { ChevronRight, FolderPlus, Trash2 } from "lucide-react";
+import { Input } from "@/components/ui/input";
 import { sampleEvenly, hourKeyToTimestamp } from "./history-utils";
 import type { HourGroup as HourGroupType } from "./history-utils";
 
@@ -81,7 +82,7 @@ export function HourGroupRow({
     )}>
       {/* Hour header */}
       <div className="flex items-center">
-        <button
+        <button type="button"
           onClick={() => {
             if (rangeSelectMode) {
               onRangeClick(hourKeyToTimestamp(group.key));
@@ -144,15 +145,14 @@ export function HourGroupRow({
               e.preventDefault();
               handleSaveAsCollection();
             }}
-            onClick={(e) => e.stopPropagation()}
             className="flex items-center gap-1.5 px-2 shrink-0"
           >
-            <input
+            <Input
               ref={(el) => el?.focus()}
               value={saveCollectionName}
               onChange={(e) => setSaveCollectionName(e.target.value)}
               placeholder="Collection name..."
-              className="text-xs bg-transparent border border-border/50 rounded px-2 py-1 w-36 text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50"
+              className="h-7 w-36 rounded bg-transparent px-2 text-xs"
             />
             <button
               type="submit"
@@ -170,7 +170,7 @@ export function HourGroupRow({
             </button>
           </form>
         ) : (
-          <button
+          <button type="button"
             onClick={(e) => {
               e.stopPropagation();
               setSaveCollectionKey(group.key);
@@ -183,7 +183,7 @@ export function HourGroupRow({
           </button>
         )}
         {/* Delete hour button */}
-        <button
+        <button type="button"
           onClick={(e) => {
             e.stopPropagation();
             onRequestDelete(group.key);
@@ -200,7 +200,7 @@ export function HourGroupRow({
         <div className="px-4 pb-3 pt-1">
           <div className="grid grid-cols-4 xl:grid-cols-6 gap-2">
             {visible.map((entry) => (
-              <button
+              <button type="button"
                 key={entry.id}
                 onClick={() => {
                   if (rangeSelectMode) {
@@ -242,7 +242,7 @@ export function HourGroupRow({
             ))}
           </div>
           {!showAll && remaining > 0 && (
-            <button
+            <button type="button"
               onClick={onShowAll}
               className="mt-2 w-full py-1.5 text-xs text-accent hover:text-accent/80 font-medium transition-colors"
             >

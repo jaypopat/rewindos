@@ -1,24 +1,12 @@
-import { forwardRef, useEffect } from "react";
+import { useEffect, type Ref } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { getAppNames } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
+import { DATE_PRESETS } from "@/lib/date-presets";
 import { AppDot } from "./AppDot";
 import { Search, X } from "lucide-react";
-
-const DATE_PRESETS = [
-  { label: "All", value: undefined },
-  { label: "Today", value: () => todayTimestamp() },
-  { label: "Yesterday", value: () => todayTimestamp() - 86400 },
-  { label: "7d", value: () => todayTimestamp() - 86400 * 7 },
-  { label: "30d", value: () => todayTimestamp() - 86400 * 30 },
-] as const;
-
-function todayTimestamp(): number {
-  const now = new Date();
-  now.setHours(0, 0, 0, 0);
-  return Math.floor(now.getTime() / 1000);
-}
+import { Input } from "@/components/ui/input";
 
 interface SearchBarProps {
   query: string;
@@ -27,6 +15,7 @@ interface SearchBarProps {
   onAppFilterChange: (app: string | undefined) => void;
   datePreset: number;
   onDatePresetChange: (index: number) => void;
+  ref?: Ref<HTMLInputElement>;
 }
 
 const chipClass = (on: boolean) =>
@@ -37,11 +26,9 @@ const chipClass = (on: boolean) =>
       : "border-line-2 text-text-secondary hover:border-line-hi hover:text-text-primary",
   );
 
-export const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(
-  function SearchBar(
-    { query, onQueryChange, appFilter, onAppFilterChange, datePreset, onDatePresetChange },
-    ref,
-  ) {
+export function SearchBar(
+  { query, onQueryChange, appFilter, onAppFilterChange, datePreset, onDatePresetChange, ref }: SearchBarProps,
+) {
     const { data: appNames } = useQuery({
       queryKey: queryKeys.appNames(),
       queryFn: getAppNames,
@@ -59,19 +46,19 @@ export const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(
         {/* The search line — editorial, a single rule */}
         <div className="flex items-center gap-3.5 pb-[18px] border-b border-line-2">
           <Search className="size-[22px] text-accent flex-none" strokeWidth={1.7} />
-          <input
+          <Input
             ref={ref}
             type="text"
             value={query}
             onChange={(e) => onQueryChange(e.target.value)}
             placeholder="Search everything you've seen…"
-            className="flex-1 bg-transparent border-none outline-none text-text-primary placeholder:text-text-muted font-display text-[28px] tracking-tight"
+            className="h-auto flex-1 rounded-none border-none bg-transparent p-0 font-display text-[28px] tracking-tight"
             onKeyDown={(e) => {
               if (e.key === "Escape") onQueryChange("");
             }}
           />
           {query && (
-            <button
+            <button type="button"
               onClick={() => onQueryChange("")}
               className="text-text-muted hover:text-text-secondary transition-colors"
             >
@@ -83,7 +70,7 @@ export const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(
         {/* Controls row */}
         <div className="flex items-center gap-2 flex-wrap mt-[22px]">
           {DATE_PRESETS.map((preset, i) => (
-            <button
+            <button type="button"
               key={preset.label}
               onClick={() => onDatePresetChange(i)}
               className={chipClass(datePreset === i)}
@@ -95,11 +82,11 @@ export const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(
           {appNames && appNames.length > 0 && (
             <>
               <span className="w-px h-5 bg-line-2 mx-1" />
-              <button onClick={() => onAppFilterChange(undefined)} className={chipClass(!appFilter)}>
+              <button type="button" onClick={() => onAppFilterChange(undefined)} className={chipClass(!appFilter)}>
                 All apps
               </button>
               {appNames.slice(0, 8).map((name) => (
-                <button
+                <button type="button"
                   key={name}
                   onClick={() => onAppFilterChange(appFilter === name ? undefined : name)}
                   className={chipClass(appFilter === name)}
@@ -133,7 +120,4 @@ export const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(
         </div>
       </div>
     );
-  },
-);
-
-export { DATE_PRESETS, todayTimestamp };
+}

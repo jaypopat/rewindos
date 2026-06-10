@@ -1,7 +1,7 @@
 import {
   createContext,
+  use,
   useCallback,
-  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -28,6 +28,7 @@ import {
   type ChatRole,
 } from "@/lib/api";
 import { invoke } from "@tauri-apps/api/core";
+import { resolveChatRoute } from "@/lib/claude-models";
 import { ollamaChat, type OllamaMessage } from "@/lib/ollama-chat";
 import { queryKeys } from "@/lib/query-keys";
 import { decodeAttachments, encodeAttachments } from "@/lib/attachments";
@@ -105,22 +106,32 @@ export function AskProvider({ children }: { children: ReactNode }) {
       let useClaude = false;
       try {
         const claude = await claudeDetect();
-        useClaude = claude.available && claude.mcp_registered;
+        const claudeReady = claude.available && claude.mcp_registered;
 
         // Build attachment context FIRST — if daemon fails here, we haven't created a chat stub
         // and the user won't see an orphan "New chat" row in the sidebar.
         const expandedText = await buildAttachedContext(attachedIds, text);
         const storedText = encodeAttachments(attachedIds, text);
 
-        // effectiveModel: what this SEND should use. For existing chats, use the persisted chat.model.
-        // For new chats, use the user's pick (pendingModel) or the backend default. Lifted above the
-        // new-chat block so it's available later for the Ollama/Claude dispatch — reading activeChat
-        // at call-time would be stale (useCallback closure captures the old value).
-        const backendDefault = useClaude
-          ? "sonnet"
-          : appConfig?.chat.model ?? "";
-        const effectiveModel =
-          activeChat?.model ?? pendingModel ?? backendDefault;
+        // Route by the SELECTED model, not by whether Claude is installed. An explicit pick
+        // (chat.model for existing chats, pendingModel for new ones) decides the backend; with
+        // no pick we default to Claude when ready, else the local Ollama model. activeChat is
+        // read here rather than threaded in because the useCallback closure captures it.
+        const route = resolveChatRoute({
+          selectedModel: activeChat?.model ?? pendingModel ?? null,
+          claudeReady,
+          ollamaDefaultModel: appConfig?.chat.model ?? "",
+        });
+        const effectiveModel = route.model;
+        useClaude = route.provider === "claude";
+
+        // A Claude model was picked but the CLI/MCP server isn't available — fail loudly
+        // instead of silently routing a Claude alias to Ollama (which would 404 the model).
+        if (useClaude && !claudeReady) {
+          throw new Error(
+            "Claude Code isn't available. Enable it in Settings → AI, or pick a local Ollama model.",
+          );
+        }
 
         if (chatId == null) {
           const title = text.slice(0, 60).trim() || "New chat";
@@ -167,7 +178,7 @@ export function AskProvider({ children }: { children: ReactNode }) {
                 }) satisfies OllamaMessage,
             );
 
-          const systemContent = `You are RewindOS. Answer directly. Cite with [REF:ID].\n\nCurrent time: ${new Date().toISOString()}\n\n${ctx.context}`;
+          const systemContent = `You are RewindOS. Answer directly. Cite screenshots with [REF:ID]. Context may include meeting transcripts ("You" = the user, "Remote" = the other party) — use them when the question concerns conversations or meetings.\n\nCurrent time: ${new Date().toISOString()}\n\n${ctx.context}`;
           const ollamaMessages: OllamaMessage[] = [
             { role: "system", content: systemContent },
             ...prevMessages,
@@ -309,7 +320,7 @@ export function AskProvider({ children }: { children: ReactNode }) {
     ],
   );
 
-  return <AskContext.Provider value={value}>{children}</AskContext.Provider>;
+  return <AskContext value={value}>{children}</AskContext>;
 }
 
 function handleEvent(
@@ -350,7 +361,7 @@ async function persistTextMessage(
 }
 
 export function useAskChat() {
-  const ctx = useContext(AskContext);
+  const ctx = use(AskContext);
   if (!ctx) throw new Error("useAskChat must be used within AskProvider");
   return ctx;
 }

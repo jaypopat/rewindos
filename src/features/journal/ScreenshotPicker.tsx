@@ -4,6 +4,7 @@ import { browseScreenshots, search, getImageUrl, type TimelineEntry, type AppUsa
 import { queryKeys } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
 import { X, ImageIcon, Search, Grid3X3, ChevronDown } from "lucide-react";
+import { Input } from "@/components/ui/input";
 
 const PAGE_SIZE = 50;
 
@@ -106,7 +107,7 @@ export function ScreenshotPicker({
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">
           {/* Mode toggle */}
-          <button
+          <button type="button"
             onClick={() => { setMode("browse"); setSearchQuery(""); setSearchResults([]); setSearchOffset(0); }}
             className={cn(
               "flex items-center gap-1 px-2 py-0.5 text-[11px] font-mono rounded transition-colors",
@@ -116,7 +117,7 @@ export function ScreenshotPicker({
             <Grid3X3 className="size-3" strokeWidth={2} />
             browse
           </button>
-          <button
+          <button type="button"
             onClick={() => setMode("search")}
             className={cn(
               "flex items-center gap-1 px-2 py-0.5 text-[11px] font-mono rounded transition-colors",
@@ -127,7 +128,7 @@ export function ScreenshotPicker({
             search
           </button>
         </div>
-        <button onClick={onClose} className="text-text-muted hover:text-text-secondary transition-colors">
+        <button type="button" onClick={onClose} className="text-text-muted hover:text-text-secondary transition-colors">
           <X className="size-3.5" strokeWidth={2} />
         </button>
       </div>
@@ -137,17 +138,17 @@ export function ScreenshotPicker({
         <div className="flex items-center gap-2 mb-2">
           <div className="flex-1 flex items-center gap-1.5 px-2 py-1.5 border border-border/50 bg-surface-overlay/50 rounded">
             <Search className="size-3 text-text-muted shrink-0" strokeWidth={2} />
-            <input
+            <Input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") handleSearchSubmit(); }}
               placeholder="Search all screenshots..."
-              className="flex-1 bg-transparent text-xs text-text-primary placeholder:text-text-muted/50 outline-none"
+              className="h-auto flex-1 rounded-none border-0 bg-transparent p-0 text-xs placeholder:text-text-muted/50"
               ref={(el) => el?.focus()}
             />
           </div>
-          <button
+          <button type="button"
             onClick={handleSearchSubmit}
             disabled={!searchQuery.trim()}
             className={cn(
@@ -163,7 +164,7 @@ export function ScreenshotPicker({
       {/* App filter chips (browse mode) */}
       {mode === "browse" && appUsage && appUsage.length > 0 && (
         <div className="flex gap-1 flex-wrap mb-2">
-          <button
+          <button type="button"
             onClick={() => handleAppFilter(undefined)}
             className={cn(
               "px-2 py-0.5 text-[10px] font-mono rounded-full border transition-colors",
@@ -175,7 +176,7 @@ export function ScreenshotPicker({
             all
           </button>
           {appUsage.slice(0, 8).map((app) => (
-            <button
+            <button type="button"
               key={app.app_name}
               onClick={() => handleAppFilter(appFilter === app.app_name ? undefined : app.app_name)}
               className={cn(
@@ -208,7 +209,7 @@ export function ScreenshotPicker({
             {displayItems.map((ss) => {
               const isAttached = attachedSet.has(ss.id);
               return (
-                <button
+                <button type="button"
                   key={ss.id}
                   onClick={() => !isAttached && onAttach(ss.id)}
                   disabled={isAttached}
@@ -245,7 +246,7 @@ export function ScreenshotPicker({
 
           {/* Load more */}
           {lastBatchFull && (
-            <button
+            <button type="button"
               onClick={handleLoadMore}
               disabled={isFetching}
               className="mt-2 w-full flex items-center justify-center gap-1 py-1.5 text-[11px] font-mono text-text-muted hover:text-text-secondary border border-border/30 rounded transition-colors disabled:opacity-50"

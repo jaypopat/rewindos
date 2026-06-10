@@ -63,7 +63,7 @@ export function AskMessages({ rows, onSelectScreenshot }: AskMessagesProps) {
           // bubble — a mono kicker, then text straight on the background.
           if (isUser) {
             return (
-              <div key={m.id} className="animate-fade-in flex justify-end">
+              <div key={m.id} className="animate-in fade-in duration-300 ease-quiet flex justify-end">
                 <div
                   className="max-w-[78%] bg-surface-overlay border border-line-2 px-4 py-3 space-y-2"
                   style={{ borderRadius: "12px 12px 3px 12px" }}
@@ -83,7 +83,7 @@ export function AskMessages({ rows, onSelectScreenshot }: AskMessagesProps) {
           }
 
           return (
-            <div key={m.id} className="animate-fade-in">
+            <div key={m.id} className="animate-in fade-in duration-300 ease-quiet">
               <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-text-faint mb-2">
                 RewindOS
               </div>

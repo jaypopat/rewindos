@@ -5,7 +5,8 @@ import type { SearchFilters } from "@/lib/api";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useGlobalKeyboard } from "@/hooks/useGlobalKeyboard";
 import { Sidebar, type View } from "@/components/Sidebar";
-import { SearchBar, DATE_PRESETS } from "@/components/SearchBar";
+import { SearchBar } from "@/components/SearchBar";
+import { DATE_PRESETS } from "@/lib/date-presets";
 import { SearchResults } from "@/components/SearchResults";
 import { DaemonPanel } from "@/components/DaemonPanel";
 import { GnomeExtensionBanner } from "@/components/GnomeExtensionBanner";
@@ -220,7 +221,7 @@ function App() {
     selectedScreenshotId !== null;
 
   return (
-    <main className="flex h-screen animate-fade-in">
+    <main className="flex h-screen animate-in fade-in duration-300 ease-quiet">
       <Sidebar activeView={view} onViewChange={handleViewChange} />
 
       <div className="flex-1 flex flex-col min-w-0 min-h-0">
@@ -232,6 +233,7 @@ function App() {
             <b className="font-medium text-text-secondary">{VIEW_LABELS[view]}</b>
           </div>
           <button
+            type="button"
             onClick={() => setPaletteOpen(true)}
             className="ml-auto flex items-center gap-2 h-[34px] px-3 min-w-[240px] rounded-lg border border-line-2 hover:border-line-hi text-text-muted text-[13px] transition-colors whitespace-nowrap"
           >
@@ -242,6 +244,7 @@ function App() {
             </span>
           </button>
           <button
+            type="button"
             onClick={() => setShowSaveMoment(true)}
             className="size-[34px] grid place-items-center rounded-lg text-text-muted hover:text-text-primary hover:bg-panel transition-colors"
             title="Save moment"

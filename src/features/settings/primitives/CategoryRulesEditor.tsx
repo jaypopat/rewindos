@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Input } from "@/components/ui/input";
 
 const DEFAULT_CATEGORIES = [
   "Development", "Browsing", "Communication", "Media", "Productivity", "System",
@@ -56,15 +57,15 @@ export function CategoryRulesEditor({
             <div key={cat} className="flex items-center gap-2">
               <span className="text-xs text-text-secondary w-28 shrink-0">{cat}</span>
               <div className="flex-1 flex gap-1">
-                <input
+                <Input
                   type="text"
                   value={inputs[cat] ?? ""}
                   onChange={(e) => setInputs((prev) => ({ ...prev, [cat]: e.target.value }))}
                   onKeyDown={(e) => e.key === "Enter" && addKeyword(cat)}
                   placeholder="add keyword..."
-                  className="flex-1 px-2 py-0.5 bg-surface-raised border border-border/60 text-[11px] text-text-primary font-mono outline-none focus:border-accent/40 transition-colors"
+                  className="h-6 flex-1 rounded-none px-2 text-[11px] font-mono"
                 />
-                <button
+                <button type="button"
                   onClick={() => addKeyword(cat)}
                   className="px-1.5 py-0.5 font-mono text-[10px] text-accent border border-accent/30 hover:bg-accent/10"
                 >
@@ -79,15 +80,15 @@ export function CategoryRulesEditor({
             <div className="flex items-center gap-2">
               <span className="text-xs text-text-secondary w-28 shrink-0">{cat}</span>
               <div className="flex-1 flex gap-1">
-                <input
+                <Input
                   type="text"
                   value={inputs[cat] ?? ""}
                   onChange={(e) => setInputs((prev) => ({ ...prev, [cat]: e.target.value }))}
                   onKeyDown={(e) => e.key === "Enter" && addKeyword(cat)}
                   placeholder="add keyword..."
-                  className="flex-1 px-2 py-0.5 bg-surface-raised border border-border/60 text-[11px] text-text-primary font-mono outline-none focus:border-accent/40 transition-colors"
+                  className="h-6 flex-1 rounded-none px-2 text-[11px] font-mono"
                 />
-                <button
+                <button type="button"
                   onClick={() => addKeyword(cat)}
                   className="px-1.5 py-0.5 font-mono text-[10px] text-accent border border-accent/30 hover:bg-accent/10"
                 >
@@ -100,7 +101,7 @@ export function CategoryRulesEditor({
                 {keywords.map((kw, i) => (
                   <span key={kw} className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-surface-overlay text-[10px] font-mono text-text-secondary">
                     {kw}
-                    <button onClick={() => removeKeyword(cat, i)} className="text-text-muted hover:text-signal-error text-[10px]">
+                    <button type="button" onClick={() => removeKeyword(cat, i)} className="text-text-muted hover:text-signal-error text-[10px]">
                       x
                     </button>
                   </span>
@@ -111,15 +112,15 @@ export function CategoryRulesEditor({
         );
       })}
       <div className="flex gap-1 pt-1">
-        <input
+        <Input
           type="text"
           value={newCategory}
           onChange={(e) => setNewCategory(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && addCategory()}
           placeholder="New category name..."
-          className="flex-1 px-2 py-1 bg-surface-raised border border-border/60 text-xs text-text-primary font-mono outline-none focus:border-accent/40 transition-colors"
+          className="h-7 flex-1 rounded-none px-2 text-xs font-mono"
         />
-        <button
+        <button type="button"
           onClick={addCategory}
           className="px-2 py-1 font-mono text-[10px] text-accent border border-accent/30 hover:bg-accent/10"
         >

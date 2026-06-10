@@ -1,9 +1,10 @@
 import { useState, useRef, useMemo } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { setJournalTags, listAllJournalTags, type JournalTag } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import { getAppColor } from "@/lib/app-colors";
 import { X, Plus } from "lucide-react";
+import { Input } from "@/components/ui/input";
 
 interface TagEditorProps {
   entryId: number;
@@ -31,9 +32,14 @@ export function TagEditor({ entryId, tags, onTagsChanged }: TagEditorProps) {
       .slice(0, 5);
   }, [input, allTags, tags]);
 
+  const qc = useQueryClient();
   const setTagsMutation = useMutation({
     mutationFn: (tagNames: string[]) => setJournalTags(entryId, tagNames),
-    onSuccess: onTagsChanged,
+    onSuccess: () => {
+      // keep the suggestions list in sync when a brand-new tag is created
+      qc.invalidateQueries({ queryKey: queryKeys.allJournalTags() });
+      onTagsChanged();
+    },
   });
 
   const addTag = (name: string) => {
@@ -45,7 +51,7 @@ export function TagEditor({ entryId, tags, onTagsChanged }: TagEditorProps) {
   };
 
   const removeTag = (name: string) => {
-    setTagsMutation.mutate(tags.filter((t) => t.name !== name).map((t) => t.name));
+    setTagsMutation.mutate(tags.flatMap((t) => (t.name === name ? [] : [t.name])));
   };
 
   const startAdding = () => {
@@ -56,7 +62,7 @@ export function TagEditor({ entryId, tags, onTagsChanged }: TagEditorProps) {
   if (tags.length === 0 && !isAdding) {
     return (
       <div className="px-5 py-1.5 border-b border-border/50">
-        <button
+        <button type="button"
           onClick={startAdding}
           className="flex items-center gap-1 text-[10px] text-text-muted/50 hover:text-text-muted transition-colors"
         >
@@ -79,7 +85,7 @@ export function TagEditor({ entryId, tags, onTagsChanged }: TagEditorProps) {
           }}
         >
           {tag.name}
-          <button
+          <button type="button"
             onClick={() => removeTag(tag.name)}
             className="hover:opacity-70 transition-opacity"
           >
@@ -89,7 +95,7 @@ export function TagEditor({ entryId, tags, onTagsChanged }: TagEditorProps) {
       ))}
       {isAdding ? (
         <div className="relative">
-          <input
+          <Input
             ref={inputRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -107,12 +113,12 @@ export function TagEditor({ entryId, tags, onTagsChanged }: TagEditorProps) {
               }, 150);
             }}
             placeholder="Tag name..."
-            className="text-[10px] bg-transparent text-text-primary placeholder:text-text-muted/50 focus:outline-none w-20"
+            className="h-auto w-20 rounded-none border-0 bg-transparent p-0 text-[10px] placeholder:text-text-muted/50"
           />
           {suggestions.length > 0 && input.trim() && (
             <div className="absolute top-full left-0 mt-1 bg-surface-raised border border-border/50 rounded-md shadow-lg z-10 py-1 min-w-[120px]">
               {suggestions.map((s) => (
-                <button
+                <button type="button"
                   key={s.id}
                   onMouseDown={(e) => {
                     e.preventDefault();
@@ -127,7 +133,7 @@ export function TagEditor({ entryId, tags, onTagsChanged }: TagEditorProps) {
           )}
         </div>
       ) : (
-        <button
+        <button type="button"
           onClick={startAdding}
           className="text-text-muted/40 hover:text-text-muted transition-colors"
         >

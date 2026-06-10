@@ -3,7 +3,9 @@ import { useMutation } from "@tanstack/react-query";
 import { exportJournal } from "@/lib/api";
 import { dateToKey } from "@/lib/time-ranges";
 import { subDays } from "date-fns";
-import { X, Download, Copy } from "lucide-react";
+import { Download, Copy } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 interface ExportDialogProps {
   onClose: () => void;
@@ -29,17 +31,11 @@ export function ExportDialog({ onClose }: ExportDialogProps) {
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={onClose} onKeyDown={(e) => { if (e.key === "Escape") onClose(); }} role="dialog" aria-modal="true" tabIndex={-1}>
-      <div
-        className="bg-surface border border-border/50 rounded-xl shadow-xl w-[480px] max-h-[80vh] flex flex-col"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between px-5 py-4 border-b border-border/50">
-          <h2 className="text-sm font-medium text-text-primary">Export Journal</h2>
-          <button onClick={onClose} className="text-text-muted hover:text-text-secondary transition-colors">
-            <X className="size-4" strokeWidth={2} />
-          </button>
-        </div>
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="bg-surface border-border/50 rounded-xl shadow-xl w-[480px] max-h-[80vh] flex flex-col gap-0 p-0">
+        <DialogHeader className="px-5 py-4 border-b border-border/50">
+          <DialogTitle className="text-sm font-medium text-text-primary">Export Journal</DialogTitle>
+        </DialogHeader>
 
         <div className="px-5 py-4 space-y-4">
           <div className="flex gap-3">
@@ -47,29 +43,29 @@ export function ExportDialog({ onClose }: ExportDialogProps) {
               <label htmlFor="export-start-date" className="text-[10px] text-text-muted font-mono uppercase tracking-wider">
                 From
               </label>
-              <input
+              <Input
                 id="export-start-date"
                 type="date"
                 value={startDate}
                 onChange={(e) => setStartDate(e.target.value)}
-                className="w-full mt-1 bg-surface-raised border border-border/30 rounded-md px-3 py-1.5 text-xs text-text-primary focus:outline-none focus:border-accent/50"
+                className="mt-1 text-xs"
               />
             </div>
             <div className="flex-1">
               <label htmlFor="export-end-date" className="text-[10px] text-text-muted font-mono uppercase tracking-wider">
                 To
               </label>
-              <input
+              <Input
                 id="export-end-date"
                 type="date"
                 value={endDate}
                 onChange={(e) => setEndDate(e.target.value)}
-                className="w-full mt-1 bg-surface-raised border border-border/30 rounded-md px-3 py-1.5 text-xs text-text-primary focus:outline-none focus:border-accent/50"
+                className="mt-1 text-xs"
               />
             </div>
           </div>
 
-          <button
+          <button type="button"
             onClick={() => exportMutation.mutate()}
             disabled={exportMutation.isPending}
             className="w-full flex items-center justify-center gap-2 bg-accent/15 hover:bg-accent/25 text-accent text-xs font-medium py-2 rounded-lg transition-colors disabled:opacity-50"
@@ -90,7 +86,7 @@ export function ExportDialog({ onClose }: ExportDialogProps) {
                   {exported.length > 2000 && "..."}
                 </pre>
               </div>
-              <button
+              <button type="button"
                 onClick={handleCopy}
                 className="flex items-center gap-1.5 text-xs text-accent hover:text-accent/80 transition-colors"
               >
@@ -100,7 +96,7 @@ export function ExportDialog({ onClose }: ExportDialogProps) {
             </div>
           )}
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

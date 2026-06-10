@@ -2,7 +2,9 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { createCollection } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
-import { X, Clock } from "lucide-react";
+import { Clock } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 interface SaveMomentDialogProps {
   onClose: () => void;
@@ -63,20 +65,14 @@ export function SaveMomentDialog({ onClose }: SaveMomentDialogProps) {
   });
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={onClose} onKeyDown={(e) => { if (e.key === "Escape") onClose(); }} role="dialog" aria-modal="true" tabIndex={-1}>
-      <div
-        className="bg-surface border border-border/50 rounded-xl shadow-xl w-[400px] flex flex-col"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between px-5 py-4 border-b border-border/50">
-          <div className="flex items-center gap-2">
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="bg-surface border-border/50 rounded-xl shadow-xl w-[400px] flex flex-col gap-0 p-0">
+        <DialogHeader className="px-5 py-4 border-b border-border/50">
+          <DialogTitle className="flex items-center gap-2 text-sm font-medium text-text-primary">
             <Clock className="size-4 text-accent" strokeWidth={2} />
-            <h2 className="text-sm font-medium text-text-primary">Save Moment</h2>
-          </div>
-          <button onClick={onClose} className="text-text-muted hover:text-text-secondary transition-colors">
-            <X className="size-4" strokeWidth={2} />
-          </button>
-        </div>
+            Save Moment
+          </DialogTitle>
+        </DialogHeader>
 
         <form
           onSubmit={(e) => {
@@ -89,13 +85,13 @@ export function SaveMomentDialog({ onClose }: SaveMomentDialogProps) {
             <label htmlFor="moment-name" className="text-[10px] text-text-muted font-mono uppercase tracking-wider">
               Name
             </label>
-            <input
+            <Input
               id="moment-name"
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder={autoName}
-              className="w-full mt-1 bg-surface-raised border border-border/30 rounded-md px-3 py-1.5 text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50"
+              className="mt-1 text-xs"
             />
           </div>
 
@@ -103,12 +99,12 @@ export function SaveMomentDialog({ onClose }: SaveMomentDialogProps) {
             <label htmlFor="moment-date" className="text-[10px] text-text-muted font-mono uppercase tracking-wider">
               Date
             </label>
-            <input
+            <Input
               id="moment-date"
               type="date"
               value={date}
               onChange={(e) => setDate(e.target.value)}
-              className="w-full mt-1 bg-surface-raised border border-border/30 rounded-md px-3 py-1.5 text-xs text-text-primary focus:outline-none focus:border-accent/50"
+              className="mt-1 text-xs"
             />
           </div>
 
@@ -117,24 +113,24 @@ export function SaveMomentDialog({ onClose }: SaveMomentDialogProps) {
               <label htmlFor="moment-start-time" className="text-[10px] text-text-muted font-mono uppercase tracking-wider">
                 Start time
               </label>
-              <input
+              <Input
                 id="moment-start-time"
                 type="time"
                 value={startTime}
                 onChange={(e) => setStartTime(e.target.value)}
-                className="w-full mt-1 bg-surface-raised border border-border/30 rounded-md px-3 py-1.5 text-xs text-text-primary focus:outline-none focus:border-accent/50"
+                className="mt-1 text-xs"
               />
             </div>
             <div className="flex-1">
               <label htmlFor="moment-end-time" className="text-[10px] text-text-muted font-mono uppercase tracking-wider">
                 End time
               </label>
-              <input
+              <Input
                 id="moment-end-time"
                 type="time"
                 value={endTime}
                 onChange={(e) => setEndTime(e.target.value)}
-                className="w-full mt-1 bg-surface-raised border border-border/30 rounded-md px-3 py-1.5 text-xs text-text-primary focus:outline-none focus:border-accent/50"
+                className="mt-1 text-xs"
               />
             </div>
           </div>
@@ -156,7 +152,7 @@ export function SaveMomentDialog({ onClose }: SaveMomentDialogProps) {
             Save Moment
           </button>
         </form>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

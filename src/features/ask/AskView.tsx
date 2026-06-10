@@ -1,5 +1,6 @@
 import { useCallback, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useHotkey } from "@tanstack/react-hotkeys";
 import { Loader2, Paperclip, PanelLeftClose, PanelLeftOpen, Plus } from "lucide-react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { queryKeys } from "@/lib/query-keys";
@@ -30,25 +31,18 @@ interface AskViewProps {
   onSelectScreenshot: (id: number) => void;
 }
 
-const CHATS_OPEN_KEY = "rewindos-ask-chats-open";
-
 export function AskView({ onSelectScreenshot }: AskViewProps) {
   const { messages, isStreaming, error, sendMessage, cancelStream, startNewChat } = useAskChat();
   const [input, setInput] = useState("");
   const [attachedIds, setAttachedIds] = useState<number[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
 
-  // The chat list is navigation history, not always-on content — one sidebar
-  // at rest, two only on request.
-  const [chatsOpen, setChatsOpen] = useState(
-    () => typeof localStorage !== "undefined" && localStorage.getItem(CHATS_OPEN_KEY) === "1",
-  );
-  const toggleChats = () => {
-    setChatsOpen((c) => {
-      localStorage.setItem(CHATS_OPEN_KEY, c ? "0" : "1");
-      return !c;
-    });
-  };
+  // The chat list is navigation history, not always-on content — it floats
+  // over the conversation on request and dismisses on select, Esc, or
+  // click-away, so the nav rail never gains a docked sibling.
+  const [chatsOpen, setChatsOpen] = useState(false);
+  const toggleChats = () => setChatsOpen((c) => !c);
+  useHotkey("Escape", () => setChatsOpen(false));
 
   const { data: chats = [] } = useQuery({
     queryKey: queryKeys.chats(),
@@ -120,13 +114,23 @@ export function AskView({ onSelectScreenshot }: AskViewProps) {
   );
 
   return (
-    <div className="flex-1 flex min-h-0">
-      {chatsOpen && <ChatSidebar />}
+    <div className="flex-1 flex min-h-0 relative">
+      {chatsOpen && (
+        <>
+          {/* click-away catcher — transparent, sits under the drawer */}
+          <div
+            className="absolute inset-x-0 top-12 bottom-0 z-10"
+            onClick={() => setChatsOpen(false)}
+            aria-hidden
+          />
+          <ChatSidebar onClose={() => setChatsOpen(false)} />
+        </>
+      )}
 
       <div className="flex-1 flex flex-col min-h-0">
         {/* Header */}
         <div className="flex items-center gap-3 px-5 h-12 border-b border-line shrink-0">
-          <button
+          <button type="button"
             onClick={toggleChats}
             title={chatsOpen ? "Hide chat history" : "Show chat history"}
             className="flex items-center gap-2 h-8 px-2.5 rounded-[7px] text-text-muted hover:text-text-primary hover:bg-panel transition-colors"
@@ -143,7 +147,7 @@ export function AskView({ onSelectScreenshot }: AskViewProps) {
           </button>
           <span className="w-px h-4 bg-line-2" />
           <AskModelPicker />
-          <button
+          <button type="button"
             onClick={startNewChat}
             title="New chat"
             className="ml-auto flex items-center gap-1.5 h-8 px-2.5 rounded-[7px] text-text-muted hover:text-text-primary hover:bg-panel transition-colors"

@@ -16,7 +16,7 @@ export function WizardShell({
   stepIndex, stepCount, canBack, nextLabel, onBack, onNext, onSkip, children,
 }: WizardShellProps) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/90 backdrop-blur-sm animate-fade-in">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/90 backdrop-blur-sm animate-in fade-in duration-300 ease-quiet">
       <div className="relative flex w-full max-w-xl flex-col gap-6 rounded-lg border border-border/60 bg-surface p-8 shadow-2xl">
         <button
           onClick={onSkip}

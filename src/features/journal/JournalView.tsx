@@ -112,7 +112,7 @@ export function JournalView({ onSelectScreenshot }: JournalViewProps) {
         )}
 
         {/* Editor area */}
-        <div key={j.contentKey} className="flex-1 overflow-y-auto px-5 py-4 animate-fade-in-up">
+        <div key={j.contentKey} className="flex-1 overflow-y-auto px-5 py-4 animate-in fade-in slide-in-from-bottom-2 duration-300 ease-quiet">
           {j.entryLoading ? (
             <div className="flex items-center justify-center py-20">
               <div className="w-6 h-6 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />

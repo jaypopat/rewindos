@@ -12,7 +12,7 @@ const SUGGESTED = [
 export function AskEmptyState({ onSuggest }: AskEmptyStateProps) {
   return (
     <div className="flex-1 flex items-center justify-center px-8">
-      <div className="max-w-[560px] w-full animate-fade-in">
+      <div className="max-w-[560px] w-full animate-in fade-in duration-300 ease-quiet">
         <div className="kicker mb-4">Ask · grounded in your captures</div>
         <h1 className="font-display text-[40px] leading-[1.08] tracking-tight mb-4">
           Ask your memory anything.

@@ -138,7 +138,7 @@ export function TimelineView({ onSelectScreenshot }: TimelineViewProps) {
           {/* Main preview */}
           <div className="flex-1 flex items-center justify-center p-4 min-h-0">
             {selected && (
-              <div className="relative max-w-full max-h-full animate-fade-in" key={selected.id}>
+              <div className="relative max-w-full max-h-full animate-in fade-in duration-300 ease-quiet" key={selected.id}>
                 <img
                   src={getImageUrl(selected.file_path)}
                   alt=""

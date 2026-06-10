@@ -1905,7 +1905,7 @@ pub fn run() {
             let toggle_item = MenuItemBuilder::with_id("toggle", "Pause Capture")
                 .build(app)
                 .expect("failed to build toggle menu item");
-            let open_item = MenuItemBuilder::with_id("open", "Open Search")
+            let open_item = MenuItemBuilder::with_id("open", "Open RewindOS")
                 .build(app)
                 .expect("failed to build open menu item");
             let quit_item = MenuItemBuilder::with_id("quit", "Quit")

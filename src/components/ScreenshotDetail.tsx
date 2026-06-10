@@ -88,7 +88,7 @@ export function ScreenshotDetail({ screenshotId, onBack, searchQuery, screenshot
 
   if (isLoading) {
     return (
-      <div className="flex-1 flex flex-col animate-fade-in">
+      <div className="flex-1 flex flex-col animate-in fade-in duration-300 ease-quiet">
         <div className="px-5 py-3">
           <Skeleton className="h-8 w-24" />
         </div>
@@ -114,7 +114,7 @@ export function ScreenshotDetail({ screenshotId, onBack, searchQuery, screenshot
   const wordCount = detail.ocr_text ? detail.ocr_text.split(/\s+/).filter(Boolean).length : 0;
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 animate-fade-in">
+    <div className="flex-1 flex flex-col min-h-0 animate-in fade-in duration-300 ease-quiet">
       {/* Top bar */}
       <div className="flex items-center gap-3 px-5 py-2.5 border-b border-border/30 shrink-0">
         <Button

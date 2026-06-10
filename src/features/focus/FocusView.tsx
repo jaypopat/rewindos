@@ -91,7 +91,7 @@ export function FocusView() {
 
       <div className="flex-1 flex flex-col items-center justify-center gap-8 px-8">
         {/* Timer ring */}
-        <div className="relative animate-fade-in">
+        <div className="relative animate-in fade-in duration-300 ease-quiet">
           <svg width={ringSize} height={ringSize} className="rotate-[-90deg]">
             {/* Background ring */}
             <circle
@@ -189,7 +189,7 @@ export function FocusView() {
         </div>
 
         {/* Stats grid */}
-        <div className="w-full max-w-md grid grid-cols-3 gap-3 animate-fade-in" style={{ animationDelay: "100ms" }}>
+        <div className="w-full max-w-md grid grid-cols-3 gap-3 animate-in fade-in fill-mode-both duration-300 ease-quiet delay-100">
           {/* App switches */}
           <div className="border border-border/50 bg-surface-raised/30 px-4 py-3">
             <div className="flex items-center gap-2 mb-2">
@@ -232,7 +232,7 @@ export function FocusView() {
         </div>
 
         {/* Daily goal bar */}
-        <div className="w-full max-w-md animate-fade-in" style={{ animationDelay: "200ms" }}>
+        <div className="w-full max-w-md animate-in fade-in fill-mode-both duration-300 ease-quiet delay-200">
           <div className="flex items-center justify-between mb-1.5">
             <span className="font-mono text-[10px] text-text-muted uppercase tracking-wider">daily goal</span>
             <span className="font-mono text-[10px] text-text-muted">
@@ -249,7 +249,7 @@ export function FocusView() {
 
         {/* Category breakdown */}
         {!focus.isLoading && Object.keys(focus.categoryBreakdown).length > 0 && (
-          <div className="w-full max-w-md animate-fade-in" style={{ animationDelay: "300ms" }}>
+          <div className="w-full max-w-md animate-in fade-in fill-mode-both duration-300 ease-quiet delay-300">
             <span className="font-mono text-[10px] text-text-muted uppercase tracking-wider">
               activity breakdown
             </span>
@@ -280,7 +280,7 @@ export function FocusView() {
 
         {/* Top app indicator */}
         {focus.topApp && (
-          <div className="flex items-center gap-2 animate-fade-in" style={{ animationDelay: "400ms" }}>
+          <div className="flex items-center gap-2 animate-in fade-in fill-mode-both duration-300 ease-quiet delay-400">
             <span className="font-mono text-[10px] text-text-muted">most used:</span>
             <span className="font-mono text-xs text-text-secondary">{focus.topApp}</span>
           </div>

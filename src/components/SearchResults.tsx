@@ -30,7 +30,7 @@ export function SearchResults({ query, filters, onSelectResult, resultView, onRe
   if (!query) {
     return (
       <div className="flex-1 flex items-center justify-center px-6">
-        <div className="text-center space-y-3 animate-fade-in">
+        <div className="text-center space-y-3 animate-in fade-in duration-300 ease-quiet">
           <Search className="h-12 w-12 mx-auto text-accent/25" strokeWidth={0.8} />
           <p className="font-display text-xl text-text-primary">
             Everything you've seen, one line away.
@@ -80,7 +80,7 @@ export function SearchResults({ query, filters, onSelectResult, resultView, onRe
   if (!data || data.results.length === 0) {
     return (
       <div className="flex-1 flex items-center justify-center px-6">
-        <div className="text-center space-y-1 animate-fade-in">
+        <div className="text-center space-y-1 animate-in fade-in duration-300 ease-quiet">
           <p className="text-sm text-text-secondary">No matches found</p>
           <p className="text-xs text-text-muted">Try a different search term</p>
         </div>

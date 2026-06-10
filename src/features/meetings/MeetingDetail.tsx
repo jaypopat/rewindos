@@ -1,44 +1,38 @@
-import { useRef, useState } from "react";
+import { useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Pencil } from "lucide-react";
+import { Input } from "@/components/ui/input";
 import { queryKeys } from "@/lib/query-keys";
 import { getMeetingSegments, type Meeting } from "@/lib/api";
 import { AudioPlayer, type AudioHandle } from "./AudioPlayer";
 import { TranscriptReader } from "./TranscriptReader";
 import { useMeetingActions } from "./useMeetings";
+import { useRename } from "@/hooks/useRename";
 
 function EditableTitle({ meeting }: { meeting: Meeting }) {
   const { rename } = useMeetingActions();
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState("");
+  const renaming = useRename<number>((id, title) => rename.mutate({ id, title }));
 
-  if (editing) {
-    const commit = () => {
-      rename.mutate({ id: meeting.id, title: draft });
-      setEditing(false);
-    };
+  if (renaming.isRenaming(meeting.id)) {
     return (
-      <input
+      <Input
         autoFocus
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={commit}
+        value={renaming.value}
+        onChange={(e) => renaming.setValue(e.target.value)}
+        onBlur={renaming.commit}
         onKeyDown={(e) => {
-          if (e.key === "Enter") commit();
-          if (e.key === "Escape") setEditing(false);
+          if (e.key === "Enter") e.currentTarget.blur();
+          if (e.key === "Escape") renaming.cancel();
         }}
         placeholder="Meeting title"
-        className="w-64 px-1.5 py-0.5 text-sm font-medium rounded bg-surface border border-border/60 text-text-primary"
+        className="h-6 w-64 rounded bg-surface px-1.5 text-sm font-medium"
       />
     );
   }
 
   return (
-    <button
-      onClick={() => {
-        setDraft(meeting.title ?? "");
-        setEditing(true);
-      }}
+    <button type="button"
+      onClick={() => renaming.start(meeting.id, meeting.title ?? "")}
       className="group flex items-center gap-1.5 text-left"
       title="Rename meeting"
     >
