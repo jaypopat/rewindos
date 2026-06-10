@@ -104,6 +104,7 @@ export function AskProvider({ children }: { children: ReactNode }) {
 
       let chatId: number | null = activeChatId;
       let useClaude = false;
+      let accumulated = "";
       try {
         const claude = await claudeDetect();
         const claudeReady = claude.available && claude.mcp_registered;
@@ -167,7 +168,13 @@ export function AskProvider({ children }: { children: ReactNode }) {
           await persistTextMessage(chatId, "user", storedText);
           qc.invalidateQueries({ queryKey: queryKeys.chatMessages(chatId) });
 
-          const prevMessages = messages
+          // History must come from the DB, not the render-closure query
+          // snapshot — `messages` can be a refetch cycle behind after the
+          // awaits above. Drop the user row just persisted; it is appended
+          // below as the live turn.
+          const allRows = await getChatMessages(chatId);
+          const prevMessages = allRows
+            .slice(0, -1)
             .filter((m) => m.role === "user" || m.role === "assistant")
             .slice(-config.chat.max_history_messages)
             .map(
@@ -186,7 +193,6 @@ export function AskProvider({ children }: { children: ReactNode }) {
           ];
 
           abortRef.current = new AbortController();
-          let accumulated = "";
           await ollamaChat({
             baseUrl: config.chat.ollama_url,
             model: effectiveModel || config.chat.model,
@@ -227,7 +233,15 @@ export function AskProvider({ children }: { children: ReactNode }) {
         }
       } catch (e) {
         if (e instanceof DOMException && e.name === "AbortError") {
-          // Leave partial
+          // Keep what streamed: persist the partial text, then refetch so
+          // the optimistic is_partial row is replaced by the real DB row
+          // instead of leaking into the next turn's context.
+          if (chatId != null) {
+            if (accumulated) {
+              await persistTextMessage(chatId, "assistant", accumulated).catch(() => {});
+            }
+            qc.invalidateQueries({ queryKey: queryKeys.chatMessages(chatId) });
+          }
         } else {
           setError(e instanceof Error ? e.message : String(e));
         }
@@ -236,7 +250,7 @@ export function AskProvider({ children }: { children: ReactNode }) {
         abortRef.current = null;
       }
     },
-    [activeChatId, activeChat, messages, isStreaming, pendingModel, appConfig, qc],
+    [activeChatId, activeChat, isStreaming, pendingModel, appConfig, qc],
   );
 
   const cancelStream = useCallback(() => {
