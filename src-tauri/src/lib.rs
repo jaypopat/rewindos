@@ -1076,23 +1076,46 @@ async fn ask_claude(
 
     let mut saw_session = existing_session_id.clone();
 
-    while let Some(line) = lines.next_line().await.map_err(|e| e.to_string())? {
-        if line.trim().is_empty() {
-            continue;
+    // Collect the stream outcome instead of early-returning: the PID entry
+    // and the child process must be cleaned up on every path, or cancel
+    // stops working and the claude process is orphaned.
+    let stream_result: Result<(), String> = async {
+        while let Some(line) = lines.next_line().await.map_err(|e| e.to_string())? {
+            if line.trim().is_empty() {
+                continue;
+            }
+            for ev in ask_stream::parse_line(&line) {
+                // A failed DB write must not kill the stream — the frontend
+                // still needs the remaining events and the terminal status.
+                if let Err(e) = persist_event(&state, chat_id, &ev, &mut saw_session) {
+                    warn!("persist_event failed (chat {chat_id}): {e}");
+                }
+                let _ = on_event.send(ev);
+            }
         }
-        for ev in ask_stream::parse_line(&line) {
-            persist_event(&state, chat_id, &ev, &mut saw_session)?;
-            let _ = on_event.send(ev);
-        }
+        Ok(())
     }
+    .await;
 
-    let status = child.wait().await.map_err(|e| e.to_string())?;
+    if stream_result.is_err() {
+        let _ = child.start_kill();
+    }
+    // SIGKILL can't be ignored, so wait() is guaranteed to terminate.
+    let status = child.wait().await;
 
     {
         let mut map = state.claude_pids.lock().await;
         map.remove(&chat_id.to_string());
     }
 
+    if let Err(e) = stream_result {
+        let _ = on_event.send(ask_stream::AskStreamEvent::Error {
+            message: format!("stream read failed: {e}"),
+        });
+        return Err(e);
+    }
+
+    let status = status.map_err(|e| e.to_string())?;
     if !status.success() {
         use tokio::io::AsyncReadExt;
         let mut stderr_text = String::new();
