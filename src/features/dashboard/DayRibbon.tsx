@@ -10,14 +10,14 @@ function fmtClock(secs: number): string {
 
 /**
  * The day, end to end — every app session as a colored block on one strip,
- * with an accent playhead that follows the cursor. Click to rewind there.
+ * with an accent playhead that follows the cursor. Click to open that moment.
  */
 export function DayRibbon({
   spans,
-  onRewindTo,
+  onPickMoment,
 }: {
   spans: AppSpan[];
-  onRewindTo?: (timestamp: number) => void;
+  onPickMoment?: (timestamp: number) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [hoverX, setHoverX] = useState<number | null>(null);
@@ -44,7 +44,7 @@ export function DayRibbon({
         onMouseMove={onMove}
         onMouseLeave={() => setHoverX(null)}
         onClick={() => {
-          if (hoverX != null && onRewindTo) onRewindTo(Math.floor(atX(hoverX)));
+          if (hoverX != null && onPickMoment) onPickMoment(Math.floor(atX(hoverX)));
         }}
         className="relative h-[46px] cursor-crosshair"
       >

@@ -47,9 +47,27 @@
   --color-text-faint: #564f42;
   --color-text-ghost: #322e28;
 
-  /* Popover (shadcn compat) */
+  /* shadcn semantic tokens — the ui/ and ai-elements/ components are written
+     against these standard names; map them onto Quiet Editorial. (They were
+     previously undefined, which left e.g. bg-background/bg-primary elements
+     transparent.) */
+  --color-background: #0e0d0b;
+  --color-foreground: #ece7dd;
+  --color-card: #131210;
+  --color-card-foreground: #ece7dd;
   --color-popover: #131210;
   --color-popover-foreground: #ece7dd;
+  --color-primary: #e8825a;
+  --color-primary-foreground: #1c1208;
+  --color-secondary: #1a1815;
+  --color-secondary-foreground: #ece7dd;
+  --color-muted: #1a1815;
+  --color-muted-foreground: #7d7668;
+  --color-accent-foreground: #1c1208;
+  --color-destructive: #cf7a63;
+  --color-destructive-foreground: #ece7dd;
+  --color-input: #2c2925;
+  --color-ring: #3a352d;
 
   /* Highlight */
   --color-highlight-bg: rgba(232, 130, 90, 0.12);
@@ -207,6 +225,12 @@ mark {
 
 .animate-pulse-glow {
   animation: pulse-glow 2s ease-in-out infinite;
+}
+
+/* Dashboard scroll indicator bounce */
+@keyframes gentleBounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(4px); }
 }
 
 /* Capturing LED — sage pulse */

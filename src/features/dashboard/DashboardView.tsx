@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useCallback, useMemo, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Play, Search } from "lucide-react";
 import {
@@ -19,7 +19,8 @@ import {
 import { formatMins } from "@/lib/format";
 import { useConfigQuery } from "@/hooks/useConfigQuery";
 import { Rise, CountNum } from "@/components/motion";
-import { EditorialAreaChart } from "@/components/charts/EditorialAreaChart";
+import { ScrollHint } from "@/components/ScrollHint";
+import { EditorialBarChart } from "@/components/charts/EditorialBarChart";
 import { DayRibbon } from "./DayRibbon";
 import { TopAppsLedger } from "./TopAppsLedger";
 import {
@@ -155,7 +156,7 @@ export function DashboardView({
     );
     const lastHour = new Date().getHours();
     return Array.from({ length: lastHour + 1 }, (_, h) => ({
-      label: String(h).padStart(2, "0"),
+      label: `${String(h).padStart(2, "0")}:00`,
       value: byHour.get(h) ?? 0,
     }));
   }, [todayActivity]);
@@ -163,7 +164,7 @@ export function DashboardView({
   const peakHour = useMemo(() => {
     if (hourly.length === 0) return null;
     const peak = hourly.reduce((a, b) => (b.value > a.value ? b : a), hourly[0]);
-    return peak.value > 0 ? `${peak.label}:00` : null;
+    return peak.value > 0 ? peak.label : null;
   }, [hourly]);
 
   const categoryEntries = useMemo(() => {
@@ -194,6 +195,23 @@ export function DashboardView({
     const step = (withThumbs.length - 1) / (count - 1);
     return Array.from({ length: count }, (_, i) => withThumbs[Math.round(i * step)]);
   }, [screenshots]);
+
+  // Ribbon click: open the frame nearest the picked time, with the whole
+  // day as siblings so ←/→ steps through it (Rewind stays one click away).
+  const openFrameAt = useCallback(
+    (ts: number) => {
+      const sorted = [...screenshots].sort((a, b) => a.timestamp - b.timestamp);
+      if (sorted.length === 0) return;
+      let best = sorted[0];
+      for (const s of sorted) {
+        if (Math.abs(s.timestamp - ts) < Math.abs(best.timestamp - ts)) best = s;
+      }
+      onSelectScreenshot(best.id, sorted.map((s) => s.id));
+    },
+    [screenshots, onSelectScreenshot],
+  );
+
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   const now = Math.floor(Date.now() / 1000);
   const dateLine = new Date().toLocaleDateString(undefined, {
@@ -250,8 +268,9 @@ export function DashboardView({
   }
 
   return (
-    <div className="flex-1 overflow-y-auto">
-      <div className="px-14 pt-11 pb-24 max-w-[1320px] mx-auto w-full">
+    <div className="flex-1 min-h-0 relative">
+      <div ref={scrollRef} className="h-full overflow-y-auto">
+        <div className="px-14 pt-11 pb-24 max-w-[1320px] mx-auto w-full">
         {/* Hero — the daily briefing */}
         <div className="grid grid-cols-[1.1fr_1fr] gap-16 items-end pb-9 border-b border-line">
           <div>
@@ -316,14 +335,11 @@ export function DashboardView({
             <Rise i={7} className="flex items-baseline gap-3.5 mb-6">
               <h2 className="font-display text-[23px] tracking-tight">The day, end to end</h2>
               <div className="ml-auto font-mono text-[11px] text-text-muted">
-                hover to scrub · click to rewind
+                hover to scrub · click to open that moment
                 {peakHour ? ` · peak ${peakHour}` : ""}
               </div>
             </Rise>
-            <DayRibbon
-              spans={appSpans}
-              onRewindTo={(ts) => onRewindToRange?.(ts - 300, ts + 300)}
-            />
+            <DayRibbon spans={appSpans} onPickMoment={openFrameAt} />
           </div>
         )}
 
@@ -392,7 +408,7 @@ export function DashboardView({
               )}
             </Rise>
             <Rise i={11}>
-              <EditorialAreaChart data={hourly} />
+              <EditorialBarChart data={hourly} />
             </Rise>
           </div>
         </div>
@@ -435,7 +451,9 @@ export function DashboardView({
             </div>
           </div>
         )}
+        </div>
       </div>
+      <ScrollHint scrollRef={scrollRef} />
     </div>
   );
 }
