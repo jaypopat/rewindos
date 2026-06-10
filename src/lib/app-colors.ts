@@ -1,16 +1,16 @@
 const APP_COLORS = [
-  "#e4e4e7", // zinc
-  "#a78bfa", // violet
-  "#34d399", // emerald
-  "#f472b6", // pink
-  "#fb923c", // orange
-  "#60a5fa", // blue
-  "#facc15", // yellow
-  "#e879f9", // fuchsia
-  "#2dd4bf", // teal
-  "#f87171", // red
-  "#818cf8", // indigo
-  "#a3e635", // lime
+  "#e8825a", // terracotta
+  "#c9925e", // ochre
+  "#9aa873", // sage
+  "#6f97b4", // slate blue
+  "#b58bc0", // mauve
+  "#cf9090", // rose
+  "#d3b25e", // honey
+  "#7fa6a0", // teal-sage
+  "#b87f5c", // sienna
+  "#8e9bb8", // periwinkle
+  "#a3a06a", // olive
+  "#c47e9e", // dusty pink
 ] as const;
 
 export function getAppColor(appName: string | null | undefined): string {

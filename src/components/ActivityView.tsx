@@ -107,19 +107,19 @@ export function ActivityView() {
               value={formatDuration(data.total_screenshots * 5)}
               sparklineData={data.daily_activity.slice(-7).map((d) => d.screenshot_count * 5)}
               detail={`${formatNumber(data.total_screenshots)} captures`}
-              accentColor="#22d3ee"
+              accentColor="#e8825a"
             />
             <StatCard
               label="Active Apps"
               value={data.total_apps}
               detail={data.app_usage.slice(0, 3).map((a) => a.app_name).join(", ")}
-              accentColor="#a78bfa"
+              accentColor="#b58bc0"
             />
             <StatCard
               label="Disk Usage"
               value={formatBytes(daemonStatus?.disk_usage_bytes ?? 0)}
               detail={daemonStatus ? `${formatDuration(daemonStatus.uptime_seconds)} uptime` : undefined}
-              accentColor="#34d399"
+              accentColor="#9aa873"
             />
             <StatCard
               label="Dedup Rate"
@@ -133,7 +133,7 @@ export function ActivityView() {
                   ? `${daemonStatus.frames_deduplicated_today} of ${daemonStatus.frames_captured_today} today`
                   : undefined
               }
-              accentColor="#fb923c"
+              accentColor="#c9925e"
             />
           </div>
 

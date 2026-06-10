@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { useHotkeySequences, type HotkeySequence } from "@tanstack/react-hotkeys";
+import { useHotkey, useHotkeySequences, type HotkeySequence } from "@tanstack/react-hotkeys";
 import type { SearchFilters } from "@/lib/api";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useGlobalKeyboard } from "@/hooks/useGlobalKeyboard";
@@ -25,7 +25,21 @@ import {
 } from "@/app/routes";
 import { SaveMomentDialog } from "@/features/saved/SaveMomentDialog";
 import { FirstRunWizard } from "@/features/onboarding/FirstRunWizard";
-import { Clock } from "lucide-react";
+import { RecallPalette } from "@/components/RecallPalette";
+import { Clock, Search } from "lucide-react";
+
+const VIEW_LABELS: Record<View, string> = {
+  dashboard: "Home",
+  search: "Search",
+  history: "History",
+  rewind: "Rewind",
+  ask: "Ask",
+  journal: "Journal",
+  saved: "Saved",
+  meetings: "Meetings",
+  focus: "Focus",
+  settings: "Settings",
+};
 
 type SubView = "list" | "detail";
 
@@ -97,6 +111,7 @@ function App() {
   const [datePreset, setDatePreset] = useState(0);
   const [resultView, setResultView] = useState<"grid" | "list">("grid");
   const [showSaveMoment, setShowSaveMoment] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
 
   const searchInputRef = useRef<HTMLInputElement>(null);
   const debouncedQuery = useDebounce(query, 300);
@@ -169,6 +184,12 @@ function App() {
     })),
   );
 
+  // ⌘K / Ctrl-K — the Recall Palette, from anywhere
+  useHotkey("Mod+K", (e) => {
+    e.preventDefault();
+    setPaletteOpen((p) => !p);
+  });
+
   // Listen for global hotkey (Ctrl+Shift+Space)
   useEffect(() => {
     const unlisten = listen("focus-search", () => {
@@ -192,13 +213,27 @@ function App() {
       <div className="flex-1 flex flex-col min-w-0 min-h-0">
         <GnomeExtensionBanner />
         <UnfilteredWarningBanner />
-        <header className="flex items-center justify-end gap-2 px-5 py-2 border-b border-border/50 bg-surface/80 backdrop-blur-sm shrink-0">
+        <header className="flex items-center gap-4 px-7 h-[60px] border-b border-line shrink-0">
+          <div className="font-mono text-[11px] uppercase tracking-[0.14em] text-text-muted whitespace-nowrap">
+            Rewind<span className="mx-2 text-text-ghost">/</span>
+            <b className="font-medium text-text-secondary">{VIEW_LABELS[view]}</b>
+          </div>
+          <button
+            onClick={() => setPaletteOpen(true)}
+            className="ml-auto flex items-center gap-2 h-[34px] px-3 min-w-[240px] rounded-lg border border-line-2 hover:border-line-hi text-text-muted text-[13px] transition-colors whitespace-nowrap"
+          >
+            <Search className="size-[15px]" strokeWidth={1.7} />
+            <span>Describe what you remember…</span>
+            <span className="ml-auto font-mono text-[10.5px] border border-line-2 rounded px-1.5 py-px text-text-faint">
+              ⌘K
+            </span>
+          </button>
           <button
             onClick={() => setShowSaveMoment(true)}
-            className="p-1.5 text-text-muted hover:text-accent transition-colors rounded-md hover:bg-accent/10"
+            className="size-[34px] grid place-items-center rounded-lg text-text-muted hover:text-text-primary hover:bg-panel transition-colors"
             title="Save moment"
           >
-            <Clock className="size-4" strokeWidth={1.5} />
+            <Clock className="size-[18px]" strokeWidth={1.7} />
           </button>
           <DaemonPanel />
         </header>
@@ -248,7 +283,11 @@ function App() {
         )}
 
         {view === "dashboard" && subView === "list" && (
-          <DashboardView onSelectScreenshot={handleSelectResult} />
+          <DashboardView
+            onSelectScreenshot={handleSelectResult}
+            onRewindToRange={handleRewindToRange}
+            onGoToSearch={() => handleViewChange("search")}
+          />
         )}
 
         {view === "history" && subView === "list" && (
@@ -300,6 +339,12 @@ function App() {
       </div>
 
       {showSaveMoment && <SaveMomentDialog onClose={() => setShowSaveMoment(false)} />}
+      <RecallPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        onOpenResult={handleSelectResult}
+        onRewindTo={(ts) => handleRewindToRange(ts - 120, ts + 120)}
+      />
       <FirstRunWizard />
     </main>
   );

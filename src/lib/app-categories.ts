@@ -46,18 +46,18 @@ const DEFAULT_RULES: Record<string, string[]> = {
 };
 
 export const CATEGORY_COLORS: Record<ActivityCategory, string> = {
-  Development: "#22d3ee",
-  Browsing: "#fb923c",
-  Communication: "#a78bfa",
-  Media: "#f472b6",
-  Productivity: "#34d399",
-  System: "#71717a",
-  Other: "#52525b",
+  Development: "#e8825a",
+  Browsing: "#c9925e",
+  Communication: "#6f97b4",
+  Media: "#cf9090",
+  Productivity: "#b58bc0",
+  System: "#9aa873",
+  Other: "#6a6457",
 };
 
 /** Get color for any category (supports user-defined ones too) */
 export function getCategoryColor(category: string): string {
-  return (CATEGORY_COLORS as Record<string, string>)[category] ?? "#52525b";
+  return (CATEGORY_COLORS as Record<string, string>)[category] ?? "#6a6457";
 }
 
 /**

@@ -9,7 +9,7 @@ import {
 } from "recharts";
 import type { HourlyActivity } from "@/lib/api";
 
-const ACCENT = "#22d3ee";
+const ACCENT = "#e8825a";
 const SURFACE = "#111827";
 const TEXT_MUTED = "#475569";
 

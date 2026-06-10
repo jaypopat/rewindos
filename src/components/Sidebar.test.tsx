@@ -1,45 +1,53 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Sidebar } from "./Sidebar";
 
-describe("Sidebar", () => {
-  it("renders all main nav items plus settings", () => {
-    const onViewChange = vi.fn();
-    render(<Sidebar activeView="dashboard" onViewChange={onViewChange} />);
+function renderSidebar(ui: React.ReactElement) {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+}
 
+describe("Sidebar", () => {
+  it("renders all nav items grouped, plus settings", () => {
+    const onViewChange = vi.fn();
+    renderSidebar(<Sidebar activeView="dashboard" onViewChange={onViewChange} />);
+
+    // 4 Overview + 5 Think + 1 System + collapse toggle
     const buttons = screen.getAllByRole("button");
-    // 8 nav items + 1 settings button = 9
-    expect(buttons.length).toBe(9);
+    expect(buttons.length).toBe(11);
+    expect(screen.getByText("Overview")).toBeTruthy();
+    expect(screen.getByText("Think")).toBeTruthy();
+    expect(screen.getByText("System")).toBeTruthy();
   });
 
   it("calls onViewChange when a nav item is clicked", () => {
     const onViewChange = vi.fn();
-    render(<Sidebar activeView="dashboard" onViewChange={onViewChange} />);
+    renderSidebar(<Sidebar activeView="dashboard" onViewChange={onViewChange} />);
 
-    const buttons = screen.getAllByRole("button");
-    // Click the fourth button (Search — after Today, History, Rewind)
-    fireEvent.click(buttons[3]);
+    fireEvent.click(screen.getByText("Search"));
     expect(onViewChange).toHaveBeenCalledWith("search");
   });
 
-  it("highlights the active view", () => {
+  it("highlights the active view with the accent mark", () => {
     const onViewChange = vi.fn();
-    const { container } = render(
+    const { container } = renderSidebar(
       <Sidebar activeView="ask" onViewChange={onViewChange} />,
     );
 
-    // The active indicator span should exist for the ask view
-    const indicator = container.querySelector(".bg-semantic");
+    const indicator = container.querySelector(".animate-navmark");
     expect(indicator).toBeTruthy();
+    const askButton = screen.getByText("Ask").closest("button");
+    expect(askButton?.className).toContain("text-accent-hi");
   });
 
-  it("renders settings button at the bottom", () => {
+  it("navigates to settings from the System group", () => {
     const onViewChange = vi.fn();
-    render(<Sidebar activeView="dashboard" onViewChange={onViewChange} />);
+    renderSidebar(<Sidebar activeView="dashboard" onViewChange={onViewChange} />);
 
-    const buttons = screen.getAllByRole("button");
-    const lastButton = buttons[buttons.length - 1];
-    fireEvent.click(lastButton);
+    fireEvent.click(screen.getByText("Settings"));
     expect(onViewChange).toHaveBeenCalledWith("settings");
   });
 });

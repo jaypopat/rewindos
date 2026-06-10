@@ -1,147 +1,214 @@
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
+import { getDaemonStatus } from "@/lib/api";
+import { queryKeys } from "@/lib/query-keys";
+import { useConfigQuery } from "@/hooks/useConfigQuery";
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
-import { LayoutGrid, CalendarDays, Rewind, Search, Sparkles, Clock, Settings, Bookmark, BookOpen, Mic } from "lucide-react";
+  LayoutGrid,
+  CalendarDays,
+  Rewind,
+  Search,
+  Sparkles,
+  Clock,
+  Settings,
+  Bookmark,
+  BookOpen,
+  Mic,
+  PanelLeftClose,
+  PanelLeftOpen,
+} from "lucide-react";
 
-export type View = "dashboard" | "history" | "rewind" | "search" | "saved" | "journal" | "ask" | "meetings" | "focus" | "settings";
+export type View =
+  | "dashboard"
+  | "history"
+  | "rewind"
+  | "search"
+  | "saved"
+  | "journal"
+  | "ask"
+  | "meetings"
+  | "focus"
+  | "settings";
 
 interface SidebarProps {
   activeView: View;
   onViewChange: (view: View) => void;
 }
 
-const NAV_ITEMS: { view: View; label: string; shortcut: string; icon: React.ReactNode }[] = [
+interface NavItem {
+  view: View;
+  label: string;
+  shortcut: string;
+  icon: React.ReactNode;
+}
+
+const NAV_GROUPS: { section: string; items: NavItem[] }[] = [
   {
-    view: "dashboard",
-    label: "Today",
-    shortcut: "g d",
-    icon: <LayoutGrid className="size-5" strokeWidth={1.8} />,
+    section: "Overview",
+    items: [
+      { view: "dashboard", label: "Home", shortcut: "g d", icon: <LayoutGrid /> },
+      { view: "search", label: "Search", shortcut: "g s", icon: <Search /> },
+      { view: "history", label: "History", shortcut: "g h", icon: <CalendarDays /> },
+      { view: "rewind", label: "Rewind", shortcut: "g r", icon: <Rewind /> },
+    ],
   },
   {
-    view: "history",
-    label: "History",
-    shortcut: "g h",
-    icon: <CalendarDays className="size-5" strokeWidth={1.8} />,
+    section: "Think",
+    items: [
+      { view: "ask", label: "Ask", shortcut: "g a", icon: <Sparkles /> },
+      { view: "journal", label: "Journal", shortcut: "g j", icon: <BookOpen /> },
+      { view: "saved", label: "Saved", shortcut: "g v", icon: <Bookmark /> },
+      { view: "meetings", label: "Meetings", shortcut: "g m", icon: <Mic /> },
+      { view: "focus", label: "Focus", shortcut: "g f", icon: <Clock /> },
+    ],
   },
   {
-    view: "rewind",
-    label: "Rewind",
-    shortcut: "g r",
-    icon: <Rewind className="size-5" strokeWidth={1.8} />,
-  },
-  {
-    view: "search",
-    label: "Search",
-    shortcut: "g s",
-    icon: <Search className="size-5" strokeWidth={1.8} />,
-  },
-  {
-    view: "saved",
-    label: "Saved",
-    shortcut: "g v",
-    icon: <Bookmark className="size-5" strokeWidth={1.8} />,
-  },
-  {
-    view: "journal",
-    label: "Journal",
-    shortcut: "g j",
-    icon: <BookOpen className="size-5" strokeWidth={1.8} />,
-  },
-  {
-    view: "ask",
-    label: "Ask",
-    shortcut: "g a",
-    icon: <Sparkles className="size-5" strokeWidth={1.8} />,
-  },
-  {
-    view: "meetings",
-    label: "Meetings",
-    shortcut: "g m",
-    icon: <Mic className="size-5" strokeWidth={1.8} />,
-  },
-  {
-    view: "focus",
-    label: "Focus",
-    shortcut: "g f",
-    icon: <Clock className="size-5" strokeWidth={1.8} />,
+    section: "System",
+    items: [{ view: "settings", label: "Settings", shortcut: "g ,", icon: <Settings /> }],
   },
 ];
 
-export function Sidebar({ activeView, onViewChange }: SidebarProps) {
-  return (
-    <TooltipProvider>
-      <aside className="w-12 flex flex-col items-center py-4 gap-1 border-r border-border/50 bg-surface-raised/50 shrink-0">
-        {/* Logo */}
-        <div className="mb-4 flex items-center justify-center w-8 h-8">
-          <svg viewBox="0 0 24 24" className="size-5 text-accent" fill="currentColor">
-            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2Zm-2 14.5v-9l6 4.5-6 4.5Z" />
-          </svg>
-        </div>
+const COLLAPSE_KEY = "rewindos-sidebar-collapsed";
 
-        {/* Nav items */}
-        <nav className="flex flex-col gap-1">
-          {NAV_ITEMS.map(({ view, label, shortcut, icon }) => (
-            <Tooltip key={view}>
-              <TooltipTrigger asChild>
+export function Sidebar({ activeView, onViewChange }: SidebarProps) {
+  const [collapsed, setCollapsed] = useState(
+    () => typeof localStorage !== "undefined" && localStorage.getItem(COLLAPSE_KEY) === "1",
+  );
+  const toggleCollapsed = () => {
+    setCollapsed((c) => {
+      localStorage.setItem(COLLAPSE_KEY, c ? "0" : "1");
+      return !c;
+    });
+  };
+
+  const { data: status } = useQuery({
+    queryKey: queryKeys.daemonStatus(),
+    queryFn: getDaemonStatus,
+    refetchInterval: 5000,
+    retry: false,
+  });
+  const { data: config } = useConfigQuery();
+
+  const capturing = status?.is_capturing && (status.capture_state ?? "capturing") === "capturing";
+  const interval = config?.capture.interval_seconds;
+
+  return (
+    <nav
+      className={cn(
+        "shrink-0 flex flex-col bg-surface-raised border-r border-line pt-[26px] pb-[18px] transition-[width] duration-300",
+        collapsed ? "w-14 px-2" : "w-[244px] px-5",
+      )}
+    >
+      {/* Brand + collapse toggle */}
+      <div
+        className={cn(
+          "flex items-center pb-[26px]",
+          collapsed ? "flex-col gap-3" : "gap-2 px-1",
+        )}
+      >
+        <span className="text-base font-semibold tracking-tight leading-none">
+          R{!collapsed && <>ewind<b className="text-accent font-semibold">OS</b></>}
+        </span>
+        <button
+          onClick={toggleCollapsed}
+          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          className={cn(
+            "grid place-items-center size-7 rounded-md text-text-muted hover:text-text-primary hover:bg-panel transition-colors",
+            !collapsed && "ml-auto",
+          )}
+        >
+          {collapsed ? (
+            <PanelLeftOpen className="size-4" strokeWidth={1.7} />
+          ) : (
+            <PanelLeftClose className="size-4" strokeWidth={1.7} />
+          )}
+        </button>
+      </div>
+
+      {/* Nav groups */}
+      <div className="flex-1 min-h-0 overflow-y-auto -mx-2 px-2">
+        {NAV_GROUPS.map((group, gi) => (
+          <div key={group.section} className={collapsed ? "mb-2" : "mb-[22px]"}>
+            {collapsed ? (
+              gi > 0 && <div className="h-px bg-line mx-2 mb-2" />
+            ) : (
+              <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-text-faint px-1.5 pb-[11px]">
+                {group.section}
+              </div>
+            )}
+            {group.items.map(({ view, label, shortcut, icon }) => {
+              const active = activeView === view;
+              return (
                 <button
+                  key={view}
                   onClick={() => onViewChange(view)}
+                  title={`${label} (${shortcut})`}
                   className={cn(
-                    "relative flex items-center justify-center w-9 h-9 transition-all",
-                    activeView === view
-                      ? view === "ask"
-                        ? "text-semantic bg-semantic/10"
-                        : "text-accent bg-accent/10"
-                      : "text-text-muted hover:text-text-secondary hover:bg-surface-overlay/50"
+                    "group relative w-full flex items-center rounded-[7px] cursor-pointer transition-colors text-left",
+                    collapsed ? "justify-center py-2" : "gap-[11px] px-2.5 py-2",
+                    active
+                      ? "text-accent-hi"
+                      : "text-text-secondary hover:text-text-primary hover:bg-panel",
                   )}
                 >
-                  {activeView === view && (
-                    <span className={cn(
-                      "absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-r",
-                      view === "ask" ? "bg-semantic" : "bg-accent"
-                    )} />
+                  {active && (
+                    <span
+                      className={cn(
+                        "animate-navmark absolute top-1/2 -translate-y-1/2 w-0.5 h-4 bg-accent",
+                        collapsed ? "-left-2" : "-left-5",
+                      )}
+                    />
                   )}
-                  {icon}
+                  <span
+                    className={cn(
+                      "[&>svg]:size-[17px] [&>svg]:stroke-[1.7] flex-none transition-transform duration-300",
+                      active
+                        ? "opacity-100"
+                        : "opacity-70 group-hover:opacity-100 group-hover:translate-x-px",
+                    )}
+                  >
+                    {icon}
+                  </span>
+                  {!collapsed && <span className="text-sm font-[450] tracking-tight">{label}</span>}
                 </button>
-              </TooltipTrigger>
-              <TooltipContent side="right" className="flex items-center gap-2">
-                <span>{label}</span>
-                <kbd className="font-mono text-[10px] text-text-muted">{shortcut}</kbd>
-              </TooltipContent>
-            </Tooltip>
-          ))}
-        </nav>
+              );
+            })}
+          </div>
+        ))}
+      </div>
 
-        {/* Spacer */}
-        <div className="flex-1" />
-
-        {/* Settings — pinned to bottom */}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              onClick={() => onViewChange("settings")}
-              className={cn(
-                "relative flex items-center justify-center w-9 h-9 transition-all",
-                activeView === "settings"
-                  ? "text-accent bg-accent/10"
-                  : "text-text-muted hover:text-text-secondary hover:bg-surface-overlay/50"
-              )}
-            >
-              {activeView === "settings" && (
-                <span className="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-r bg-accent" />
-              )}
-              <Settings className="size-5" strokeWidth={1.8} />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="right" className="flex items-center gap-2">
-            <span>Settings</span>
-            <kbd className="font-mono text-[10px] text-text-muted">g ,</kbd>
-          </TooltipContent>
-        </Tooltip>
-      </aside>
-    </TooltipProvider>
+      {/* Capture status footer */}
+      <div className="pt-4 border-t border-line">
+        <div
+          className={cn(
+            "flex items-center py-1",
+            collapsed ? "justify-center" : "gap-2.5 px-1.5",
+          )}
+          title={
+            collapsed
+              ? `${status ? (capturing ? "Capturing" : "Paused") : "Connecting"}${interval ? ` · every ${interval}s` : ""}`
+              : undefined
+          }
+        >
+          <span
+            className={cn(
+              "size-[7px] rounded-full flex-none",
+              capturing ? "bg-signal-active animate-led-pulse" : "bg-signal-paused",
+            )}
+          />
+          {!collapsed && (
+            <div>
+              <div className="text-[12.5px] font-medium text-text-secondary">
+                {status ? (capturing ? "Capturing" : "Paused") : "Connecting"}
+              </div>
+              <div className="font-mono text-[10.5px] tracking-[0.04em] text-text-faint mt-px">
+                {interval ? `every ${interval}s · OCR live` : "rewindos-daemon"}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </nav>
   );
 }

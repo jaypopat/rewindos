@@ -70,27 +70,27 @@ export function AppsMode({
           label="Screen Time"
           value={formatDuration(totalActiveTime)}
           detail={`${activeBlocks.length} active blocks`}
-          accentColor="#22d3ee"
+          accentColor="#e8825a"
         />
         <StatCard
           label="Captures"
           value={formatNumber(totalCaptures)}
           detail="View in timeline →"
-          accentColor="#a78bfa"
+          accentColor="#b58bc0"
           onClick={onSwitchToTimeline}
         />
         <StatCard
           label="Active Apps"
           value={uniqueApps}
           detail={topAppNames}
-          accentColor="#34d399"
+          accentColor="#9aa873"
         />
         {rangeDays > 1 && (
           <StatCard
             label="Avg Daily"
             value={formatDuration(avgDaily)}
             detail={`over ${rangeDays} day${rangeDays > 1 ? "s" : ""}`}
-            accentColor="#fb923c"
+            accentColor="#c9925e"
           />
         )}
       </div>

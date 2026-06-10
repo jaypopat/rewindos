@@ -10,8 +10,8 @@ import {
 import type { DailyActivity } from "@/lib/api";
 import { formatDateShort } from "@/lib/format";
 
-const ACCENT = "#22d3ee";
-const SECONDARY = "#a78bfa";
+const ACCENT = "#e8825a";
+const SECONDARY = "#b58bc0";
 const SURFACE = "#111827";
 const TEXT_MUTED = "#475569";
 

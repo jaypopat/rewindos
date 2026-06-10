@@ -31,12 +31,13 @@ export function SearchResults({ query, filters, onSelectResult, resultView, onRe
     return (
       <div className="flex-1 flex items-center justify-center px-6">
         <div className="text-center space-y-3 animate-fade-in">
-          <Search className="h-12 w-12 mx-auto text-accent/20" strokeWidth={0.8} />
-          <p className="text-sm text-text-secondary">
-            Search your screen history
+          <Search className="h-12 w-12 mx-auto text-accent/25" strokeWidth={0.8} />
+          <p className="font-display text-xl text-text-primary">
+            Everything you've seen, one line away.
           </p>
           <p className="text-xs text-text-muted">
-            Press <kbd className="px-1.5 py-0.5 bg-surface-raised border border-border/50 text-[10px] font-mono">/</kbd> to focus
+            Press <kbd className="px-1.5 py-0.5 bg-surface-raised border border-line-2 rounded text-[10px] font-mono">/</kbd> to focus
+            · <kbd className="px-1.5 py-0.5 bg-surface-raised border border-line-2 rounded text-[10px] font-mono">⌘K</kbd> for quick recall
           </p>
         </div>
       </div>
@@ -89,26 +90,26 @@ export function SearchResults({ query, filters, onSelectResult, resultView, onRe
 
   return (
     <ScrollArea className="flex-1">
-      <div className="px-5 py-3 space-y-3">
-        {/* Results header */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <span className="font-display text-lg text-text-primary leading-none">
-              {formatNumber(data.total_count)}
+      <div className="px-14 pt-5 pb-20 max-w-[1180px]">
+        {/* Meta line */}
+        <div className="flex items-baseline gap-3.5 mb-1.5">
+          <span className="kicker">Results for “{query}”</span>
+          <SemanticBadge mode={data.search_mode} />
+          <span className="ml-auto flex items-center gap-4">
+            <span className="font-mono text-[10.5px] text-text-faint">
+              {formatNumber(data.total_count)} match{data.total_count !== 1 ? "es" : ""}
             </span>
-            <span className="text-xs text-text-muted">
-              result{data.total_count !== 1 ? "s" : ""}
-            </span>
-            <SemanticBadge mode={data.search_mode} />
-          </div>
-          <ViewToggle view={resultView} onViewChange={onResultViewChange} />
+            <ViewToggle view={resultView} onViewChange={onResultViewChange} />
+          </span>
         </div>
 
         {/* Results */}
         {resultView === "grid" ? (
-          <SearchResultGrid results={data.results} onSelectResult={onSelectResult} />
+          <div className="mt-4">
+            <SearchResultGrid results={data.results} onSelectResult={onSelectResult} />
+          </div>
         ) : (
-          <div className="space-y-1.5">
+          <div className="border-t border-line">
             {data.results.map((result, i) => (
               <SearchResultCard
                 key={result.id}
