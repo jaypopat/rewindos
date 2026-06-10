@@ -645,66 +645,6 @@ struct AppTimeEntry {
     session_count: usize,
 }
 
-async fn generate_summary_ollama(prompt: &str, url: &str, model: &str) -> Option<String> {
-    let client = match reqwest::Client::builder()
-        .connect_timeout(std::time::Duration::from_secs(10))
-        .timeout(std::time::Duration::from_secs(120))
-        .build()
-    {
-        Ok(c) => c,
-        Err(e) => {
-            warn!("Failed to build HTTP client: {e}");
-            return None;
-        }
-    };
-
-    let resp = match client
-        .post(url)
-        .json(&serde_json::json!({
-            "model": model,
-            "prompt": prompt,
-            "stream": false,
-            "options": { "temperature": 0.7, "num_predict": 512 }
-        }))
-        .send()
-        .await
-    {
-        Ok(r) if r.status().is_success() => r,
-        Ok(r) => {
-            warn!("Ollama returned {}: {}", r.status(), r.text().await.unwrap_or_default());
-            return None;
-        }
-        Err(e) => {
-            warn!("Ollama request failed: {e}");
-            return None;
-        }
-    };
-
-    let json: serde_json::Value = match resp.json().await {
-        Ok(j) => j,
-        Err(e) => {
-            warn!("Failed to parse Ollama response: {e}");
-            return None;
-        }
-    };
-
-    let raw = json["response"].as_str().unwrap_or("").trim();
-    if raw.is_empty() {
-        return None;
-    }
-    // Strip <think>...</think> blocks emitted by reasoning models
-    let cleaned = if let Some(after) = raw.strip_prefix("<think>") {
-        after
-            .find("</think>")
-            .map(|end| after[end + 8..].trim())
-            .unwrap_or(raw)
-            .to_string()
-    } else {
-        let re = regex_lite::Regex::new(r"(?s)<think>.*?</think>").unwrap();
-        re.replace_all(raw, "").trim().to_string()
-    };
-    Some(cleaned)
-}
 
 #[tauri::command]
 async fn get_daily_summary(
@@ -916,16 +856,13 @@ async fn get_daily_summary(
         context_lines.join("\n"),
     );
 
-    // 4. Generate summary — prefer Claude when available, fall back to Ollama
-    let (ollama_url, ollama_model) = {
+    // 4. Generate summary — prefer Claude when available, fall back to chat provider
+    let chat_cfg = {
         let cfg = state
             .config
             .lock()
             .map_err(|e| format!("config lock: {e}"))?;
-        (
-            format!("{}/api/generate", cfg.chat.base_url.trim_end_matches('/')),
-            cfg.chat.model.clone(),
-        )
+        cfg.chat.clone()
     };
 
     let claude_status = claude_code::detect();
@@ -941,17 +878,17 @@ async fn get_daily_summary(
         {
             Ok(text) => (Some(text), "claude-code".to_string()),
             Err(e) => {
-                warn!("claude one-shot failed, falling back to ollama: {e}");
+                warn!("claude one-shot failed, falling back to chat provider: {e}");
                 (
-                    generate_summary_ollama(&prompt, &ollama_url, &ollama_model).await,
-                    ollama_model.clone(),
+                    rewindos_core::summary::generate_summary(&prompt, &chat_cfg).await,
+                    chat_cfg.model.clone(),
                 )
             }
         }
     } else {
         (
-            generate_summary_ollama(&prompt, &ollama_url, &ollama_model).await,
-            ollama_model.clone(),
+            rewindos_core::summary::generate_summary(&prompt, &chat_cfg).await,
+            chat_cfg.model.clone(),
         )
     };
 
@@ -1647,67 +1584,17 @@ async fn generate_journal_summary(
         period_key, period_type, entries_text.join("\n\n"),
     );
 
-    let (ollama_url, ollama_model) = {
+    let chat_cfg = {
         let cfg = state
             .config
             .lock()
             .map_err(|e| format!("config lock: {e}"))?;
-        (
-            format!("{}/api/generate", cfg.chat.base_url.trim_end_matches('/')),
-            cfg.chat.model.clone(),
-        )
+        cfg.chat.clone()
     };
 
-    let summary_text = match reqwest::Client::builder()
-        .connect_timeout(std::time::Duration::from_secs(10))
-        .timeout(std::time::Duration::from_secs(120))
-        .build()
-    {
-        Ok(client) => {
-            match client
-                .post(&ollama_url)
-                .json(&serde_json::json!({
-                    "model": ollama_model,
-                    "prompt": prompt,
-                    "stream": false,
-                    "options": {
-                        "temperature": 0.7,
-                        "num_predict": 512,
-                    }
-                }))
-                .send()
-                .await
-            {
-                Ok(resp) if resp.status().is_success() => {
-                    match resp.json::<serde_json::Value>().await {
-                        Ok(json) => {
-                            let raw = json["response"].as_str().unwrap_or("").trim();
-                            if raw.is_empty() {
-                                return Err("Empty response from Ollama".to_string());
-                            }
-                            // Strip <think>...</think> blocks
-                            let cleaned = {
-                                let re =
-                                    regex_lite::Regex::new(r"(?s)<think>.*?</think>").unwrap();
-                                re.replace_all(raw, "").trim().to_string()
-                            };
-                            cleaned
-                        }
-                        Err(e) => return Err(format!("Failed to parse Ollama response: {e}")),
-                    }
-                }
-                Ok(resp) => {
-                    return Err(format!(
-                        "Ollama returned {}: {}",
-                        resp.status(),
-                        resp.text().await.unwrap_or_default()
-                    ))
-                }
-                Err(e) => return Err(format!("Ollama request failed: {e}")),
-            }
-        }
-        Err(e) => return Err(format!("Failed to build HTTP client: {e}")),
-    };
+    let summary_text = rewindos_core::summary::generate_summary(&prompt, &chat_cfg)
+        .await
+        .ok_or_else(|| "Summary generation failed".to_string())?;
 
     let entry_count = entries.len() as i64;
     let generated_at = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
@@ -1720,7 +1607,7 @@ async fn generate_journal_summary(
             &period_key,
             &summary_text,
             entry_count,
-            Some(&ollama_model),
+            Some(&chat_cfg.model),
         );
     }
 

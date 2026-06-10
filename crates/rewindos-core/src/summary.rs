@@ -4,6 +4,18 @@
 use std::sync::OnceLock;
 
 use crate::config::ChatConfig;
+use crate::vault::gather::DayMemory;
+
+/// Shared instruction header for the daily-summary prompts. Wording matches the
+/// prompt historically assembled in `get_daily_summary` in `src-tauri/src/lib.rs`.
+const DAILY_PROMPT_INTRO: &str = "You are an AI assistant analyzing a user's desktop activity for the day. \
+    Based on the data below, write a brief productivity summary (3-5 sentences). \
+    Be specific about what the user was working on based on the window titles and screen content. \
+    Mention concrete tasks, not just app names. Be encouraging but honest.";
+
+/// Shared closing instruction for the daily-summary prompts.
+const DAILY_PROMPT_OUTRO: &str = "Write a concise daily summary. Focus on what was accomplished, not just what apps were used. \
+    If you can identify specific tasks (coding, writing, browsing topics), mention them.";
 
 /// Structured inputs for the deterministic, no-LLM fallback digest.
 #[derive(Debug, Clone)]
@@ -151,15 +163,58 @@ pub fn build_daily_prompt(app_breakdown: &[AppEntry], sessions: &[SessionRow]) -
 
     // --- prompt (wording identical to src-tauri) ---
     format!(
-        "You are an AI assistant analyzing a user's desktop activity for the day. \
-        Based on the data below, write a brief productivity summary (3-5 sentences). \
-        Be specific about what the user was working on based on the window titles and screen content. \
-        Mention concrete tasks, not just app names. Be encouraging but honest.\n\n\
-        App usage: {app_summary_text}\n\n\
-        Activity log:\n{}\n\n\
-        Write a concise daily summary. Focus on what was accomplished, not just what apps were used. \
-        If you can identify specific tasks (coding, writing, browsing topics), mention them.",
+        "{DAILY_PROMPT_INTRO}\n\nApp usage: {app_summary_text}\n\nActivity log:\n{}\n\n{DAILY_PROMPT_OUTRO}",
         context_lines.join("\n"),
+    )
+}
+
+/// Build the day-recap LLM prompt from an already-gathered [`DayMemory`].
+///
+/// Used by the daemon's vault export, where the data section comes from the
+/// memory's stats (on-screen time, peak hour, top apps), meetings, and open
+/// todos. `DayMemory` does not carry OCR sessions, so unlike
+/// [`build_daily_prompt`] there is no per-session activity log — the
+/// instruction wording is shared verbatim.
+pub fn build_daily_prompt_from_memory(mem: &DayMemory) -> String {
+    let stats = &mem.stats;
+    let mut data_lines: Vec<String> = Vec::new();
+
+    let h = stats.on_screen_secs / 3600;
+    let m = (stats.on_screen_secs % 3600) / 60;
+    data_lines.push(format!("- On-screen time: {h}h{m:02}m"));
+
+    if let Some(peak) = stats.peak_hour {
+        data_lines.push(format!("- Busiest hour: {peak:02}:00"));
+    }
+
+    if !stats.app_minutes.is_empty() {
+        let apps = stats
+            .app_minutes
+            .iter()
+            .take(8)
+            .map(|(name, mins)| format!("{name}: {mins}min"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        data_lines.push(format!("- App usage: {apps}"));
+    }
+
+    if !mem.meetings.is_empty() {
+        let meetings = mem
+            .meetings
+            .iter()
+            .map(|mt| format!("{} ({}min)", mt.title, mt.duration_secs / 60))
+            .collect::<Vec<_>>()
+            .join(", ");
+        data_lines.push(format!("- Meetings: {meetings}"));
+    }
+
+    if !stats.todos.is_empty() {
+        data_lines.push(format!("- Open todos: {}", stats.todos.len()));
+    }
+
+    format!(
+        "{DAILY_PROMPT_INTRO}\n\nActivity data:\n{}\n\n{DAILY_PROMPT_OUTRO}",
+        data_lines.join("\n"),
     )
 }
 
@@ -172,62 +227,10 @@ fn think_re() -> &'static regex_lite::Regex {
     })
 }
 
-/// POST a prompt to Ollama's `/api/generate` and return cleaned text.
-/// Ported from the Tauri app so the daemon and app share one implementation.
-///
-/// `base_url` is the base Ollama URL, e.g. `"http://localhost:11434"`.
-/// This function appends `/api/generate` itself — callers must NOT pre-append
-/// `/api/generate`.
-pub async fn generate_summary_ollama(
-    prompt: &str,
-    base_url: &str,
-    model: &str,
-) -> Option<String> {
-    let endpoint = format!("{}/api/generate", base_url.trim_end_matches('/'));
-
-    let client = match reqwest::Client::builder()
-        .connect_timeout(std::time::Duration::from_secs(10))
-        .timeout(std::time::Duration::from_secs(120))
-        .build()
-    {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::warn!("Failed to build HTTP client: {e}");
-            return None;
-        }
-    };
-
-    let resp = match client
-        .post(&endpoint)
-        .json(&serde_json::json!({
-            "model": model,
-            "prompt": prompt,
-            "stream": false,
-            "options": { "temperature": 0.7, "num_predict": 512 }
-        }))
-        .send()
-        .await
-    {
-        Ok(r) if r.status().is_success() => r,
-        Ok(r) => {
-            tracing::warn!("Ollama returned {}: {}", r.status(), r.text().await.unwrap_or_default());
-            return None;
-        }
-        Err(e) => {
-            tracing::warn!("Ollama request failed: {e}");
-            return None;
-        }
-    };
-
-    let json: serde_json::Value = match resp.json().await {
-        Ok(j) => j,
-        Err(e) => {
-            tracing::warn!("Failed to parse Ollama response: {e}");
-            return None;
-        }
-    };
-
-    let raw = json["response"].as_str().unwrap_or("").trim();
+/// Clean raw LLM output: trim, strip `<think>` blocks (an unclosed `<think>`
+/// discards the entire response). Returns `None` when nothing usable remains.
+fn clean_summary_text(raw: &str) -> Option<String> {
+    let raw = raw.trim();
     if raw.is_empty() {
         return None;
     }
@@ -249,6 +252,19 @@ pub async fn generate_summary_ollama(
     Some(cleaned)
 }
 
+/// Generate a summary via the configured chat provider. Returns `None` on any
+/// failure (graceful degradation — callers fall back to the digest).
+pub async fn generate_summary(prompt: &str, chat: &ChatConfig) -> Option<String> {
+    let client = crate::chat::ChatClient::new(chat);
+    match client.complete(prompt, 512, 0.7).await {
+        Ok(text) => clean_summary_text(&text),
+        Err(e) => {
+            tracing::warn!("summary generation failed: {e}");
+            None
+        }
+    }
+}
+
 /// Resolve the recap for a date. Tier (a) cached → (b) generate+return (caller
 /// caches) → (c) deterministic digest. Returns `(text, is_ai)` — `is_ai=false`
 /// means the digest tier, so the caller knows the day can be upgraded later.
@@ -267,9 +283,7 @@ pub async fn resolve_recap(
             return (c, true);
         }
     }
-    if let Some(generated) =
-        generate_summary_ollama(prompt, &chat.base_url, &chat.model).await
-    {
+    if let Some(generated) = generate_summary(prompt, chat).await {
         return (generated, true);
     }
     (build_digest(digest), false)
@@ -278,6 +292,31 @@ pub async fn resolve_recap(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn clean_summary_text_passes_plain_text_trimmed() {
+        assert_eq!(clean_summary_text("  a fine summary \n"), Some("a fine summary".to_string()));
+    }
+
+    #[test]
+    fn clean_summary_text_strips_closed_think_block() {
+        assert_eq!(
+            clean_summary_text("<think>reasoning</think>the answer"),
+            Some("the answer".to_string())
+        );
+    }
+
+    #[test]
+    fn clean_summary_text_discards_unclosed_think() {
+        assert_eq!(clean_summary_text("<think>never closed..."), None);
+    }
+
+    #[test]
+    fn clean_summary_text_rejects_empty() {
+        assert_eq!(clean_summary_text(""), None);
+        assert_eq!(clean_summary_text("   \n  "), None);
+        assert_eq!(clean_summary_text("<think>x</think>   "), None);
+    }
 
     #[test]
     fn digest_is_never_empty_and_mentions_time() {
@@ -350,5 +389,38 @@ mod tests {
         assert!(prompt.contains("Slack: 30min (5 sessions)"));
         assert!(prompt.contains("main.rs"));
         assert!(prompt.contains("productivity summary"));
+    }
+
+    #[test]
+    fn build_daily_prompt_from_memory_contains_stats_and_meetings() {
+        use crate::vault::gather::{MeetingMemory, StatsMemory};
+
+        let mem = DayMemory {
+            date_key: "2026-06-10".into(),
+            journal_text: None,
+            recap: None,
+            meetings: vec![MeetingMemory {
+                title: "Standup".into(),
+                started_at: 0,
+                duration_secs: 15 * 60,
+                minutes: None,
+                transcript: vec![],
+            }],
+            moments: vec![],
+            stats: StatsMemory {
+                on_screen_secs: 4 * 3600 + 12 * 60,
+                peak_hour: Some(14),
+                app_minutes: vec![("VS Code".into(), 120), ("Slack".into(), 30)],
+                todos: vec!["ship the export".into()],
+            },
+        };
+        let prompt = build_daily_prompt_from_memory(&mem);
+        assert!(prompt.contains("productivity summary"), "shares the instruction wording");
+        assert!(prompt.contains("On-screen time: 4h12m"));
+        assert!(prompt.contains("Busiest hour: 14:00"));
+        assert!(prompt.contains("VS Code: 120min"));
+        assert!(prompt.contains("Standup (15min)"));
+        assert!(prompt.contains("Open todos: 1"));
+        assert!(prompt.contains("concise daily summary"), "shares the closing instruction");
     }
 }

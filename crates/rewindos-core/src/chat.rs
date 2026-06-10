@@ -218,7 +218,11 @@ impl ChatClient {
 
     pub async fn health_check(&self) -> Result<bool> {
         let url = format!("{}/models", self.base_url);
-        match self.with_auth(self.client.get(&url)).send().await {
+        match self
+            .with_auth(self.client.get(&url).timeout(std::time::Duration::from_secs(15)))
+            .send()
+            .await
+        {
             Ok(resp) => Ok(resp.status().is_success()),
             Err(_) => Ok(false),
         }
@@ -263,7 +267,7 @@ impl ChatClient {
                 .map_err(|e| CoreError::Chat(format!("request failed: {e}")))?;
 
             if !response.status().is_success() {
-                Err(Self::error_from_response(response).await)?;
+                yield Err(Self::error_from_response(response).await);
                 return;
             }
 
@@ -285,7 +289,7 @@ impl ChatClient {
                             return;
                         }
                         SseEvent::Error(msg) => {
-                            Err(CoreError::Chat(format!("provider stream error: {msg}")))?;
+                            yield Err(CoreError::Chat(format!("provider stream error: {msg}")));
                             return;
                         }
                         SseEvent::Skip => {}
@@ -319,16 +323,14 @@ User: "that thing I was looking at" → {"category":"recall","search_terms":[],"
 User: "something about databases" → {"category":"recall","search_terms":["database","sql","postgres","mysql"],"time_range_seconds":2592000,"app_filter":null,"confidence":"medium"}"#;
 
 impl ChatClient {
-    /// Use the LLM to analyze a user query and extract structured search parameters.
-    pub async fn analyze_query(&self, query: &str) -> Result<QueryIntent> {
-        let prompt = format!("{QUERY_ANALYSIS_PROMPT}\n\nUser: \"{query}\"");
-
+    /// Non-streaming single-prompt completion. Returns the assistant message text.
+    pub async fn complete(&self, prompt: &str, max_tokens: u32, temperature: f32) -> Result<String> {
         let body = serde_json::json!({
             "model": self.model,
             "messages": [{"role": "user", "content": prompt}],
             "stream": false,
-            "temperature": 0.0,
-            "max_tokens": 300,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
         });
 
         let url = format!("{}/chat/completions", self.base_url);
@@ -341,7 +343,7 @@ impl ChatClient {
             )
             .send()
             .await
-            .map_err(|e| CoreError::Chat(format!("analyze_query request failed: {e}")))?;
+            .map_err(|e| CoreError::Chat(format!("completion request failed: {e}")))?;
 
         if !response.status().is_success() {
             return Err(Self::error_from_response(response).await);
@@ -350,17 +352,25 @@ impl ChatClient {
         let resp_json: serde_json::Value = response
             .json()
             .await
-            .map_err(|e| CoreError::Chat(format!("parse analyze_query response: {e}")))?;
+            .map_err(|e| CoreError::Chat(format!("parse completion response: {e}")))?;
 
-        let content = resp_json["choices"][0]["message"]["content"]
+        Ok(resp_json["choices"][0]["message"]["content"]
             .as_str()
-            .unwrap_or("{}");
+            .unwrap_or("")
+            .to_string())
+    }
+
+    /// Use the LLM to analyze a user query and extract structured search parameters.
+    pub async fn analyze_query(&self, query: &str) -> Result<QueryIntent> {
+        let prompt = format!("{QUERY_ANALYSIS_PROMPT}\n\nUser: \"{query}\"");
+        let content = self.complete(&prompt, 300, 0.0).await?;
+        let content = if content.is_empty() { "{}".to_string() } else { content };
 
         // Strip <think>...</think> blocks (reasoning models like deepseek-r1)
         let clean = if let Ok(re) = regex_lite::Regex::new(r"(?s)<think>.*?</think>") {
-            re.replace_all(content, "").trim().to_string()
+            re.replace_all(&content, "").trim().to_string()
         } else {
-            content.to_string()
+            content.clone()
         };
 
         // Strip markdown code fences if present
