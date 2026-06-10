@@ -123,6 +123,11 @@ export function DashboardView({
     [activeBlocks],
   );
 
+  const totalScreenTime = useMemo(
+    () => taskStats.reduce((sum, t) => sum + t.estimated_seconds, 0),
+    [taskStats],
+  );
+
   const longestBlock = useMemo(
     () => activeBlocks.reduce((max, b) => Math.max(max, b.duration_secs), 0),
     [activeBlocks],
@@ -247,7 +252,7 @@ export function DashboardView({
 
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="px-14 pt-11 pb-24 max-w-[1320px]">
+      <div className="px-14 pt-11 pb-24 max-w-[1320px] mx-auto w-full">
         {/* Hero — the daily briefing */}
         <div className="grid grid-cols-[1.1fr_1fr] gap-16 items-end pb-9 border-b border-line">
           <div>
@@ -373,6 +378,7 @@ export function DashboardView({
             <TopAppsLedger
               apps={topTasks}
               categoryFor={(app) => categorizeApp(app, categoryRules)}
+              totalSeconds={totalScreenTime}
               riseBase={11}
             />
           </div>

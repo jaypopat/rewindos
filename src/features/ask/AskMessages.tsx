@@ -36,39 +36,17 @@ interface AskMessagesProps {
   onSelectScreenshot?: (id: number) => void;
 }
 
-function RoleHeader({ role }: { role: "user" | "assistant" }) {
-  const isUser = role === "user";
-  return (
-    <div className="flex items-center gap-2 mb-1.5">
-      <div
-        className={cn(
-          "w-1.5 h-1.5",
-          isUser ? "bg-accent" : "bg-semantic",
-        )}
-      />
-      <span
-        className={cn(
-          "font-mono text-[10px] uppercase tracking-[0.2em]",
-          isUser ? "text-accent" : "text-semantic",
-        )}
-      >
-        {isUser ? "you" : "rewindos"}
-      </span>
-    </div>
-  );
-}
-
 const ASSISTANT_PROSE =
-  "text-sm text-text-secondary leading-relaxed " +
+  "text-[15px] text-text-primary/90 leading-[1.65] " +
   "[&>p]:my-1.5 [&>ul]:my-1.5 [&>ol]:my-1.5 [&>pre]:my-2 " +
   "[&>h1]:text-base [&>h1]:font-semibold [&>h1]:text-text-primary [&>h1]:mt-3 [&>h1]:mb-1 " +
   "[&>h2]:text-sm [&>h2]:font-semibold [&>h2]:text-text-primary [&>h2]:mt-2 [&>h2]:mb-1 " +
   "[&>h3]:text-sm [&>h3]:font-medium [&>h3]:text-text-primary [&>h3]:mt-2 [&>h3]:mb-0.5 " +
-  "[&>blockquote]:border-l-2 [&>blockquote]:border-semantic/30 [&>blockquote]:pl-3 [&>blockquote]:text-text-muted [&>blockquote]:italic " +
-  "[&_code]:font-mono [&_code]:text-xs [&_code]:bg-surface-overlay [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-accent [&_code]:rounded-sm " +
-  "[&_a]:text-accent [&_a]:hover:underline " +
+  "[&>blockquote]:border-l-2 [&>blockquote]:border-accent-line [&>blockquote]:pl-3 [&>blockquote]:text-text-muted [&>blockquote]:italic " +
+  "[&_code]:font-mono [&_code]:text-xs [&_code]:bg-surface-raised [&_code]:border [&_code]:border-line [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-accent-hi [&_code]:rounded " +
+  "[&_a]:text-accent-hi [&_a]:hover:underline " +
   "[&_strong]:text-text-primary [&_strong]:font-semibold " +
-  "[&_ul]:list-disc [&_ul]:list-inside [&_ol]:list-decimal [&_ol]:list-inside [&_li]:text-text-secondary";
+  "[&_ul]:list-disc [&_ul]:list-inside [&_ol]:list-decimal [&_ol]:list-inside [&_li]:text-text-primary/90";
 
 export function AskMessages({ rows, onSelectScreenshot }: AskMessagesProps) {
   const messages = toUIMessages(rows);
@@ -76,32 +54,44 @@ export function AskMessages({ rows, onSelectScreenshot }: AskMessagesProps) {
 
   return (
     <Conversation className="flex-1 min-h-0">
-      <ConversationContent className="max-w-3xl mx-auto w-full px-6 py-5 space-y-5">
+      <ConversationContent className="max-w-[820px] mx-auto w-full px-7 py-6 space-y-6">
         {messages.map((m, idx) => {
           const isUser = m.role === "user";
           const isLast = idx === messages.length - 1;
+
+          // User turns: a quiet right-aligned bubble. Assistant turns: no
+          // bubble — a mono kicker, then text straight on the background.
+          if (isUser) {
+            return (
+              <div key={m.id} className="animate-fade-in flex justify-end">
+                <div
+                  className="max-w-[78%] bg-surface-overlay border border-line-2 px-4 py-3 space-y-2"
+                  style={{ borderRadius: "12px 12px 3px 12px" }}
+                >
+                  {m.parts.map((part, i) =>
+                    part.type === "text" ? (
+                      <UserTextWithAttachments
+                        key={`${m.id}-${i}`}
+                        text={part.text}
+                        onSelectScreenshot={onSelectScreenshot}
+                      />
+                    ) : null,
+                  )}
+                </div>
+              </div>
+            );
+          }
+
           return (
             <div key={m.id} className="animate-fade-in">
-              <RoleHeader role={m.role} />
-              <div
-                className={cn(
-                  "pl-3.5 border-l space-y-2",
-                  isUser ? "border-accent/30" : "border-semantic/20",
-                )}
-              >
+              <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-text-faint mb-2">
+                RewindOS
+              </div>
+              <div className="space-y-2">
                 {m.parts.map((part, i) => {
                   const key = `${m.id}-${i}`;
 
                   if (part.type === "text") {
-                    if (isUser) {
-                      return (
-                        <UserTextWithAttachments
-                          key={key}
-                          text={part.text}
-                          onSelectScreenshot={onSelectScreenshot}
-                        />
-                      );
-                    }
                     return (
                       <AssistantTextWithCitations
                         key={key}
@@ -115,7 +105,7 @@ export function AskMessages({ rows, onSelectScreenshot }: AskMessagesProps) {
                     return (
                       <Reasoning
                         key={key}
-                        className="border border-border/30 bg-surface-raised/10 rounded-none"
+                        className="border border-line bg-surface-raised rounded-lg"
                       >
                         <ReasoningTrigger />
                         <ReasoningContent>{part.text}</ReasoningContent>
@@ -127,8 +117,8 @@ export function AskMessages({ rows, onSelectScreenshot }: AskMessagesProps) {
                   return <CompactToolCall key={key} part={part} />;
                 })}
               </div>
-              {!isUser && isLast && (
-                <div className="pl-3.5 mt-2">
+              {isLast && (
+                <div className="mt-2">
                   <MessageActions
                     onCopy={() => {
                       const allText = m.parts

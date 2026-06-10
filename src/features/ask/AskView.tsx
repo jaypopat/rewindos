@@ -106,20 +106,19 @@ export function AskView({ onSelectScreenshot }: AskViewProps) {
 
       <div className="flex-1 flex flex-col min-h-0">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-2.5 border-b border-border/50 shrink-0">
-          <div className="flex items-center gap-3">
-            <div
-              className={cn(
-                "w-1.5 h-1.5 transition-colors",
-                chatReady ? "bg-signal-success animate-pulse-glow" : "bg-signal-error",
-              )}
-            />
-            <span className="font-mono text-xs text-text-primary uppercase tracking-[0.2em]">
-              ask
-            </span>
-            <span className="text-border">·</span>
-            <AskModelPicker />
-          </div>
+        <div className="flex items-center gap-3 px-7 h-12 border-b border-line shrink-0">
+          <div
+            className={cn(
+              "size-1.5 rounded-full transition-colors",
+              chatReady ? "bg-signal-active animate-led-pulse" : "bg-signal-error",
+            )}
+          />
+          <span className="kicker">Ask</span>
+          <span className="text-text-ghost">·</span>
+          <AskModelPicker />
+          <span className="ml-auto font-mono text-[10px] uppercase tracking-[0.14em] text-text-faint">
+            {usingClaude ? "claude · mcp" : "local · ollama"}
+          </span>
         </div>
 
         {/* Messages or empty state */}
@@ -134,7 +133,7 @@ export function AskView({ onSelectScreenshot }: AskViewProps) {
 
         {/* Streaming indicator */}
         {isStreaming && (
-          <div className="px-6 py-1.5 shrink-0 flex items-center gap-2 text-semantic border-t border-border/30">
+          <div className="px-7 py-1.5 shrink-0 flex items-center gap-2 text-accent-hi border-t border-line">
             <Loader2 className="size-3 animate-spin" />
             <span className="font-mono text-[10px] uppercase tracking-[0.2em]">
               thinking
@@ -144,7 +143,7 @@ export function AskView({ onSelectScreenshot }: AskViewProps) {
 
         {/* Error */}
         {error && (
-          <div className="mx-6 mb-2 px-3 py-2 border border-signal-error/30 bg-signal-error/5 shrink-0">
+          <div className="mx-7 mb-2 px-3.5 py-2.5 rounded-lg border border-signal-error/30 bg-signal-error/5 shrink-0">
             <div className="flex items-start gap-2">
               <span className="font-mono text-[10px] text-signal-error uppercase tracking-wider mt-0.5 shrink-0">
                 err
@@ -155,7 +154,7 @@ export function AskView({ onSelectScreenshot }: AskViewProps) {
         )}
 
         {/* Prompt */}
-        <div className="border-t border-border/50 px-6 py-4 shrink-0 bg-surface-raised/20">
+        <div className="border-t border-line px-7 py-4 shrink-0">
           <div className="max-w-3xl mx-auto">
             {attachedIds.length > 0 && (
               <div className="mb-2">
@@ -180,7 +179,7 @@ export function AskView({ onSelectScreenshot }: AskViewProps) {
             )}
             <PromptInput
               onSubmit={onPromptSubmit}
-              className="border border-border/50 bg-surface-raised/40 focus-within:border-semantic/40 transition-colors rounded-none"
+              className="border border-line-2 bg-surface-raised focus-within:border-line-hi transition-colors rounded-xl"
             >
               <PromptInputTextarea
                 value={input}
@@ -197,19 +196,19 @@ export function AskView({ onSelectScreenshot }: AskViewProps) {
                 disabled={isStreaming || !chatReady}
                 className="font-sans text-sm"
               />
-              <PromptInputFooter className="px-3 pb-2 pt-1 rounded-none">
+              <PromptInputFooter className="px-3 pb-2 pt-1">
                 <div className="flex items-center gap-3 text-text-muted">
                   <button
                     type="button"
                     onClick={() => setPickerOpen(true)}
                     disabled={isStreaming || !chatReady}
-                    className="text-text-muted hover:text-semantic disabled:opacity-40 disabled:hover:text-text-muted transition-colors"
+                    className="text-text-muted hover:text-accent-hi disabled:opacity-40 disabled:hover:text-text-muted transition-colors"
                     title="attach screenshot"
                     aria-label="attach screenshot"
                   >
-                    <Paperclip className="size-4" />
+                    <Paperclip className="size-4" strokeWidth={1.7} />
                   </button>
-                  <span className="font-mono text-[10px] uppercase tracking-wider">
+                  <span className="font-mono text-[10px] text-text-faint">
                     {usingClaude ? "⇧⏎ newline · ⏎ send" : "⏎ send"}
                   </span>
                 </div>
@@ -220,6 +219,11 @@ export function AskView({ onSelectScreenshot }: AskViewProps) {
                 />
               </PromptInputFooter>
             </PromptInput>
+            <p className="font-mono text-[9.5px] text-text-faint mt-2.5 text-center">
+              {usingClaude
+                ? "Claude answers through MCP tools over your local index."
+                : "Answers are generated locally from your captures. Nothing is sent off-device."}
+            </p>
           </div>
         </div>
       </div>

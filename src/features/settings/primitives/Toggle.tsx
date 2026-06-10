@@ -2,13 +2,15 @@ export function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: 
   return (
     <button
       onClick={() => onChange(!checked)}
-      className={`w-9 h-5 rounded-full transition-all relative ${
-        checked ? "bg-accent" : "bg-surface-overlay"
+      role="switch"
+      aria-checked={checked}
+      className={`w-10 h-[23px] rounded-full transition-colors relative border ${
+        checked ? "bg-accent border-accent-deep" : "bg-surface-overlay border-line-2"
       }`}
     >
       <span
-        className={`absolute top-0.5 w-4 h-4 rounded-full bg-text-primary transition-all ${
-          checked ? "left-4.5" : "left-0.5"
+        className={`absolute top-[2px] size-[17px] rounded-full transition-all ${
+          checked ? "left-[19px] bg-[#1c1208]" : "left-[2px] bg-text-muted"
         }`}
       />
     </button>

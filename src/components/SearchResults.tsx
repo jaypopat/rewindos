@@ -90,7 +90,7 @@ export function SearchResults({ query, filters, onSelectResult, resultView, onRe
 
   return (
     <ScrollArea className="flex-1">
-      <div className="px-14 pt-5 pb-20 max-w-[1180px]">
+      <div className="px-14 pt-5 pb-20 max-w-[1180px] mx-auto w-full">
         {/* Meta line */}
         <div className="flex items-baseline gap-3.5 mb-1.5">
           <span className="kicker">Results for “{query}”</span>

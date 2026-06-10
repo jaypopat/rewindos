@@ -10,11 +10,14 @@ import type { TopTask } from "./dashboard-utils";
 export function TopAppsLedger({
   apps,
   categoryFor,
+  totalSeconds,
   riseBase = 0,
   onSelectApp,
 }: {
   apps: TopTask[];
   categoryFor: (appName: string) => string;
+  /** Total tracked screen seconds — when set, each row shows its share. */
+  totalSeconds?: number;
   riseBase?: number;
   onSelectApp?: (appName: string) => void;
 }) {
@@ -55,8 +58,14 @@ export function TopAppsLedger({
               />
             </div>
           </div>
-          <span className="font-mono text-xs text-text-secondary">
+          <span className="font-mono text-xs text-text-secondary whitespace-nowrap">
             {formatSecs(a.totalSeconds)}
+            {totalSeconds && totalSeconds > 0 ? (
+              <span className="text-text-faint">
+                {" "}
+                · {Math.round((a.totalSeconds / totalSeconds) * 100)}%
+              </span>
+            ) : null}
           </span>
         </Rise>
       ))}

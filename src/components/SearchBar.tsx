@@ -55,7 +55,7 @@ export const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(
     }, [ref]);
 
     return (
-      <div className="px-14 pt-11 pb-1 max-w-[1180px] w-full">
+      <div className="px-14 pt-11 pb-1 max-w-[1180px] w-full mx-auto">
         {/* The search line — editorial, a single rule */}
         <div className="flex items-center gap-3.5 pb-[18px] border-b border-line-2">
           <Search className="size-[22px] text-accent flex-none" strokeWidth={1.7} />

@@ -1,8 +1,13 @@
-export function Field({ label, children }: { label: string; children: React.ReactNode }) {
+export function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
-    <div className="flex items-center justify-between gap-4">
-      <label className="text-sm text-text-secondary shrink-0">{label}</label>
-      <div className="max-w-56">{children}</div>
+    <div className="flex items-center justify-between gap-6 py-3.5 border-b border-line">
+      <div className="min-w-0">
+        <label className="text-sm font-medium text-text-primary">{label}</label>
+        {hint && (
+          <p className="text-[12.5px] text-text-muted mt-0.5 max-w-[54ch] leading-relaxed">{hint}</p>
+        )}
+      </div>
+      <div className="max-w-56 shrink-0">{children}</div>
     </div>
   );
 }

@@ -91,32 +91,32 @@ export function ChatSidebar() {
   }, [hits]);
 
   return (
-    <div className="w-64 shrink-0 border-r border-border/50 flex flex-col min-h-0 bg-surface-raised/10">
+    <div className="w-64 shrink-0 border-r border-line flex flex-col min-h-0">
       {/* Header */}
-      <div className="p-3 border-b border-border/50 space-y-2">
+      <div className="p-3 border-b border-line space-y-2.5">
         <div className="flex items-center gap-2">
-          <span className="font-mono text-[10px] text-text-muted uppercase tracking-[0.2em]">
-            chats
+          <span className="font-mono text-[10px] text-text-faint uppercase tracking-[0.18em]">
+            Chats
           </span>
-          <div className="flex-1 h-px bg-border/40" />
-          <span className="font-mono text-[10px] text-text-muted/70">
+          <div className="flex-1 h-px bg-line" />
+          <span className="font-mono text-[10px] text-text-faint">
             {chats.length}
           </span>
         </div>
         <button
           onClick={startNewChat}
-          className="group w-full flex items-center justify-center gap-1.5 px-2 py-2 font-mono text-[11px] text-semantic border border-semantic/40 hover:bg-semantic/10 hover:border-semantic/60 transition-all uppercase tracking-wider"
+          className="group w-full flex items-center justify-center gap-1.5 h-8 rounded-lg text-[12.5px] font-medium text-text-primary border border-line-2 hover:border-line-hi hover:bg-panel transition-colors"
         >
-          <Plus className="size-3 group-hover:scale-110 transition-transform" strokeWidth={2} />
-          new chat
+          <Plus className="size-3.5" strokeWidth={1.7} />
+          New chat
         </button>
         <div className="relative">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3 text-text-muted pointer-events-none" />
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="search"
-            className="w-full pl-8 pr-7 py-1.5 bg-surface-raised/30 border border-border/40 font-mono text-xs text-text-primary placeholder:text-text-muted/50 outline-none focus:border-semantic/40 focus:bg-surface-raised/50 transition-colors"
+            placeholder="Search chats"
+            className="w-full pl-8 pr-7 py-1.5 rounded-[7px] bg-transparent border border-line-2 text-[12.5px] text-text-primary placeholder:text-text-muted outline-none focus:border-line-hi transition-colors"
           />
           {query && (
             <button
@@ -141,7 +141,7 @@ export function ChatSidebar() {
                 <button
                   key={h.message_id}
                   onClick={() => selectChat(h.chat_id)}
-                  className="group w-full px-3 py-2 text-left cursor-pointer hover:bg-surface-raised/40 border-l-2 border-transparent hover:border-semantic/40 transition-colors"
+                  className="group w-full px-3 py-2 text-left cursor-pointer hover:bg-panel border-l-2 border-transparent hover:border-line-hi transition-colors"
                 >
                   <div className="font-sans text-xs text-text-primary truncate group-hover:text-text-primary">
                     {h.chat_title}
@@ -173,8 +173,8 @@ export function ChatSidebar() {
                     className={cn(
                       "group px-3 py-2 cursor-pointer border-l-2 transition-colors",
                       active
-                        ? "border-semantic bg-semantic/[0.06]"
-                        : "border-transparent hover:bg-surface-raised/40 hover:border-border/50",
+                        ? "border-accent bg-panel"
+                        : "border-transparent hover:bg-panel",
                     )}
                     onClick={() => !isRenaming && selectChat(c.id)}
                   >
@@ -195,13 +195,13 @@ export function ChatSidebar() {
                             if (e.key === "Enter") e.currentTarget.blur();
                             if (e.key === "Escape") setRenamingId(null);
                           }}
-                          className="flex-1 bg-transparent border-b border-semantic/50 font-sans text-xs text-text-primary outline-none"
+                          className="flex-1 bg-transparent border-b border-accent-line text-[12.5px] text-text-primary outline-none"
                         />
                       ) : (
                         <>
                           <span
                             className={cn(
-                              "flex-1 font-sans text-xs truncate",
+                              "flex-1 text-[12.5px] font-[450] truncate",
                               active ? "text-text-primary" : "text-text-secondary group-hover:text-text-primary",
                             )}
                           >
@@ -232,7 +232,7 @@ export function ChatSidebar() {
                                 URL.revokeObjectURL(url);
                               }}
                               title="export markdown"
-                              hoverClass="hover:text-semantic"
+                              hoverClass="hover:text-accent-hi"
                             >
                               <Download className="size-3" />
                             </IconButton>
@@ -250,10 +250,10 @@ export function ChatSidebar() {
                         </>
                       )}
                     </div>
-                    <div className="flex items-center gap-1.5 font-mono text-[10px] text-text-muted/60 mt-1">
+                    <div className="flex items-center gap-1.5 font-mono text-[10px] text-text-faint mt-1">
                       <span
                         className={cn(
-                          c.backend === "claude" ? "text-semantic/70" : "text-text-muted/70",
+                          c.backend === "claude" ? "text-accent-hi/80" : "text-text-muted",
                         )}
                       >
                         {c.backend}
@@ -276,7 +276,7 @@ function Section({ label, children }: { label: string; children: React.ReactNode
   return (
     <div className="py-1">
       <div className="px-3 pt-2 pb-1">
-        <span className="font-mono text-[10px] text-text-muted/60 uppercase tracking-[0.2em]">
+        <span className="font-mono text-[10px] text-text-faint uppercase tracking-[0.18em]">
           {label}
         </span>
       </div>

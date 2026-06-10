@@ -6,64 +6,32 @@ const SUGGESTED = [
   "What was that error I saw in VS Code?",
   "What did I work on this morning?",
   "How long did I spend on GitHub today?",
-  "Show me what I was reading last hour",
+  "What did we discuss in my last meeting?",
 ];
 
 export function AskEmptyState({ onSuggest }: AskEmptyStateProps) {
   return (
     <div className="flex-1 flex items-center justify-center px-8">
-      <div className="max-w-md w-full animate-fade-in">
-        {/* Header */}
-        <div className="mb-8">
-          <div className="flex items-center gap-3 mb-3">
-            <div className="w-2 h-2 bg-semantic animate-pulse-glow" />
-            <span className="font-mono text-[10px] text-semantic uppercase tracking-[0.2em]">
-              memory interface
-            </span>
-          </div>
-          <h1 className="font-display text-4xl text-text-primary leading-none mb-2">
-            Ask RewindOS
-          </h1>
-          <p className="text-sm text-text-muted leading-relaxed">
-            Query your screen history in natural language.
-            <br />
-            Everything stays local.
-          </p>
-        </div>
+      <div className="max-w-[560px] w-full animate-fade-in">
+        <div className="kicker mb-4">Ask · grounded in your captures</div>
+        <h1 className="font-display text-[40px] leading-[1.08] tracking-tight mb-4">
+          Ask your memory anything.
+        </h1>
+        <p className="text-[15px] text-text-secondary leading-relaxed mb-9 max-w-[46ch]">
+          Grounded in everything you've seen — screenshots, text, and meeting
+          transcripts. References link back to the exact frame.
+        </p>
 
-        {/* Suggested queries */}
-        <div className="space-y-1.5">
-          <span className="font-mono text-[10px] text-text-muted uppercase tracking-widest">
-            try asking
-          </span>
-          {SUGGESTED.map((q, i) => (
+        <div className="flex flex-wrap gap-2">
+          {SUGGESTED.map((q) => (
             <button
               key={q}
               onClick={() => onSuggest(q)}
-              className="group w-full text-left px-3 py-2.5 border border-border/50 hover:border-semantic/40 bg-surface-raised/30 hover:bg-semantic/5 transition-all"
-              style={{ animationDelay: `${i * 80}ms` }}
+              className="inline-flex items-center h-8 px-3.5 rounded-[7px] text-[12.5px] font-[450] text-text-secondary border border-line-2 hover:border-line-hi hover:text-text-primary hover:bg-panel transition-colors"
             >
-              <div className="flex items-start gap-2.5">
-                <span className="font-mono text-xs text-semantic/60 group-hover:text-semantic shrink-0 mt-px">
-                  {">"}
-                </span>
-                <span className="text-sm text-text-secondary group-hover:text-text-primary transition-colors">
-                  {q}
-                </span>
-              </div>
+              {q}
             </button>
           ))}
-        </div>
-
-        {/* Keyboard hint */}
-        <div className="mt-6 flex items-center gap-2 text-text-muted">
-          <span className="font-mono text-[10px]">
-            powered by local llm
-          </span>
-          <span className="text-border">|</span>
-          <span className="font-mono text-[10px]">
-            context from your captures
-          </span>
         </div>
       </div>
     </div>

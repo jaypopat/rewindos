@@ -134,6 +134,19 @@ function App() {
     dispatch({ type: "SELECT_RESULT", id, siblingIds });
   }, []);
 
+  // The detail pane only renders inside detail-capable views (see showDetail).
+  // The palette is global, so route through Search first when the current view
+  // can't host a detail — otherwise the click selects a frame nothing displays.
+  const handleOpenFromPalette = useCallback(
+    (id: number, siblingIds?: number[]) => {
+      if (view === "meetings" || view === "focus" || view === "settings") {
+        dispatch({ type: "CHANGE_VIEW", view: "search" });
+      }
+      dispatch({ type: "SELECT_RESULT", id, siblingIds });
+    },
+    [view],
+  );
+
   const handleNavigateScreenshot = useCallback((id: number) => {
     dispatch({ type: "NAVIGATE_SCREENSHOT", id });
   }, []);
@@ -342,7 +355,7 @@ function App() {
       <RecallPalette
         open={paletteOpen}
         onClose={() => setPaletteOpen(false)}
-        onOpenResult={handleSelectResult}
+        onOpenResult={handleOpenFromPalette}
         onRewindTo={(ts) => handleRewindToRange(ts - 120, ts + 120)}
       />
       <FirstRunWizard />

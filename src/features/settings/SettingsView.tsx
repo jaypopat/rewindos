@@ -1,8 +1,7 @@
 import { useState, useEffect } from "react";
 import { useConfig } from "./hooks/useConfig";
 import { getDaemonStatus } from "@/lib/api";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Settings } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { GeneralTab } from "./tabs/GeneralTab";
 import { CaptureTab } from "./tabs/CaptureTab";
 import { PrivacyTab } from "./tabs/PrivacyTab";
@@ -40,7 +39,7 @@ export function SettingsView() {
     return (
       <div className="flex-1 flex items-center justify-center">
         <span className="font-mono text-xs text-text-muted">
-          {error ? `error: ${error}` : "loading config..."}
+          {error ? `error: ${error}` : "loading config…"}
         </span>
       </div>
     );
@@ -58,46 +57,55 @@ export function SettingsView() {
   };
 
   return (
-    <div className="flex-1 flex flex-col min-h-0">
-      {/* Header */}
-      <div className="flex items-center justify-between px-5 py-2 border-b border-border/50 shrink-0">
-        <div className="flex items-center gap-2">
-          <Settings className="size-4 text-text-muted" strokeWidth={1.8} />
-          <span className="font-mono text-xs text-text-muted uppercase tracking-wider">settings</span>
-        </div>
-        <div className="flex items-center gap-2">
-          {error && <span className="font-mono text-[10px] text-signal-error">{error}</span>}
-          {saved && <span className="font-mono text-[10px] text-signal-active">saved</span>}
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="px-3 py-1 font-mono text-[11px] text-text-primary bg-accent/10 border border-accent/30 hover:bg-accent/20 transition-all disabled:opacity-50 uppercase tracking-wider"
-          >
-            {saving ? "saving..." : "save"}
-          </button>
-        </div>
-      </div>
-      <div className="flex-1 flex min-h-0">
-        <div className="w-36 border-r border-border/50 py-2 shrink-0">
-          {TABS.map((t) => (
-            <button
-              key={t.id}
-              onClick={() => setTab(t.id)}
-              className={`w-full text-left px-4 py-1.5 font-mono text-xs transition-all ${
-                tab === t.id
-                  ? "text-accent bg-accent/5 border-r-2 border-accent"
-                  : "text-text-muted hover:text-text-secondary"
-              }`}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
-        <ScrollArea className="flex-1">
-          <div className="px-6 py-4 max-w-xl space-y-5">
-            {tabContent[tab]}
+    <div className="flex-1 min-h-0 overflow-y-auto">
+      <div className="px-14 pt-11 pb-24 max-w-[1100px] mx-auto w-full">
+        {/* Header */}
+        <div className="flex items-end gap-6 pb-8 border-b border-line">
+          <div>
+            <div className="kicker mb-3">Settings</div>
+            <h1 className="font-display text-[34px] leading-tight tracking-tight">
+              Tune how RewindOS remembers.
+            </h1>
           </div>
-        </ScrollArea>
+          <div className="ml-auto flex items-center gap-3 pb-1">
+            {error && (
+              <span className="font-mono text-[10.5px] text-signal-error">{error}</span>
+            )}
+            {saved && (
+              <span className="font-mono text-[10.5px] text-signal-active">saved</span>
+            )}
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="inline-flex items-center h-9 px-[15px] rounded-lg text-[13px] font-semibold bg-accent text-[#1c1208] border border-accent-deep hover:bg-accent-hi transition-colors disabled:opacity-50"
+            >
+              {saving ? "Saving…" : "Save changes"}
+            </button>
+          </div>
+        </div>
+
+        <div className="flex gap-12 mt-9">
+          {/* Tab rail */}
+          <div className="w-[180px] shrink-0 sticky top-6 self-start">
+            {TABS.map((t) => (
+              <button
+                key={t.id}
+                onClick={() => setTab(t.id)}
+                className={cn(
+                  "w-full text-left px-3 py-2 rounded-[7px] text-[13.5px] font-[450] transition-colors",
+                  tab === t.id
+                    ? "bg-accent-muted text-accent-hi"
+                    : "text-text-secondary hover:text-text-primary hover:bg-panel",
+                )}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Fields */}
+          <div className="flex-1 min-w-0 max-w-[640px]">{tabContent[tab]}</div>
+        </div>
       </div>
     </div>
   );
