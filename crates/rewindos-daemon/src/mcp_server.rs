@@ -13,8 +13,8 @@ use rewindos_core::config::AppConfig;
 use rewindos_core::db::Database;
 use rewindos_core::mcp::{
     get_app_usage, get_recent_activity, get_screenshot_detail, get_timeline, search_screenshots,
-    GetAppUsageInput, GetRecentActivityInput, GetScreenshotDetailInput, GetTimelineInput,
-    SearchScreenshotsInput,
+    search_transcripts, GetAppUsageInput, GetRecentActivityInput, GetScreenshotDetailInput,
+    GetTimelineInput, SearchScreenshotsInput, SearchTranscriptsInput,
 };
 use rmcp::{
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
@@ -99,6 +99,26 @@ impl RewindosMcpServer {
     ) -> Result<CallToolResult, McpError> {
         let db = self.db.lock().map_err(Self::lock_err)?;
         let out = get_screenshot_detail(&db, input)
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        Self::ok_json(&out)
+    }
+
+    #[tool(
+        description = "Search recorded meeting transcripts ('You' = the user, 'Remote' = the \
+                       other party). With a query: relevance-ranked matches, optionally within \
+                       a time window. Without a query: chronological segments from the window \
+                       (default last 7 days) — use for 'what was discussed in my last meeting?'."
+    )]
+    async fn search_transcripts(
+        &self,
+        Parameters(input): Parameters<SearchTranscriptsInput>,
+    ) -> Result<CallToolResult, McpError> {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        let db = self.db.lock().map_err(Self::lock_err)?;
+        let out = search_transcripts(&db, input, now)
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
         Self::ok_json(&out)
     }

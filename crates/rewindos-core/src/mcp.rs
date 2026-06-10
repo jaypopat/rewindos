@@ -206,6 +206,99 @@ pub fn search_screenshots(
         .collect())
 }
 
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct SearchTranscriptsInput {
+    /// Free-text query over meeting transcript segments. Omit (or pass an
+    /// empty string) to list segments chronologically within the time window
+    /// instead — useful for "what was discussed in yesterday's meeting?".
+    #[serde(default)]
+    pub query: String,
+    /// Unix timestamp (seconds) — only segments spoken at/after this moment.
+    pub start_time: Option<i64>,
+    /// Unix timestamp (seconds) — only segments spoken at/before this moment.
+    pub end_time: Option<i64>,
+    #[serde(default = "default_transcript_limit")]
+    pub limit: i64,
+}
+
+fn default_transcript_limit() -> i64 {
+    20
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+pub struct TranscriptHit {
+    pub meeting_id: i64,
+    pub meeting_title: Option<String>,
+    /// Unix seconds the meeting started.
+    pub meeting_started_at: i64,
+    /// Unix seconds this segment was spoken (meeting start + offset).
+    pub timestamp: i64,
+    /// "You" is the user; "Remote" is the other party.
+    pub speaker: String,
+    pub text: String,
+}
+
+/// Search recorded meeting transcripts. With a query: FTS-ranked relevance
+/// search, optionally narrowed to a time window. Without one: a chronological
+/// listing of the window (defaulting to the last 7 days).
+pub fn search_transcripts(
+    db: &Database,
+    input: SearchTranscriptsInput,
+    now: i64,
+) -> crate::error::Result<Vec<TranscriptHit>> {
+    if input.query.trim().is_empty() {
+        let start = input.start_time.unwrap_or(now - 7 * 86_400);
+        let end = input.end_time.unwrap_or(now);
+        let rows = db.get_transcript_segments_in_range(start, end, input.limit)?;
+        return Ok(rows
+            .into_iter()
+            .map(
+                |(meeting_id, title, started_at, start_ms, speaker, text)| TranscriptHit {
+                    meeting_id,
+                    meeting_title: title,
+                    meeting_started_at: started_at,
+                    timestamp: started_at + start_ms / 1000,
+                    speaker,
+                    text: truncate_chars(&text, 400),
+                },
+            )
+            .collect());
+    }
+
+    // Over-fetch when a time filter applies, since relevance ranking happens
+    // before the window is known.
+    let has_window = input.start_time.is_some() || input.end_time.is_some();
+    let fetch = if has_window { 200 } else { input.limit };
+    let hits = db.search_transcripts(input.query.trim(), None, fetch)?;
+
+    let mut out = Vec::new();
+    for h in hits {
+        let meeting = db.get_meeting(h.meeting_id)?;
+        let (title, started_at) = match meeting {
+            Some(m) => (m.title, m.started_at),
+            None => (None, 0),
+        };
+        let timestamp = started_at + h.start_ms / 1000;
+        if input.start_time.is_some_and(|s| timestamp < s)
+            || input.end_time.is_some_and(|e| timestamp > e)
+        {
+            continue;
+        }
+        out.push(TranscriptHit {
+            meeting_id: h.meeting_id,
+            meeting_title: title,
+            meeting_started_at: started_at,
+            timestamp,
+            speaker: h.speaker_label,
+            text: truncate_chars(&h.text, 400),
+        });
+        if out.len() as i64 >= input.limit {
+            break;
+        }
+    }
+    Ok(out)
+}
+
 fn truncate_chars(s: &str, max: usize) -> String {
     if s.chars().count() > max {
         s.chars().take(max).collect::<String>() + "..."
@@ -365,6 +458,111 @@ mod tests {
 
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].app_name.as_deref(), Some("code"));
+    }
+
+    fn seed_meeting(db: &Database, title: &str, started_at: i64, segments: &[(&str, i64, &str)]) -> i64 {
+        let id = db.insert_meeting(started_at, Some(title), None).unwrap();
+        for (speaker, start_ms, text) in segments {
+            db.insert_transcript_segment(
+                id,
+                &crate::schema::NewTranscriptSegment {
+                    start_ms: *start_ms,
+                    end_ms: start_ms + 5_000,
+                    source: if *speaker == "You" { "mic" } else { "system" }.to_string(),
+                    speaker_label: speaker.to_string(),
+                    text: text.to_string(),
+                },
+            )
+            .unwrap();
+        }
+        id
+    }
+
+    #[test]
+    fn transcript_search_returns_relevant_segments_with_meeting_context() {
+        let db = Database::open_in_memory().unwrap();
+        let now = 1_700_100_000;
+        let id = seed_meeting(
+            &db,
+            "Sponsor call",
+            now - 3_600,
+            &[
+                ("You", 5_000, "let's talk about the audi sponsorship terms"),
+                ("Remote", 65_000, "the budget is fine on our side"),
+            ],
+        );
+        seed_meeting(&db, "Standup", now - 7_200, &[("You", 0, "daily sync notes")]);
+
+        let hits = search_transcripts(
+            &db,
+            SearchTranscriptsInput {
+                query: "sponsorship".to_string(),
+                start_time: None,
+                end_time: None,
+                limit: 10,
+            },
+            now,
+        )
+        .unwrap();
+
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].meeting_id, id);
+        assert_eq!(hits[0].meeting_title.as_deref(), Some("Sponsor call"));
+        assert_eq!(hits[0].speaker, "You");
+        assert_eq!(hits[0].timestamp, now - 3_600 + 5);
+    }
+
+    #[test]
+    fn transcript_search_without_query_lists_the_window_chronologically() {
+        let db = Database::open_in_memory().unwrap();
+        let now = 1_700_100_000;
+        seed_meeting(&db, "Old", now - 30 * 86_400, &[("You", 0, "ancient history")]);
+        seed_meeting(
+            &db,
+            "Recent",
+            now - 3_600,
+            &[("Remote", 10_000, "fresh discussion"), ("You", 70_000, "my reply here")],
+        );
+
+        let hits = search_transcripts(
+            &db,
+            SearchTranscriptsInput {
+                query: "".to_string(),
+                start_time: None,
+                end_time: None,
+                limit: 10,
+            },
+            now,
+        )
+        .unwrap();
+
+        // Defaults to the last 7 days — the 30-day-old meeting is excluded.
+        assert_eq!(hits.len(), 2);
+        assert_eq!(hits[0].meeting_title.as_deref(), Some("Recent"));
+        assert!(hits[0].timestamp <= hits[1].timestamp);
+    }
+
+    #[test]
+    fn transcript_search_applies_the_time_window_to_query_hits() {
+        let db = Database::open_in_memory().unwrap();
+        let now = 1_700_100_000;
+        seed_meeting(&db, "Early", now - 10 * 86_400, &[("You", 0, "pricing table talk")]);
+        let recent = seed_meeting(&db, "Late", now - 3_600, &[("You", 0, "pricing table again")]);
+
+        let hits = search_transcripts(
+            &db,
+            SearchTranscriptsInput {
+                query: "pricing".to_string(),
+                start_time: Some(now - 86_400),
+                end_time: None,
+                limit: 10,
+            },
+            now,
+        )
+        .unwrap();
+
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].meeting_id, recent);
     }
 
     #[test]
