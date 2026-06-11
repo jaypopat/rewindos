@@ -11,7 +11,7 @@ export const queryKeys = {
     ["activity", sinceTimestamp, untilTimestamp] as const,
   timeline: (startTime: number) => ["timeline", startTime] as const,
   dailySummary: (dateKey: string) => ["daily-summary", dateKey] as const,
-  ollamaHealth: () => ["ollama-health"] as const,
+  chatHealth: (baseUrl: string) => ["chat-health", baseUrl] as const,
   claudeStatus: () => ["claude-status"] as const,
   chatModels: (baseUrl: string, apiKey: string) => ["chat-models", baseUrl, apiKey] as const,
   hourlyBrowse: (startTime: number, endTime: number) =>

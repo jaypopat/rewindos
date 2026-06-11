@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useHotkey } from "@tanstack/react-hotkeys";
 import type { JSONContent } from "@tiptap/core";
 import {
+  chatHealthCheck,
   getJournalEntry,
   upsertJournalEntry,
   getJournalDates,
@@ -18,7 +19,6 @@ import {
   type JournalEntry,
   type JournalDateInfo,
 } from "@/lib/api";
-import { providerHealth } from "@/lib/provider-chat";
 import { queryKeys } from "@/lib/query-keys";
 import { useDebounce } from "@/hooks/useDebounce";
 import { dateToKey, dayStartEnd } from "@/lib/time-ranges";
@@ -133,9 +133,8 @@ export function useJournalEntry() {
   });
 
   const { data: ollamaAvailable } = useQuery({
-    queryKey: queryKeys.ollamaHealth(),
-    queryFn: () =>
-      journalConfig ? providerHealth(journalConfig.chat.base_url, journalConfig.chat.api_key) : false,
+    queryKey: queryKeys.chatHealth(journalConfig?.chat.base_url ?? ""),
+    queryFn: () => (journalConfig ? chatHealthCheck(journalConfig.chat) : false),
     enabled: !!journalConfig,
     staleTime: 120_000,
   });

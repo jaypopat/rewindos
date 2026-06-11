@@ -44,6 +44,7 @@ struct AppState {
     config: Mutex<AppConfig>,
     embedding_client: Option<EmbeddingClient>,
     claude_pids: Arc<tokio::sync::Mutex<HashMap<String, u32>>>,
+    chat_cancel_flags: Arc<tokio::sync::Mutex<HashMap<String, Arc<std::sync::atomic::AtomicBool>>>>,
     audio_server: Option<audio_server::AudioServer>,
 }
 
@@ -819,81 +820,24 @@ async fn get_daily_summary(
 
     let total_sessions = app_breakdown.iter().map(|a| a.session_count).sum();
 
-    // 3. Build prompt for Ollama
-    let mut context_lines = Vec::new();
-    let mut current_group_app: Option<String> = None;
-    let mut group_titles: Vec<String> = Vec::new();
-    let mut group_ocr_snippets: Vec<String> = Vec::new();
-
-    for (app_name, window_title, _ts, ocr_text) in &sessions {
-        let name = app_name.clone().unwrap_or_else(|| "Unknown".to_string());
-
-        if current_group_app.as_deref() != Some(&name) {
-            if let Some(prev_app) = &current_group_app {
-                let titles: Vec<&str> = group_titles.iter().take(3).map(|s| s.as_str()).collect();
-                let snippet = group_ocr_snippets
-                    .join(" ")
-                    .chars()
-                    .take(200)
-                    .collect::<String>();
-                context_lines.push(format!(
-                    "- {prev_app}: windows [{}], content: \"{}\"",
-                    titles.join(", "),
-                    snippet,
-                ));
-            }
-            current_group_app = Some(name);
-            group_titles.clear();
-            group_ocr_snippets.clear();
-        }
-
-        if let Some(title) = window_title {
-            if !title.is_empty() && !group_titles.contains(title) {
-                group_titles.push(title.clone());
-            }
-        }
-        let snippet: String = ocr_text.chars().take(100).collect();
-        if !snippet.trim().is_empty() {
-            group_ocr_snippets.push(snippet);
-        }
-    }
-    if let Some(prev_app) = &current_group_app {
-        let titles: Vec<&str> = group_titles.iter().take(3).map(|s| s.as_str()).collect();
-        let snippet = group_ocr_snippets
-            .join(" ")
-            .chars()
-            .take(200)
-            .collect::<String>();
-        context_lines.push(format!(
-            "- {prev_app}: windows [{}], content: \"{}\"",
-            titles.join(", "),
-            snippet,
-        ));
-    }
-
-    let app_summary_text = app_breakdown
+    // 3. Build prompt for Ollama via the shared core function
+    let prompt_app_entries: Vec<rewindos_core::summary::AppEntry> = app_breakdown
         .iter()
-        .take(8)
-        .map(|a| {
-            format!(
-                "{}: {:.0}min ({} sessions)",
-                a.app_name, a.minutes, a.session_count
-            )
+        .map(|a| rewindos_core::summary::AppEntry {
+            app_name: a.app_name.clone(),
+            minutes: a.minutes,
+            session_count: a.session_count,
         })
-        .collect::<Vec<_>>()
-        .join(", ");
-
-    let prompt = format!(
-        "You are an AI assistant analyzing a user's desktop activity for the day. \
-        Based on the data below, write a brief productivity summary (3-5 sentences). \
-        Be specific about what the user was working on based on the window titles and screen content. \
-        Mention concrete tasks, not just app names. Be encouraging but honest.\n\n\
-        App usage: {app_summary_text}\n\n\
-        Activity log:\n{}\n\n\
-        Write a concise daily summary. Focus on what was accomplished, not just what apps were used. \
-        If you can identify specific tasks (coding, writing, browsing topics), mention them.",
-        context_lines.join("\n"),
-    );
+        .collect();
+    let prompt_session_rows: Vec<rewindos_core::summary::SessionRow> = sessions
+        .iter()
+        .map(|(app_name, window_title, _ts, ocr_text)| rewindos_core::summary::SessionRow {
+            app_name: app_name.clone(),
+            window_title: window_title.clone(),
+            ocr_text: ocr_text.clone(),
+        })
+        .collect();
+    let prompt = rewindos_core::summary::build_daily_prompt(&prompt_app_entries, &prompt_session_rows);
 
     // 4. Generate summary — prefer Claude when available, fall back to chat provider
     let chat_cfg = {
@@ -1716,6 +1660,77 @@ async fn delete_screenshots_in_range(
     Ok(deleted)
 }
 
+// -- Provider chat stream commands --
+
+#[derive(Clone, serde::Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum ChatStreamEvent {
+    Token { text: String },
+    Done,
+    Error { message: String },
+}
+
+#[tauri::command]
+async fn chat_stream_completion(
+    state: State<'_, AppState>,
+    stream_id: String,
+    chat: rewindos_core::config::ChatConfig,
+    messages: Vec<rewindos_core::chat::ChatMessage>,
+    on_event: tauri::ipc::Channel<ChatStreamEvent>,
+) -> Result<(), String> {
+    let cancelled = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    {
+        let mut map = state.chat_cancel_flags.lock().await;
+        map.insert(stream_id.clone(), cancelled.clone());
+    }
+
+    let client = rewindos_core::chat::ChatClient::new(&chat);
+    let stream = client.chat_stream(messages);
+    futures::pin_mut!(stream);
+
+    let mut result: Result<(), String> = Ok(());
+    while let Some(chunk) = stream.next().await {
+        if cancelled.load(std::sync::atomic::Ordering::Relaxed) {
+            break;
+        }
+        match chunk {
+            Ok(c) => {
+                if !c.token.is_empty() {
+                    let _ = on_event.send(ChatStreamEvent::Token { text: c.token });
+                }
+                if c.done {
+                    break;
+                }
+            }
+            Err(e) => {
+                let msg = e.to_string();
+                let _ = on_event.send(ChatStreamEvent::Error { message: msg.clone() });
+                result = Err(msg);
+                break;
+            }
+        }
+    }
+    let _ = on_event.send(ChatStreamEvent::Done);
+
+    {
+        let mut map = state.chat_cancel_flags.lock().await;
+        map.remove(&stream_id);
+    }
+    result
+}
+
+#[tauri::command]
+async fn chat_stream_cancel(
+    state: State<'_, AppState>,
+    stream_id: String,
+) -> Result<(), String> {
+    let map = state.chat_cancel_flags.lock().await;
+    if let Some(flag) = map.get(&stream_id) {
+        flag.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+    Ok(())
+}
+
 // -- Settings commands --
 
 #[tauri::command]
@@ -1890,6 +1905,7 @@ pub fn run() {
                 config: Mutex::new(config),
                 embedding_client,
                 claude_pids: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+                chat_cancel_flags: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
                 audio_server,
             });
 
@@ -2186,6 +2202,8 @@ pub fn run() {
             delete_screenshots_in_range,
             get_config,
             update_config,
+            chat_stream_completion,
+            chat_stream_cancel,
             chat_health_check,
             chat_list_models,
             toggle_bookmark,

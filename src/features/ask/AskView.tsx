@@ -4,8 +4,7 @@ import { useHotkey } from "@tanstack/react-hotkeys";
 import { Loader2, Paperclip, PanelLeftClose, PanelLeftOpen, Plus } from "lucide-react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { queryKeys } from "@/lib/query-keys";
-import { claudeDetect, getConfig, getScreenshotsByIds, listChats } from "@/lib/api";
-import { providerHealth } from "@/lib/provider-chat";
+import { chatHealthCheck, claudeDetect, getConfig, getScreenshotsByIds, listChats } from "@/lib/api";
 import { useAskChat } from "@/context/AskContext";
 import { Button } from "@/components/ui/button";
 import { AskMessages } from "./AskMessages";
@@ -71,12 +70,9 @@ export function AskView({ onSelectScreenshot }: AskViewProps) {
     queryFn: getConfig,
   });
 
-  const { data: ollamaOnline = false } = useQuery({
-    queryKey: queryKeys.ollamaHealth(),
-    queryFn: () =>
-      config
-        ? providerHealth(config.chat.base_url, config.chat.api_key)
-        : false,
+  const { data: chatOnline = false } = useQuery({
+    queryKey: queryKeys.chatHealth(config?.chat.base_url ?? ""),
+    queryFn: () => (config ? chatHealthCheck(config.chat) : false),
     enabled: !!config,
     refetchInterval: 60_000,
     staleTime: 30_000,
@@ -89,7 +85,7 @@ export function AskView({ onSelectScreenshot }: AskViewProps) {
   });
 
   const usingClaude = !!(claudeStatus?.available && claudeStatus.mcp_registered);
-  const chatReady = usingClaude || ollamaOnline;
+  const chatReady = usingClaude || chatOnline;
 
   const submit = useCallback(
     async (textOverride?: string) => {

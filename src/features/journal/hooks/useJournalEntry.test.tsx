@@ -27,12 +27,15 @@ vi.mock("@/lib/api", () => {
     getActivity: vi.fn(async () => ({ total_screenshots: 0, app_usage: [] })),
     getTaskBreakdown: vi.fn(async () => []),
     getJournalTags: vi.fn(async () => []),
-    getConfig: vi.fn(async () => ({ chat: { ollama_url: "" } })),
+    getConfig: vi.fn(async () => ({
+      chat: { enabled: true, provider: "ollama", base_url: "", api_key: "", model: "" },
+    })),
     getCarryForwardTodos: vi.fn(async () => []),
+    chatHealthCheck: vi.fn(async () => false),
   };
 });
 
-vi.mock("@/lib/provider-chat", () => ({ providerHealth: vi.fn(async () => false) }));
+vi.mock("@/lib/provider-chat", () => ({ providerChat: vi.fn() }));
 vi.mock("@tanstack/react-hotkeys", () => ({ useHotkey: vi.fn() }));
 
 import { useJournalEntry } from "./useJournalEntry";

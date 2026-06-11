@@ -34,8 +34,11 @@ describe("queryKeys", () => {
     expect(key).toEqual(["activity", 1000, 2000]);
   });
 
-  it("generates ollama health key", () => {
-    expect(queryKeys.ollamaHealth()).toEqual(["ollama-health"]);
+  it("generates chat health key including base url", () => {
+    expect(queryKeys.chatHealth("http://localhost:11434/v1")).toEqual([
+      "chat-health",
+      "http://localhost:11434/v1",
+    ]);
   });
 
   it("generates claude status key", () => {

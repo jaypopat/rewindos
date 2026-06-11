@@ -27,18 +27,18 @@ export function AskModelPicker() {
     queryKey: queryKeys.config(),
     queryFn: getConfig,
   });
-  const ollamaUrl = config?.chat.base_url ?? "";
+  const baseUrl = config?.chat.base_url ?? "";
   const apiKey = config?.chat.api_key ?? "";
   const defaultOllama = config?.chat.model;
 
   const { data: ollamaModels = [] } = useQuery({
-    queryKey: queryKeys.chatModels(ollamaUrl, apiKey),
+    queryKey: queryKeys.chatModels(baseUrl, apiKey),
     queryFn: async () => {
       if (!config?.chat) return [];
       const models = await chatListModels(config.chat);
       return models.filter((name) => !name.toLowerCase().includes("embed"));
     },
-    enabled: !!ollamaUrl && !!config,
+    enabled: !!baseUrl && !!config,
     staleTime: 60_000,
   });
 
@@ -100,10 +100,10 @@ export function AskModelPicker() {
             ))}
           </ModelSelectorGroup>
           <ModelSelectorSeparator />
-          <ModelSelectorGroup heading="Ollama (local)">
+          <ModelSelectorGroup heading="Local provider">
             {ollamaModels.length === 0 ? (
               <div className="px-2 py-1.5 font-mono text-[10px] text-text-muted/60 italic">
-                no models pulled — run `ollama pull &lt;name&gt;`
+                no models found — check your provider settings
               </div>
             ) : (
               ollamaModels.map((m) => (

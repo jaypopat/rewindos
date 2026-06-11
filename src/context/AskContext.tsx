@@ -194,10 +194,7 @@ export function AskProvider({ children }: { children: ReactNode }) {
 
           abortRef.current = new AbortController();
           await providerChat({
-            baseUrl: config.chat.base_url,
-            apiKey: config.chat.api_key,
-            model: effectiveModel || config.chat.model,
-            temperature: config.chat.temperature,
+            chat: { ...config.chat, model: effectiveModel || config.chat.model },
             messages: providerMessages,
             signal: abortRef.current.signal,
             onToken: (token) => {
