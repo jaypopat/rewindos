@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { createCollection } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import { Clock } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
@@ -139,10 +140,12 @@ export function SaveMomentDialog({ onClose }: SaveMomentDialogProps) {
             <p className="text-[10px] text-red-400">{(saveMutation.error as Error).message}</p>
           )}
 
-          <button
+          <Button
             type="submit"
+            variant="editorial-accent"
+            size="editorial"
             disabled={saveMutation.isPending}
-            className="w-full flex items-center justify-center gap-2 bg-accent/15 hover:bg-accent/25 text-accent text-xs font-medium py-2 rounded-lg transition-colors disabled:opacity-50"
+            className="h-auto w-full flex items-center justify-center gap-2 border-transparent bg-accent/15 hover:bg-accent/25 text-xs font-medium py-2 rounded-lg font-sans"
           >
             {saveMutation.isPending ? (
               <div className="w-3 h-3 border border-accent/30 border-t-accent rounded-full animate-spin" />
@@ -150,7 +153,7 @@ export function SaveMomentDialog({ onClose }: SaveMomentDialogProps) {
               <Clock className="size-3" strokeWidth={2} />
             )}
             Save Moment
-          </button>
+          </Button>
         </form>
       </DialogContent>
     </Dialog>

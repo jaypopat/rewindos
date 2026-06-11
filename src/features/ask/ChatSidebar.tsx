@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Plus, Search, Pencil, Trash2, X, Download } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   deleteChat,
@@ -116,7 +117,9 @@ export function ChatSidebar({ open, onClose }: { open: boolean; onClose: () => v
             {chats.length}
           </span>
         </div>
-        <button type="button"
+        <Button
+          variant="outline"
+          type="button"
           onClick={() => {
             startNewChat();
             onClose();
@@ -125,7 +128,7 @@ export function ChatSidebar({ open, onClose }: { open: boolean; onClose: () => v
         >
           <Plus className="size-3.5" strokeWidth={1.7} />
           New chat
-        </button>
+        </Button>
         <div className="relative">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3 text-text-muted pointer-events-none" />
           <Input
@@ -135,13 +138,16 @@ export function ChatSidebar({ open, onClose }: { open: boolean; onClose: () => v
             className="bg-transparent pl-8 pr-7 text-[12.5px]"
           />
           {query && (
-            <button type="button"
+            <Button
+              variant="quiet"
+              size="icon-xs"
+              type="button"
               onClick={() => setQuery("")}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary"
+              className="absolute right-2 top-1/2 -translate-y-1/2 size-auto p-0 text-text-muted hover:text-text-primary"
               aria-label="clear search"
             >
               <X className="size-3" />
-            </button>
+            </Button>
           )}
         </div>
       </div>
@@ -356,17 +362,20 @@ function IconButton({
   hoverClass: string;
 }) {
   return (
-    <button type="button"
+    <Button
+      variant="quiet"
+      size="icon-xs"
+      type="button"
       onClick={onClick}
       title={title}
       aria-label={title}
       className={cn(
-        "p-1 text-text-muted transition-colors",
+        "size-auto p-1 text-text-muted transition-colors",
         hoverClass,
       )}
     >
       {children}
-    </button>
+    </Button>
   );
 }
 

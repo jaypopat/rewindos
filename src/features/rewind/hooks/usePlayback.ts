@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { getImageUrl, type TimelineEntry } from "@/lib/api";
-import { SPEEDS } from "@/features/rewind/rewind-utils";
+import type { SPEEDS } from "@/features/rewind/rewind-utils";
 
 export function usePlayback(screenshots: TimelineEntry[]) {
   const [currentIndex, setCurrentIndex] = useState(0);

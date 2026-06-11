@@ -5,6 +5,7 @@ import { queryKeys } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
 import { X, ImageIcon, Search, Grid3X3, ChevronDown } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 
 const PAGE_SIZE = 50;
 
@@ -118,30 +119,30 @@ export function ScreenshotPicker({
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">
           {/* Mode toggle */}
-          <button type="button"
+          <Button variant="quiet" type="button"
             onClick={() => { setMode("browse"); setSearchQuery(""); setSearchResults([]); setSearchOffset(0); }}
             className={cn(
-              "flex items-center gap-1 px-2 py-0.5 text-[11px] font-mono rounded transition-colors",
+              "h-auto flex items-center gap-1 px-2 py-0.5 text-[11px] font-mono rounded transition-colors",
               mode === "browse" ? "bg-accent/15 text-accent" : "text-text-muted hover:text-text-secondary",
             )}
           >
             <Grid3X3 className="size-3" strokeWidth={2} />
             browse
-          </button>
-          <button type="button"
+          </Button>
+          <Button variant="quiet" type="button"
             onClick={() => setMode("search")}
             className={cn(
-              "flex items-center gap-1 px-2 py-0.5 text-[11px] font-mono rounded transition-colors",
+              "h-auto flex items-center gap-1 px-2 py-0.5 text-[11px] font-mono rounded transition-colors",
               mode === "search" ? "bg-accent/15 text-accent" : "text-text-muted hover:text-text-secondary",
             )}
           >
             <Search className="size-3" strokeWidth={2} />
             search
-          </button>
+          </Button>
         </div>
-        <button type="button" onClick={onClose} className="text-text-muted hover:text-text-secondary transition-colors">
+        <Button variant="quiet" size="icon-xs" type="button" onClick={onClose} className="size-auto text-text-muted hover:text-text-secondary transition-colors">
           <X className="size-3.5" strokeWidth={2} />
-        </button>
+        </Button>
       </div>
 
       {/* Search input (search mode) */}
@@ -159,46 +160,46 @@ export function ScreenshotPicker({
               ref={(el) => el?.focus()}
             />
           </div>
-          <button type="button"
+          <Button variant="ghost" type="button"
             onClick={handleSearchSubmit}
             disabled={!searchQuery.trim()}
             className={cn(
-              "px-2 py-1.5 text-[11px] font-mono rounded transition-colors",
+              "h-auto px-2 py-1.5 text-[11px] font-mono rounded transition-colors",
               searchQuery.trim() ? "text-accent hover:bg-accent/10" : "text-text-muted/30",
             )}
           >
             go
-          </button>
+          </Button>
         </div>
       )}
 
       {/* App filter chips (browse mode) */}
       {mode === "browse" && appUsage && appUsage.length > 0 && (
         <div className="flex gap-1 flex-wrap mb-2">
-          <button type="button"
+          <Button variant="quiet" type="button"
             onClick={() => handleAppFilter(undefined)}
             className={cn(
-              "px-2 py-0.5 text-[10px] font-mono rounded-full border transition-colors",
+              "h-auto px-2 py-0.5 text-[10px] font-mono rounded-full border transition-colors",
               !appFilter
                 ? "border-accent/40 bg-accent/10 text-accent"
                 : "border-border/40 text-text-muted hover:text-text-secondary",
             )}
           >
             all
-          </button>
+          </Button>
           {appUsage.slice(0, 8).map((app) => (
-            <button type="button"
+            <Button variant="quiet" type="button"
               key={app.app_name}
               onClick={() => handleAppFilter(appFilter === app.app_name ? undefined : app.app_name)}
               className={cn(
-                "px-2 py-0.5 text-[10px] font-mono rounded-full border transition-colors truncate max-w-[120px]",
+                "h-auto px-2 py-0.5 text-[10px] font-mono rounded-full border transition-colors truncate max-w-[120px]",
                 appFilter === app.app_name
                   ? "border-accent/40 bg-accent/10 text-accent"
                   : "border-border/40 text-text-muted hover:text-text-secondary",
               )}
             >
               {app.app_name.toLowerCase()}
-            </button>
+            </Button>
           ))}
         </div>
       )}
@@ -257,10 +258,10 @@ export function ScreenshotPicker({
 
           {/* Load more */}
           {lastBatchFull && (
-            <button type="button"
+            <Button variant="quiet" type="button"
               onClick={handleLoadMore}
               disabled={isFetching}
-              className="mt-2 w-full flex items-center justify-center gap-1 py-1.5 text-[11px] font-mono text-text-muted hover:text-text-secondary border border-border/30 rounded transition-colors disabled:opacity-50"
+              className="mt-2 h-auto w-full flex items-center justify-center gap-1 py-1.5 text-[11px] font-mono text-text-muted hover:text-text-secondary border border-border/30 rounded transition-colors disabled:opacity-50"
             >
               {isFetching ? (
                 <div className="w-3 h-3 border border-accent/30 border-t-accent rounded-full animate-spin" />
@@ -270,7 +271,7 @@ export function ScreenshotPicker({
                   load more
                 </>
               )}
-            </button>
+            </Button>
           )}
         </>
       )}

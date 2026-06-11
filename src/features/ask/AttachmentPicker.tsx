@@ -2,6 +2,7 @@ import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useDebounce } from "@/hooks/useDebounce";
 import { Check, Search } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   Dialog,
@@ -159,14 +160,18 @@ export function AttachmentPicker({ open, onClose, onAttach }: AttachmentPickerPr
             {selected.size} selected
           </span>
           <div className="flex gap-2">
-            <button
+            <Button
+              variant="editorial-muted"
+              size="editorial"
               type="button"
               onClick={handleClose}
               className="px-3 py-1.5 font-mono text-[11px] uppercase tracking-wider text-text-muted hover:text-text-primary border border-border/40"
             >
               cancel
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="editorial"
+              size="editorial"
               type="button"
               disabled={selected.size === 0}
               onClick={handleAttach}
@@ -178,7 +183,7 @@ export function AttachmentPicker({ open, onClose, onAttach }: AttachmentPickerPr
               )}
             >
               attach {selected.size > 0 ? `(${selected.size})` : ""}
-            </button>
+            </Button>
           </div>
         </DialogFooter>
       </DialogContent>

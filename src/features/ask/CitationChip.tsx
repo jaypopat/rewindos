@@ -1,3 +1,4 @@
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 interface CitationChipProps {
@@ -7,7 +8,9 @@ interface CitationChipProps {
 
 export function CitationChip({ id, onClick }: CitationChipProps) {
   return (
-    <button
+    <Button
+      variant="editorial"
+      size="editorial"
       type="button"
       onClick={(e) => {
         e.preventDefault();
@@ -22,6 +25,6 @@ export function CitationChip({ id, onClick }: CitationChipProps) {
       aria-label={`screenshot ${id}`}
     >
       #{id}
-    </button>
+    </Button>
   );
 }

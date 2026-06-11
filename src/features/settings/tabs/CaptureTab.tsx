@@ -1,4 +1,4 @@
-import { type AppConfig } from "@/lib/config";
+import type { AppConfig } from "@/lib/config";
 import { SectionTitle } from "../primitives/SectionTitle";
 import { Field } from "../primitives/Field";
 import { NumberInput } from "../primitives/NumberInput";

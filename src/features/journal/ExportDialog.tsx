@@ -5,6 +5,7 @@ import { dateToKey } from "@/lib/time-ranges";
 import { subDays } from "date-fns";
 import { Download, Copy } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 interface ExportDialogProps {
@@ -65,10 +66,10 @@ export function ExportDialog({ onClose }: ExportDialogProps) {
             </div>
           </div>
 
-          <button type="button"
+          <Button variant="ghost" type="button"
             onClick={() => exportMutation.mutate()}
             disabled={exportMutation.isPending}
-            className="w-full flex items-center justify-center gap-2 bg-accent/15 hover:bg-accent/25 text-accent text-xs font-medium py-2 rounded-lg transition-colors disabled:opacity-50"
+            className="h-auto w-full flex items-center justify-center gap-2 bg-accent/15 hover:bg-accent/25 hover:text-accent text-accent text-xs font-medium py-2 rounded-lg transition-colors disabled:opacity-50"
           >
             {exportMutation.isPending ? (
               <div className="w-3 h-3 border border-accent/30 border-t-accent rounded-full animate-spin" />
@@ -76,7 +77,7 @@ export function ExportDialog({ onClose }: ExportDialogProps) {
               <Download className="size-3" strokeWidth={2} />
             )}
             Export as Markdown
-          </button>
+          </Button>
 
           {exported && (
             <div className="space-y-2">
@@ -86,13 +87,13 @@ export function ExportDialog({ onClose }: ExportDialogProps) {
                   {exported.length > 2000 && "..."}
                 </pre>
               </div>
-              <button type="button"
+              <Button variant="ghost" type="button"
                 onClick={handleCopy}
-                className="flex items-center gap-1.5 text-xs text-accent hover:text-accent/80 transition-colors"
+                className="h-auto p-0 flex items-center gap-1.5 text-xs text-accent hover:bg-transparent hover:text-accent/80 transition-colors"
               >
                 <Copy className="size-3" strokeWidth={2} />
                 {copied ? "Copied!" : "Copy to clipboard"}
-              </button>
+              </Button>
             </div>
           )}
         </div>

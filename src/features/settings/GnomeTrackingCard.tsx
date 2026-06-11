@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { Button } from "@/components/ui/button";
 import {
   gnomeExtensionStatus,
   recheckWindowInfo,
@@ -73,29 +74,35 @@ export function GnomeTrackingCard() {
             tracking. Install it, then toggle it on in GNOME Extensions.
           </p>
           <div className="flex gap-2">
-            <button
+            <Button
+              variant="editorial-accent"
+              size="editorial"
               onClick={() => void openExtensionPage()}
-              className="px-3 py-1 font-mono text-[11px] uppercase tracking-wider text-text-primary bg-accent/10 border border-accent/30 hover:bg-accent/20 transition-all"
+              className="h-auto px-3 py-1 text-[11px] uppercase tracking-wider text-text-primary bg-accent/10 hover:bg-accent/20"
             >
               Install
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="editorial-muted"
+              size="editorial"
               onClick={onRecheck}
               disabled={busy}
-              className="px-3 py-1 font-mono text-[11px] uppercase tracking-wider text-text-muted border border-border/60 hover:bg-surface transition-all disabled:opacity-50"
+              className="h-auto px-3 py-1 text-[11px] border-border/60 hover:bg-surface hover:text-text-muted"
             >
               {busy ? "Checking…" : "Re-check"}
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="editorial-muted"
+              size="editorial"
               onClick={async () => {
                 await setUnfilteredCapture(true);
                 await refresh();
               }}
-              className="px-3 py-1 font-mono text-[11px] uppercase tracking-wider text-text-muted border border-border/60 hover:bg-surface transition-all"
+              className="h-auto px-3 py-1 text-[11px] border-border/60 hover:bg-surface hover:text-text-muted"
               title="Capture without enforcing app/incognito exclusions"
             >
               Capture anyway
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -106,13 +113,15 @@ export function GnomeTrackingCard() {
             Extension detected but not yet active. Click re-check to activate
             tracking without restarting.
           </p>
-          <button
+          <Button
+            variant="editorial-accent"
+            size="editorial"
             onClick={onRecheck}
             disabled={busy}
-            className="px-3 py-1 font-mono text-[11px] uppercase tracking-wider text-text-primary bg-accent/10 border border-accent/30 hover:bg-accent/20 transition-all disabled:opacity-50"
+            className="h-auto px-3 py-1 text-[11px] uppercase tracking-wider text-text-primary bg-accent/10 hover:bg-accent/20"
           >
             {busy ? "Activating…" : "Re-check"}
-          </button>
+          </Button>
         </div>
       )}
 

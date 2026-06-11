@@ -1,11 +1,12 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { type AppConfig } from "@/lib/config";
+import type { AppConfig } from "@/lib/config";
 import { queryKeys } from "@/lib/query-keys";
 import { whisperModelPresent, downloadWhisperModel } from "@/lib/api";
 import { SectionTitle } from "../primitives/SectionTitle";
 import { Field } from "../primitives/Field";
 import { TextInput } from "../primitives/TextInput";
 import { Toggle } from "../primitives/Toggle";
+import { Button } from "@/components/ui/button";
 
 interface TabProps {
   config: AppConfig;
@@ -79,13 +80,14 @@ export function MeetingTab({ config, update }: TabProps) {
       </Field>
       {present === false && (
         <Field label="">
-          <button
+          <Button
+            variant="editorial"
+            size="editorial"
             onClick={() => download.mutate()}
             disabled={download.isPending}
-            className="font-mono text-xs px-3 py-1 border border-semantic/40 text-semantic hover:bg-semantic/10 transition-all disabled:opacity-50"
           >
             {download.isPending ? "downloading... (may take minutes)" : "Download model"}
-          </button>
+          </Button>
         </Field>
       )}
       {download.isError && (

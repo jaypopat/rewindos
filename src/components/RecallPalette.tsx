@@ -14,6 +14,7 @@ import { parseFragments } from "@/lib/recall-parse";
 import { useDebounce } from "@/hooks/useDebounce";
 import { HighlightedText, cn } from "@/lib/utils";
 import { formatRelativeTime, formatNumber } from "@/lib/format";
+import { Button } from "@/components/ui/button";
 
 const EXAMPLE_FRAGMENTS = [
   "that postgres error in ghostty",
@@ -203,13 +204,14 @@ export function RecallPalette({ open, onClose, onOpenResult, onRewindTo }: Recal
             {!hasQuery && (
               <div className="flex flex-wrap gap-2 px-[18px] pt-3 pb-4">
                 {EXAMPLE_FRAGMENTS.map((s) => (
-                  <button
+                  <Button
+                    variant="ghost"
                     key={s}
                     onClick={() => setQuery(s)}
-                    className="inline-flex items-center h-7 px-3 rounded-[7px] text-xs font-[450] text-text-secondary border border-line-2 hover:border-line-hi hover:text-text-primary transition-colors cursor-pointer"
+                    className="inline-flex items-center h-7 px-3 rounded-[7px] text-xs font-[450] text-text-secondary border border-line-2 hover:border-line-hi hover:text-text-primary cursor-pointer"
                   >
                     {s}
-                  </button>
+                  </Button>
                 ))}
               </div>
             )}

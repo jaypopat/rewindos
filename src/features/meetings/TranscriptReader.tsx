@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 import type { TranscriptSegment, Meeting } from "@/lib/api";
 
 function mmss(ms: number) {
@@ -39,22 +40,24 @@ export function TranscriptReader({
               >
                 {seg.speaker_label}
               </span>
-              <button
-                className="font-mono text-[10px] tabular-nums text-text-faint transition-colors hover:text-accent"
+              <Button
+                variant="quiet"
+                className="h-auto p-0 font-mono text-[10px] tabular-nums text-text-faint hover:text-accent"
                 onClick={() => onSeek(seg.start_ms / 1000)}
                 title="Play from here"
               >
                 {mmss(seg.start_ms)}
-              </button>
+              </Button>
               {onJumpToTime && (
-                <button
-                  className="inline-flex items-center gap-1 font-mono text-[10px] uppercase tracking-[0.08em] text-text-faint opacity-0 transition-all hover:text-accent group-hover:opacity-100"
+                <Button
+                  variant="quiet"
+                  className="h-auto p-0 inline-flex items-center gap-1 font-mono text-[10px] uppercase tracking-[0.08em] text-text-faint opacity-0 transition-all hover:text-accent group-hover:opacity-100"
                   title="Jump to this moment in Rewind"
                   aria-label="Jump to screenshot"
                   onClick={() => onJumpToTime(meeting.started_at + Math.floor(seg.start_ms / 1000))}
                 >
                   ↪ screen
-                </button>
+                </Button>
               )}
             </div>
             <p className="mt-1 text-[14px] leading-[1.68] text-text-secondary">{seg.text}</p>

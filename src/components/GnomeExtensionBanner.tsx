@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 import { getDaemonStatus, openExtensionPage, setUnfilteredCapture } from "@/lib/api";
+import { Button } from "@/components/ui/button";
 
 const DISMISS_KEY = "gnome-extension-banner-dismissed";
 
@@ -27,33 +28,39 @@ export function GnomeExtensionBanner() {
         App and window tracking is off on GNOME. Install the "Window Calls
         Extended" extension to enable it.
       </span>
-      <button
+      <Button
+        variant="editorial-accent"
+        size="editorial"
         onClick={() => void openExtensionPage()}
-        className="px-2 py-0.5 font-mono text-[11px] uppercase tracking-wider bg-accent/10 border border-accent/30 hover:bg-accent/20 transition-all"
+        className="px-2 py-0.5 text-[11px] uppercase tracking-wider bg-accent/10 hover:bg-accent/20"
       >
         Install
-      </button>
-      <button
+      </Button>
+      <Button
+        variant="editorial-muted"
+        size="editorial"
         onClick={async () => {
           await setUnfilteredCapture(true);
           setShow(false);
         }}
-        className="px-2 py-0.5 font-mono text-[11px] uppercase tracking-wider text-text-muted border border-border/60 hover:bg-surface transition-all"
+        className="px-2 py-0.5 text-[11px] uppercase tracking-wider text-text-muted border border-border/60 hover:bg-surface"
         title="Capture without enforcing app/incognito exclusions"
       >
         Capture anyway
-      </button>
-      <button
+      </Button>
+      <Button
+        variant="quiet"
+        size="icon-xs"
         onClick={() => {
           localStorage.setItem(DISMISS_KEY, "1");
           setShow(false);
         }}
-        className="text-text-muted hover:text-text-primary transition-colors"
+        className="hover:text-text-primary"
         title="Dismiss"
         aria-label="Dismiss"
       >
         <X className="size-3.5" />
-      </button>
+      </Button>
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type RefObject } from "react";
 import { ChevronDown } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 /**
  * A floating "more below" affordance pinned to the bottom of a scroll
@@ -37,19 +38,21 @@ export function ScrollHint({ scrollRef }: { scrollRef: RefObject<HTMLElement | n
   if (!visible) return null;
 
   return (
-    <button
+    <Button
+      variant="ghost"
+      size="icon"
       onClick={() => {
         const el = scrollRef.current;
         el?.scrollBy({ top: el.clientHeight * 0.8, behavior: "smooth" });
       }}
       title="More below"
-      className="absolute bottom-5 left-1/2 -translate-x-1/2 z-10 grid place-items-center size-9 rounded-full border border-line-2 bg-surface-raised text-text-secondary hover:text-text-primary hover:border-line-hi transition-colors"
+      className="absolute bottom-5 left-1/2 -translate-x-1/2 z-10 grid place-items-center size-9 rounded-full border border-line-2 bg-surface-raised text-text-secondary hover:text-text-primary hover:border-line-hi"
       style={{ boxShadow: "0 16px 40px -16px #000" }}
     >
       <ChevronDown
         className="size-4 animate-[gentleBounce_2s_ease-in-out_infinite]"
         strokeWidth={1.7}
       />
-    </button>
+    </Button>
   );
 }

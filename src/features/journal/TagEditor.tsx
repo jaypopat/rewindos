@@ -5,6 +5,7 @@ import { queryKeys } from "@/lib/query-keys";
 import { getAppColor } from "@/lib/app-colors";
 import { X, Plus } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 
 interface TagEditorProps {
   entryId: number;
@@ -62,13 +63,13 @@ export function TagEditor({ entryId, tags, onTagsChanged }: TagEditorProps) {
   if (tags.length === 0 && !isAdding) {
     return (
       <div className="px-5 py-1.5 border-b border-border/50">
-        <button type="button"
+        <Button variant="quiet" type="button"
           onClick={startAdding}
-          className="flex items-center gap-1 text-[10px] text-text-muted/50 hover:text-text-muted transition-colors"
+          className="h-auto p-0 flex items-center gap-1 text-[10px] text-text-muted/50 hover:text-text-muted transition-colors"
         >
           <Plus className="size-2.5" strokeWidth={2} />
           Add tags
-        </button>
+        </Button>
       </div>
     );
   }
@@ -85,12 +86,12 @@ export function TagEditor({ entryId, tags, onTagsChanged }: TagEditorProps) {
           }}
         >
           {tag.name}
-          <button type="button"
+          <Button variant="ghost" size="icon-xs" type="button"
             onClick={() => removeTag(tag.name)}
-            className="hover:opacity-70 transition-opacity"
+            className="size-auto p-0 hover:bg-transparent hover:opacity-70 transition-opacity"
           >
             <X className="size-2.5" strokeWidth={2} />
-          </button>
+          </Button>
         </span>
       ))}
       {isAdding ? (
@@ -118,27 +119,27 @@ export function TagEditor({ entryId, tags, onTagsChanged }: TagEditorProps) {
           {suggestions.length > 0 && input.trim() && (
             <div className="absolute top-full left-0 mt-1 bg-surface-raised border border-border/50 rounded-md shadow-lg z-10 py-1 min-w-[120px]">
               {suggestions.map((s) => (
-                <button type="button"
+                <Button variant="ghost" type="button"
                   key={s.id}
                   onMouseDown={(e) => {
                     e.preventDefault();
                     addTag(s.name);
                   }}
-                  className="w-full text-left text-[10px] text-text-secondary hover:text-text-primary hover:bg-surface-overlay/50 px-2 py-1 transition-colors"
+                  className="h-auto justify-start w-full text-left text-[10px] text-text-secondary hover:text-text-primary hover:bg-surface-overlay/50 px-2 py-1 transition-colors"
                 >
                   {s.name}
-                </button>
+                </Button>
               ))}
             </div>
           )}
         </div>
       ) : (
-        <button type="button"
+        <Button variant="quiet" size="icon-xs" type="button"
           onClick={startAdding}
-          className="text-text-muted/40 hover:text-text-muted transition-colors"
+          className="size-auto text-text-muted/40 hover:text-text-muted transition-colors"
         >
           <Plus className="size-3" strokeWidth={2} />
-        </button>
+        </Button>
       )}
     </div>
   );

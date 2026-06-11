@@ -1,7 +1,8 @@
-import { type JournalDateInfo, type JournalStreakInfo, type ActivityResponse } from "@/lib/api";
+import type { JournalDateInfo, JournalStreakInfo, ActivityResponse } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { AppDot } from "@/components/AppDot";
 import { Flame, Lightbulb, Download } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { MiniCalendarHeatmap } from "./MiniCalendarHeatmap";
 import { OpenTodosPanel } from "./OpenTodosPanel";
 import { AISummaryPanel } from "./AISummaryPanel";
@@ -125,13 +126,13 @@ export function JournalSidebar({
         )}
 
         {/* Export button */}
-        <button
+        <Button variant="outline"
           onClick={onShowExport}
-          className="w-full flex items-center justify-center gap-1.5 text-xs text-text-muted hover:text-text-secondary bg-surface-raised hover:bg-surface-overlay/50 border border-border/30 rounded-lg px-3 py-2 transition-all"
+          className="h-auto w-full flex items-center justify-center gap-1.5 text-xs text-text-muted hover:text-text-secondary bg-surface-raised hover:bg-surface-overlay/50 border border-border/30 rounded-lg px-3 py-2 transition-all"
         >
           <Download className="size-3" strokeWidth={2} />
           Export Journal
-        </button>
+        </Button>
 
         {/* Empty state for days with no data */}
         {activityData && activityData.total_screenshots === 0 && (

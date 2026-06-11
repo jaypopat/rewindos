@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronRight, Pencil } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { queryKeys } from "@/lib/query-keys";
@@ -32,16 +33,17 @@ function EditableTitle({ meeting }: { meeting: Meeting }) {
   }
 
   return (
-    <button type="button"
+    <Button type="button"
+      variant="quiet"
       onClick={() => renaming.start(meeting.id, meeting.title ?? "")}
-      className="group flex items-center gap-2.5 text-left"
+      className="h-auto p-0 group flex items-center gap-2.5 text-left"
       title="Rename meeting"
     >
       <h2 className="font-display text-[24px] tracking-tight text-text-primary">
         {meeting.title ?? "Untitled meeting"}
       </h2>
       <Pencil className="size-3.5 text-text-faint opacity-0 group-hover:opacity-100 transition-opacity" strokeWidth={1.7} />
-    </button>
+    </Button>
   );
 }
 
@@ -73,11 +75,12 @@ export function MeetingDetail({
           Expanded, it's capped so a long summary can't swallow the viewport. */}
       {meeting.summary && (
         <div className="border-b border-line shrink-0">
-          <button
+          <Button
             type="button"
+            variant="ghost"
             onClick={() => setMinutesOpen((v) => !v)}
             aria-expanded={minutesOpen}
-            className="flex w-full items-center gap-2 px-7 py-3 text-left transition-colors hover:bg-panel"
+            className="h-auto justify-start rounded-none flex w-full items-center gap-2 px-7 py-3 text-left hover:bg-panel"
           >
             <ChevronRight
               className={cn(
@@ -89,7 +92,7 @@ export function MeetingDetail({
             <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-text-muted">
               Minutes
             </span>
-          </button>
+          </Button>
           {minutesOpen && (
             <div className="max-h-[40vh] overflow-y-auto px-7 pb-5">
               <p className="max-w-[68ch] text-[13px] leading-[1.6] text-text-secondary whitespace-pre-wrap">

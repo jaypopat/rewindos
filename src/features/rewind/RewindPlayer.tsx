@@ -1,6 +1,7 @@
 import { getImageUrl, type TimelineEntry } from "@/lib/api";
 import { getAppColor } from "@/lib/app-colors";
 import { Maximize2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { formatTimeShort } from "@/features/rewind/rewind-utils";
 
 interface RewindPlayerProps {
@@ -28,13 +29,15 @@ export function RewindPlayer({
         )}
         {/* Expand button */}
         {currentScreenshot && (
-          <button
+          <Button
+            variant="ghost"
+            size="icon-sm"
             onClick={() => onSelectScreenshot(currentScreenshot.id, allIds)}
-            className="absolute top-2 right-2 p-1.5 rounded-md bg-black/50 text-white/80 hover:text-white hover:bg-black/70 transition-colors"
+            className="absolute top-2 right-2 p-1.5 rounded-md bg-black/50 text-white/80 hover:text-white hover:bg-black/70"
             title="View full detail (Enter)"
           >
             <Maximize2 className="size-4" strokeWidth={1.5} />
-          </button>
+          </Button>
         )}
       </div>
 

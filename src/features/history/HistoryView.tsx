@@ -2,6 +2,7 @@ import { useState, useMemo } from "react";
 import { cn } from "@/lib/utils";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Button } from "@/components/ui/button";
 import { CalendarIcon, Crosshair } from "lucide-react";
 
 import { useHistoryData } from "./hooks/useHistoryData";
@@ -32,63 +33,67 @@ export function HistoryView({ onSelectScreenshot, onRewindToRange }: HistoryView
           <h2 className="font-display text-xl text-text-primary">History</h2>
           <div className="flex gap-0.5 bg-surface-raised rounded-lg p-0.5">
             {(["apps", "timeline"] as const).map((m) => (
-              <button
+              <Button
+                variant="ghost"
                 key={m}
                 onClick={() => setMode(m)}
                 className={cn(
-                  "px-2.5 py-1 text-xs rounded-md transition-colors capitalize",
+                  "h-auto px-2.5 py-1 text-xs rounded-md capitalize",
                   m === mode
-                    ? "bg-accent/15 text-accent font-medium"
-                    : "text-text-muted hover:text-text-secondary",
+                    ? "bg-accent/15 text-accent font-medium hover:bg-accent/15 hover:text-accent"
+                    : "text-text-muted hover:text-text-secondary hover:bg-transparent",
                 )}
               >
                 {m === "apps" ? "Apps" : "Timeline"}
-              </button>
+              </Button>
             ))}
           </div>
           {mode === "timeline" && (
-            <button
+            <Button
+              variant="ghost"
               onClick={range.toggleRangeSelectMode}
               className={cn(
-                "flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-lg border transition-colors",
+                "flex items-center gap-1.5 h-auto px-2.5 py-1 text-xs rounded-lg border",
                 range.rangeSelectMode
-                  ? "bg-accent/15 border-accent/50 text-accent font-medium"
-                  : "border-border/50 text-text-muted hover:text-text-secondary hover:border-border",
+                  ? "bg-accent/15 border-accent/50 text-accent font-medium hover:bg-accent/15 hover:text-accent"
+                  : "border-border/50 text-text-muted hover:text-text-secondary hover:border-border hover:bg-transparent",
               )}
             >
               <Crosshair className="size-3" />
               Select Range
-            </button>
+            </Button>
           )}
         </div>
         <div className="flex items-center gap-2">
           <div className="flex gap-0.5 bg-surface-raised rounded-lg p-0.5">
             {RANGE_PRESETS.map((r, i) => (
-              <button
+              <Button
+                variant="ghost"
                 key={r.label}
                 onClick={() => {
                   setRangeIdx(i);
                   setCustomDate(null);
                 }}
                 className={cn(
-                  "px-3 py-1 text-xs rounded-md transition-colors",
+                  "h-auto px-3 py-1 text-xs rounded-md",
                   i === rangeIdx && !customDate
-                    ? "bg-accent/15 text-accent font-medium"
-                    : "text-text-muted hover:text-text-secondary",
+                    ? "bg-accent/15 text-accent font-medium hover:bg-accent/15 hover:text-accent"
+                    : "text-text-muted hover:text-text-secondary hover:bg-transparent",
                 )}
               >
                 {r.label}
-              </button>
+              </Button>
             ))}
           </div>
           <Popover>
             <PopoverTrigger asChild>
-              <button
+              <Button
+                variant="ghost"
                 className={cn(
-                  "flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-lg border bg-surface-raised transition-colors cursor-pointer",
+                  "flex items-center gap-1.5 h-auto px-2.5 py-1 text-xs rounded-lg border bg-surface-raised cursor-pointer",
                   customDate
-                    ? "border-accent/50 text-accent"
-                    : "border-border/50 text-text-muted hover:text-text-secondary",
+                    ? "border-accent/50 text-accent hover:text-accent hover:bg-surface-raised"
+                    : "border-border/50 text-text-muted hover:text-text-secondary hover:bg-surface-raised",
                 )}
               >
                 <CalendarIcon className="size-3" />
@@ -98,7 +103,7 @@ export function HistoryView({ onSelectScreenshot, onRewindToRange }: HistoryView
                       day: "numeric",
                     })
                   : "Pick date"}
-              </button>
+              </Button>
             </PopoverTrigger>
             <PopoverContent className="w-auto p-0" align="end">
               <Calendar

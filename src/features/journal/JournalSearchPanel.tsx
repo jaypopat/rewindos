@@ -6,6 +6,7 @@ import { queryKeys } from "@/lib/query-keys";
 import { useDebounce } from "@/hooks/useDebounce";
 import { Search, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { MOOD_EMOJIS } from "./constants";
 
 function Snippet({ html }: { html: string }) {
@@ -55,9 +56,9 @@ export function JournalSearchPanel({ onNavigate, onClose }: JournalSearchPanelPr
             placeholder="Search journal entries..."
             className="h-auto flex-1 rounded-none border-0 bg-transparent p-0 text-sm placeholder:text-text-muted/50"
           />
-          <button type="button" onClick={onClose} className="text-text-muted hover:text-text-secondary transition-colors">
+          <Button variant="quiet" size="icon-xs" type="button" onClick={onClose} className="size-auto text-text-muted hover:text-text-secondary transition-colors">
             <X className="size-3.5" strokeWidth={2} />
-          </button>
+          </Button>
         </div>
       </div>
 

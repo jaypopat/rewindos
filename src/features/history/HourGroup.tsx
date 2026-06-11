@@ -4,6 +4,7 @@ import { createCollection, getImageUrl } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { ChevronRight, FolderPlus, Trash2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { sampleEvenly, hourKeyToTimestamp } from "./history-utils";
 import type { HourGroup as HourGroupType } from "./history-utils";
 
@@ -154,45 +155,55 @@ export function HourGroupRow({
               placeholder="Collection name..."
               className="h-7 w-36 rounded bg-transparent px-2 text-xs"
             />
-            <button
+            <Button
+              variant="link"
+              size="xs"
               type="submit"
               disabled={!saveCollectionName.trim() || savingCollection}
-              className="text-accent hover:text-accent/80 text-xs font-medium disabled:opacity-40 transition-colors"
+              className="text-accent hover:text-accent/80 text-xs font-medium disabled:opacity-40 px-0 no-underline hover:no-underline"
             >
               Save
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="quiet"
+              size="xs"
               type="button"
               onClick={() => { setSaveCollectionKey(null); setSaveCollectionName(""); }}
-              className="text-text-muted hover:text-text-secondary text-xs transition-colors"
+              className="text-text-muted hover:text-text-secondary text-xs px-0"
             >
               Cancel
-            </button>
+            </Button>
           </form>
         ) : (
-          <button type="button"
+          <Button
+            variant="quiet"
+            size="icon-sm"
+            type="button"
             onClick={(e) => {
               e.stopPropagation();
               setSaveCollectionKey(group.key);
               setSaveCollectionName(group.label);
             }}
-            className="px-2 py-2.5 text-text-muted/60 hover:text-accent transition-colors shrink-0"
+            className="px-2 py-2.5 size-auto text-text-muted/60 hover:text-accent shrink-0"
             title={`Save ${group.label} as collection`}
           >
             <FolderPlus className="size-4" strokeWidth={1.5} />
-          </button>
+          </Button>
         )}
         {/* Delete hour button */}
-        <button type="button"
+        <Button
+          variant="quiet"
+          size="icon-sm"
+          type="button"
           onClick={(e) => {
             e.stopPropagation();
             onRequestDelete(group.key);
           }}
-          className="px-3 py-2.5 text-red-400/60 hover:text-red-400 transition-colors shrink-0"
+          className="px-3 py-2.5 size-auto text-red-400/60 hover:text-red-400 shrink-0"
           title={`Delete all captures from ${group.label}`}
         >
           <Trash2 className="size-4" strokeWidth={1.5} />
-        </button>
+        </Button>
       </div>
 
       {/* Expanded grid */}
@@ -242,12 +253,14 @@ export function HourGroupRow({
             ))}
           </div>
           {!showAll && remaining > 0 && (
-            <button type="button"
+            <Button
+              variant="link"
+              type="button"
               onClick={onShowAll}
-              className="mt-2 w-full py-1.5 text-xs text-accent hover:text-accent/80 font-medium transition-colors"
+              className="mt-2 w-full h-auto py-1.5 text-xs text-accent hover:text-accent/80 font-medium no-underline hover:no-underline"
             >
               Load {remaining} more screenshot{remaining !== 1 ? "s" : ""}
-            </button>
+            </Button>
           )}
         </div>
       )}

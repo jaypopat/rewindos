@@ -18,13 +18,15 @@ export function WizardShell({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/90 backdrop-blur-sm animate-in fade-in duration-300 ease-quiet">
       <div className="relative flex w-full max-w-xl flex-col gap-6 rounded-lg border border-border/60 bg-surface p-8 shadow-2xl">
-        <button
+        <Button
+          variant="editorial-muted"
+          size="editorial"
           onClick={onSkip}
-          className="absolute right-4 top-4 font-mono text-[11px] uppercase tracking-wider text-text-muted hover:text-text-primary transition-colors"
+          className="absolute right-4 top-4 border-0 px-0 py-0 text-[11px] hover:bg-transparent hover:text-text-primary"
           aria-label="Skip setup"
         >
           Skip
-        </button>
+        </Button>
 
         <div className="flex items-center gap-1.5" aria-hidden>
           {Array.from({ length: stepCount }).map((_, i) => (

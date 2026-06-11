@@ -5,6 +5,7 @@ import { queryKeys } from "@/lib/query-keys";
 import { dateToKey } from "@/lib/time-ranges";
 import { cn } from "@/lib/utils";
 import { Sparkles, RefreshCw } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import {
   startOfMonth,
   endOfMonth,
@@ -62,24 +63,24 @@ export function AISummaryPanel({ selectedDate }: AISummaryPanelProps) {
           AI Summary
         </h3>
         <div className="flex gap-0.5 bg-surface-raised rounded p-0.5">
-          <button
+          <Button variant="quiet"
             onClick={() => setTab("week")}
             className={cn(
-              "px-2 py-0.5 text-[10px] rounded transition-colors",
+              "h-auto px-2 py-0.5 text-[10px] rounded transition-colors",
               tab === "week" ? "bg-accent/15 text-accent" : "text-text-muted hover:text-text-secondary",
             )}
           >
             Week
-          </button>
-          <button
+          </Button>
+          <Button variant="quiet"
             onClick={() => setTab("month")}
             className={cn(
-              "px-2 py-0.5 text-[10px] rounded transition-colors",
+              "h-auto px-2 py-0.5 text-[10px] rounded transition-colors",
               tab === "month" ? "bg-accent/15 text-accent" : "text-text-muted hover:text-text-secondary",
             )}
           >
             Month
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -98,13 +99,13 @@ export function AISummaryPanel({ selectedDate }: AISummaryPanelProps) {
           <div className="flex items-center gap-2 text-[10px] text-text-muted">
             <span className="font-mono">{summary.entry_count} entries</span>
             {summary.cached && <span className="text-text-muted/50">cached</span>}
-            <button
+            <Button variant="quiet" size="icon-xs"
               onClick={() => refetch()}
-              className="ml-auto text-text-muted hover:text-accent transition-colors"
+              className="ml-auto size-auto text-text-muted hover:text-accent transition-colors"
               title="Regenerate"
             >
               <RefreshCw className="size-3" strokeWidth={2} />
-            </button>
+            </Button>
           </div>
         </div>
       ) : null}

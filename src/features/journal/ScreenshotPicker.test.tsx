@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, waitFor, act, fireEvent, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import React from "react";
 import type { TimelineEntry } from "@/lib/api";
 
 vi.mock("@/lib/api", () => ({

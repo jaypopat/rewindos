@@ -24,6 +24,7 @@ import { toUIMessages, type ChatToolPart } from "@/lib/chat-messages";
 import { getScreenshotsByIds, type ChatMessageRow } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import { decodeAttachments, stripMarker } from "@/lib/attachments";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { parseTextWithRefs, collectRefs } from "@/lib/citations";
 import { CitationChip } from "./CitationChip";
@@ -182,11 +183,13 @@ function CompactToolCall({ part }: { part: ChatToolPart }) {
 
   return (
     <div className="font-mono text-[11px]">
-      <button
+      <Button
+        variant="quiet"
+        size="xs"
         type="button"
         onClick={() => setOpen((o) => !o)}
         className={cn(
-          "group flex items-center gap-1.5 max-w-full transition-colors",
+          "group flex items-center gap-1.5 max-w-full h-auto px-0 py-0 font-mono transition-colors",
           isError
             ? "text-signal-error/80 hover:text-signal-error"
             : "text-text-muted/80 hover:text-text-secondary",
@@ -208,7 +211,7 @@ function CompactToolCall({ part }: { part: ChatToolPart }) {
             strokeWidth={2}
           />
         )}
-      </button>
+      </Button>
       {open && (
         <div className="mt-1.5 ml-4 space-y-1.5">
           <ToolDetail label="args" body={JSON.stringify(part.input, null, 2)} />

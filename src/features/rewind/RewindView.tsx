@@ -4,6 +4,7 @@ import { deleteScreenshotsInRange } from "@/lib/api";
 import { formatDuration } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { CalendarIcon } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
@@ -182,29 +183,31 @@ export function RewindView({ onSelectScreenshot, initialTimeRange, onClearInitia
         <div className="flex items-center gap-2">
           <div className="flex gap-0.5 bg-surface-raised rounded-lg p-0.5">
             {TIME_RANGES.map((tr, i) => (
-              <button
+              <Button
                 key={tr.label}
+                variant="quiet"
                 onClick={() => {
                   setRangeIdx(i);
                   setCustomDate(null);
                   clearFixedRange();
                 }}
                 className={cn(
-                  "px-3 py-1 text-xs rounded-md transition-colors",
+                  "h-auto px-3 py-1 text-xs rounded-md",
                   i === rangeIdx && !customDate && !fixedRange
                     ? "bg-accent/15 text-accent font-medium"
                     : "text-text-muted hover:text-text-secondary",
                 )}
               >
                 {tr.label}
-              </button>
+              </Button>
             ))}
           </div>
           <Popover>
             <PopoverTrigger asChild>
-              <button
+              <Button
+                variant="outline"
                 className={cn(
-                  "flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-lg border bg-surface-raised transition-colors cursor-pointer",
+                  "h-auto flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-lg border bg-surface-raised cursor-pointer",
                   customDate
                     ? "border-accent/50 text-accent"
                     : "border-border/50 text-text-muted hover:text-text-secondary",
@@ -217,7 +220,7 @@ export function RewindView({ onSelectScreenshot, initialTimeRange, onClearInitia
                       day: "numeric",
                     })
                   : "Pick date"}
-              </button>
+              </Button>
             </PopoverTrigger>
             <PopoverContent className="w-auto p-0" align="end">
               <Calendar
@@ -236,14 +239,16 @@ export function RewindView({ onSelectScreenshot, initialTimeRange, onClearInitia
             </PopoverContent>
           </Popover>
           {fixedRange && (
-            <button
+            <Button
+              variant="editorial-accent"
+              size="editorial"
               onClick={clearFixedRange}
-              className="flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-lg border border-accent/50 bg-accent/10 text-accent hover:bg-accent/20 transition-colors"
+              className="flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-lg border-accent/50 bg-accent/10 hover:bg-accent/20 font-sans"
               title="Clear moment range"
             >
               {formatMomentRange(fixedRange.start, fixedRange.end)}
               <span className="text-accent/60">&times;</span>
-            </button>
+            </Button>
           )}
         </div>
       </div>

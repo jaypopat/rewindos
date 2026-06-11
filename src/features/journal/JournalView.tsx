@@ -2,6 +2,7 @@ import { useCallback, useRef } from "react";
 import { cn } from "@/lib/utils";
 import { queryKeys } from "@/lib/query-keys";
 import { ChevronLeft, ChevronRight, Search, Paperclip } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 import { useJournalEntry } from "./hooks/useJournalEntry";
 import { JournalEditor, type JournalEditorHandle } from "./JournalEditor";
@@ -46,27 +47,27 @@ export function JournalView({ onSelectScreenshot }: JournalViewProps) {
       <div className="flex-1 flex flex-col min-w-0 border-r border-border/50">
         {/* Date nav + search */}
         <div className="flex items-center gap-2 px-5 py-3 border-b border-border/50 shrink-0">
-          <button
+          <Button variant="quiet" size="icon-sm"
             onClick={j.goToPrev}
             title="Previous day (Alt+←)"
-            className="p-1 text-text-muted hover:text-text-secondary transition-colors"
+            className="size-auto p-1 text-text-muted hover:text-text-secondary transition-colors"
           >
             <ChevronLeft className="size-4" strokeWidth={2} />
-          </button>
-          <button
+          </Button>
+          <Button variant="ghost"
             onClick={j.goToToday}
             title="Jump to today"
-            className="text-sm font-medium text-text-primary hover:text-accent transition-colors min-w-[140px] text-center"
+            className="h-auto p-0 text-sm font-medium text-text-primary hover:text-accent hover:bg-transparent transition-colors min-w-[140px] text-center"
           >
             {j.formattedDate}
-          </button>
-          <button
+          </Button>
+          <Button variant="quiet" size="icon-sm"
             onClick={j.goToNext}
             title="Next day (Alt+→)"
-            className="p-1 text-text-muted hover:text-text-secondary transition-colors"
+            className="size-auto p-1 text-text-muted hover:text-text-secondary transition-colors"
           >
             <ChevronRight className="size-4" strokeWidth={2} />
-          </button>
+          </Button>
 
           {j.isToday && (
             <span className="text-[10px] font-mono text-accent bg-accent/10 px-1.5 py-0.5 rounded">today</span>
@@ -76,16 +77,16 @@ export function JournalView({ onSelectScreenshot }: JournalViewProps) {
 
           {j.isSaving && <span className="text-[10px] text-text-muted font-mono">saving...</span>}
 
-          <button
+          <Button variant="quiet" size="icon-sm"
             onClick={() => j.setShowSearch(!j.showSearch)}
             className={cn(
-              "p-1.5 rounded-md transition-colors",
+              "size-auto p-1.5 rounded-md transition-colors",
               j.showSearch ? "bg-accent/15 text-accent" : "text-text-muted hover:text-text-secondary",
             )}
             title="Search journal"
           >
             <Search className="size-3.5" strokeWidth={2} />
-          </button>
+          </Button>
         </div>
 
         {/* Tag editor */}
@@ -160,13 +161,13 @@ export function JournalView({ onSelectScreenshot }: JournalViewProps) {
 
         {/* Bottom bar: attach + writing stats */}
         <div className="flex items-center gap-3 px-5 py-2 border-t border-border/50 shrink-0">
-          <button
+          <Button variant="quiet"
             onClick={() => j.setShowScreenshotPicker(!j.showScreenshotPicker)}
-            className="flex items-center gap-1.5 text-xs text-text-muted hover:text-text-secondary transition-colors"
+            className="h-auto p-0 flex items-center gap-1.5 text-xs text-text-muted hover:text-text-secondary transition-colors"
           >
             <Paperclip className="size-3" strokeWidth={2} />
             {j.showScreenshotPicker ? "Close" : "Attach"}
-          </button>
+          </Button>
           {j.journalScreenshots.length > 0 && (
             <span className="text-[10px] text-text-muted font-mono">{j.journalScreenshots.length} attached</span>
           )}

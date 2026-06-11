@@ -91,14 +91,15 @@ export function CollectionDetailView({
                   {formatDuration(collection.end_time - collection.start_time)}
                 </span>
                 {onRewindToRange && (
-                  <button
+                  <Button
+                    variant="ghost"
                     onClick={() => onRewindToRange(collection.start_time!, collection.end_time!)}
-                    className="flex items-center gap-1 px-2 py-1 text-xs text-accent hover:bg-accent/10 rounded-md transition-colors"
+                    className="h-auto flex items-center gap-1 px-2 py-1 text-xs text-accent hover:bg-accent/10 rounded-md"
                     title="Rewind this moment"
                   >
                     <Rewind className="size-3" strokeWidth={1.5} />
                     Rewind
-                  </button>
+                  </Button>
                 )}
               </div>
             )}
@@ -109,13 +110,14 @@ export function CollectionDetailView({
         )}
 
         <div className="ml-auto">
-          <button
+          <Button
+            variant="quiet"
             onClick={() => setConfirmDelete(true)}
-            className="p-1.5 text-text-muted hover:text-red-400 transition-colors"
+            className="h-auto p-1.5 text-text-muted hover:text-red-400"
             title="Delete moment"
           >
             <Trash2 className="size-4" strokeWidth={1.5} />
-          </button>
+          </Button>
         </div>
       </div>
 

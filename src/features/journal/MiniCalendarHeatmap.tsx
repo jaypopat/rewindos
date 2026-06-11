@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { dateToKey } from "@/lib/time-ranges";
-import { type JournalDateInfo } from "@/lib/api";
+import type { JournalDateInfo } from "@/lib/api";
 import { ChevronLeft, ChevronRight } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import {
   format,
   startOfMonth,
@@ -42,21 +43,21 @@ export function MiniCalendarHeatmap({
   return (
     <div>
       <div className="flex items-center justify-between mb-2">
-        <button
+        <Button variant="quiet" size="icon-xs"
           onClick={() => setViewMonth((m) => subMonths(m, 1))}
-          className="p-0.5 text-text-muted hover:text-text-secondary transition-colors"
+          className="size-auto p-0.5 text-text-muted hover:text-text-secondary transition-colors"
         >
           <ChevronLeft className="size-3.5" strokeWidth={2} />
-        </button>
+        </Button>
         <span className="text-xs font-medium text-text-secondary">
           {format(viewMonth, "MMMM yyyy")}
         </span>
-        <button
+        <Button variant="quiet" size="icon-xs"
           onClick={() => setViewMonth((m) => addMonths(m, 1))}
-          className="p-0.5 text-text-muted hover:text-text-secondary transition-colors"
+          className="size-auto p-0.5 text-text-muted hover:text-text-secondary transition-colors"
         >
           <ChevronRight className="size-3.5" strokeWidth={2} />
-        </button>
+        </Button>
       </div>
 
       {/* Day headers */}

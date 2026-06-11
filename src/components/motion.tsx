@@ -82,7 +82,7 @@ export function useCountUp(target: number, { dur = 1000 }: { dur?: number } = {}
       return;
     }
     setVal(0);
-    const ease = (t: number) => 1 - Math.pow(1 - t, 3);
+    const ease = (t: number) => 1 - (1 - t) ** 3;
     const steps = Math.max(1, Math.round(dur / 40));
     let n = 0;
     const id = setInterval(() => {

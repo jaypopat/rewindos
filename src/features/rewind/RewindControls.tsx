@@ -1,5 +1,6 @@
 import { Play, Pause, Scissors, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 import { SPEEDS } from "@/features/rewind/rewind-utils";
 
 interface RewindControlsProps {
@@ -30,9 +31,11 @@ export function RewindControls({
   return (
     <div className="shrink-0 border-t border-border/30 px-5 py-2 flex items-center gap-3">
       {/* Play/Pause */}
-      <button
+      <Button
+        variant="ghost"
+        size="icon-sm"
         onClick={() => setIsPlaying((p) => !p)}
-        className="p-1.5 rounded-md hover:bg-surface-raised transition-colors text-text-secondary hover:text-text-primary"
+        className="p-1.5 rounded-md hover:bg-surface-raised text-text-secondary hover:text-text-primary"
         title={isPlaying ? "Pause (Space)" : "Play (Space)"}
       >
         {isPlaying ? (
@@ -40,23 +43,24 @@ export function RewindControls({
         ) : (
           <Play className="size-4" strokeWidth={2} />
         )}
-      </button>
+      </Button>
 
       {/* Speed toggles */}
       <div className="flex gap-0.5 bg-surface-raised/60 rounded-md p-0.5">
         {SPEEDS.map((s) => (
-          <button
+          <Button
             key={s}
+            variant="quiet"
             onClick={() => setPlaybackSpeed(s)}
             className={cn(
-              "px-2 py-0.5 text-[11px] rounded transition-colors font-mono",
+              "h-auto px-2 py-0.5 text-[11px] rounded font-mono",
               playbackSpeed === s
                 ? "bg-accent/15 text-accent font-medium"
                 : "text-text-muted hover:text-text-secondary",
             )}
           >
             {s}x
-          </button>
+          </Button>
         ))}
       </div>
 
@@ -64,10 +68,11 @@ export function RewindControls({
       <div className="w-px h-4 bg-border/30" />
 
       {/* Range select toggle */}
-      <button
+      <Button
+        variant="ghost"
         onClick={onToggleRangeMode}
         className={cn(
-          "flex items-center gap-1.5 px-2 py-1 text-xs rounded-md transition-colors",
+          "h-auto flex items-center gap-1.5 px-2 py-1 text-xs rounded-md",
           rangeMode
             ? "bg-red-500/15 text-red-400"
             : "text-text-muted hover:text-text-secondary hover:bg-surface-raised",
@@ -76,7 +81,7 @@ export function RewindControls({
       >
         <Scissors className="size-3.5" strokeWidth={1.8} />
         {rangeMode ? "Cancel" : "Select Range"}
-      </button>
+      </Button>
 
       {/* Range action */}
       {rangeSelFractions && rangeSelFractions.count >= 1 && (
@@ -84,13 +89,14 @@ export function RewindControls({
           <span className="text-xs text-text-muted">
             {rangeSelFractions.count} selected
           </span>
-          <button
+          <Button
+            variant="ghost"
             onClick={onDeleteClick}
-            className="flex items-center gap-1 px-2 py-1 text-xs rounded-md bg-red-500/15 text-red-400 hover:bg-red-500/25 transition-colors"
+            className="h-auto flex items-center gap-1 px-2 py-1 text-xs rounded-md bg-red-500/15 text-red-400 hover:bg-red-500/25"
           >
             <Trash2 className="size-3.5" strokeWidth={1.8} />
             Delete
-          </button>
+          </Button>
         </>
       )}
 

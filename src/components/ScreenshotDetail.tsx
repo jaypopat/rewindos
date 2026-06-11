@@ -134,27 +134,31 @@ export function ScreenshotDetail({ screenshotId, onBack, searchQuery, screenshot
         {canNavigate && (
           <>
             <div className="flex items-center gap-1">
-              <button
+              <Button
+                variant="quiet"
+                size="icon-xs"
                 onClick={() => hasPrev && onNavigate!(screenshotIds[currentIndex - 1])}
                 disabled={!hasPrev}
-                className="p-1 text-text-muted hover:text-text-primary disabled:opacity-30 disabled:cursor-default transition-colors"
+                className="p-1 hover:text-text-primary disabled:opacity-30"
               >
                 <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
                 </svg>
-              </button>
+              </Button>
               <span className="text-[10px] text-text-muted font-mono tabular-nums">
                 {currentIndex + 1}/{screenshotIds.length}
               </span>
-              <button
+              <Button
+                variant="quiet"
+                size="icon-xs"
                 onClick={() => hasNext && onNavigate!(screenshotIds[currentIndex + 1])}
                 disabled={!hasNext}
-                className="p-1 text-text-muted hover:text-text-primary disabled:opacity-30 disabled:cursor-default transition-colors"
+                className="p-1 hover:text-text-primary disabled:opacity-30"
               >
                 <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
                 </svg>
-              </button>
+              </Button>
             </div>
             <div className="w-px h-4 bg-border/50" />
           </>

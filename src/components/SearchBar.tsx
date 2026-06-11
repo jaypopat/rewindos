@@ -7,6 +7,8 @@ import { DATE_PRESETS } from "@/lib/date-presets";
 import { AppDot } from "./AppDot";
 import { Search, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 
 interface SearchBarProps {
   query: string;
@@ -58,62 +60,66 @@ export function SearchBar(
             }}
           />
           {query && (
-            <button type="button"
+            <Button
+              variant="quiet"
+              size="icon-xs"
+              type="button"
               onClick={() => onQueryChange("")}
-              className="text-text-muted hover:text-text-secondary transition-colors"
             >
               <X className="size-4" strokeWidth={1.7} />
-            </button>
+            </Button>
           )}
         </div>
 
         {/* Controls row */}
         <div className="flex items-center gap-2 flex-wrap mt-[22px]">
           {DATE_PRESETS.map((preset, i) => (
-            <button type="button"
+            <Button
+              variant="ghost"
+              type="button"
               key={preset.label}
               onClick={() => onDatePresetChange(i)}
               className={chipClass(datePreset === i)}
             >
               {preset.label}
-            </button>
+            </Button>
           ))}
 
           {appNames && appNames.length > 0 && (
             <>
               <span className="w-px h-5 bg-line-2 mx-1" />
-              <button type="button" onClick={() => onAppFilterChange(undefined)} className={chipClass(!appFilter)}>
+              <Button variant="ghost" type="button" onClick={() => onAppFilterChange(undefined)} className={chipClass(!appFilter)}>
                 All apps
-              </button>
+              </Button>
               {appNames.slice(0, 8).map((name) => (
-                <button type="button"
+                <Button
+                  variant="ghost"
+                  type="button"
                   key={name}
                   onClick={() => onAppFilterChange(appFilter === name ? undefined : name)}
                   className={chipClass(appFilter === name)}
                 >
                   <AppDot appName={name} size={6} />
                   {name}
-                </button>
+                </Button>
               ))}
               {appNames.length > 8 && (
-                <select
-                  value={appFilter && !appNames.slice(0, 8).includes(appFilter) ? appFilter : ""}
-                  onChange={(e) => onAppFilterChange(e.target.value || undefined)}
-                  className="h-[30px] px-3 pr-6 rounded-[7px] text-[12.5px] font-[450] bg-transparent border border-line-2 text-text-secondary cursor-pointer focus:outline-none hover:border-line-hi appearance-none"
-                  style={{
-                    backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%236a6457' stroke-width='2'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='m19.5 8.25-7.5 7.5-7.5-7.5'/%3E%3C/svg%3E")`,
-                    backgroundRepeat: "no-repeat",
-                    backgroundPosition: "right 6px center",
-                    backgroundSize: "10px",
-                  }}
+                <Select
+                  value={appFilter && !appNames.slice(0, 8).includes(appFilter) ? appFilter : "__more__"}
+                  onValueChange={(value) => onAppFilterChange(value === "__more__" ? undefined : value)}
                 >
-                  <option value="">More…</option>
-                  {appNames.slice(8).map((name) => (
-                    <option key={name} value={name}>
-                      {name}
-                    </option>
-                  ))}
-                </select>
+                  <SelectTrigger className="h-[30px] px-3 rounded-[7px] text-[12.5px] font-[450] bg-transparent border border-line-2 text-text-secondary cursor-pointer hover:border-line-hi">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__more__">More…</SelectItem>
+                    {appNames.slice(8).map((name) => (
+                      <SelectItem key={name} value={name}>
+                        {name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               )}
             </>
           )}

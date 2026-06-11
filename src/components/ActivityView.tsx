@@ -7,6 +7,7 @@ import { StatCard } from "./StatCard";
 import { HeatmapCalendar } from "./charts/HeatmapCalendar";
 import { WeeklyHeatmap } from "./charts/WeeklyHeatmap";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 
 const AppDonutChart = lazy(() =>
   import("./charts/AppDonutChart").then((m) => ({ default: m.AppDonutChart })),
@@ -64,18 +65,19 @@ export function ActivityView() {
         </div>
         <div className="flex gap-0.5 bg-surface-raised rounded-lg p-0.5">
           {RANGES.map((r, i) => (
-            <button
+            <Button
+              variant="ghost"
               key={r.label}
               onClick={() => setRangeIdx(i)}
               className={cn(
-                "px-3 py-1 text-xs rounded-md transition-colors",
+                "h-auto px-3 py-1 text-xs rounded-md",
                 i === rangeIdx
                   ? "bg-accent/15 text-accent font-medium"
                   : "text-text-muted hover:text-text-secondary"
               )}
             >
               {r.label}
-            </button>
+            </Button>
           ))}
         </div>
       </div>

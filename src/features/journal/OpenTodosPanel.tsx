@@ -5,6 +5,7 @@ import { queryKeys } from "@/lib/query-keys";
 import { dateToKey } from "@/lib/time-ranges";
 import { subDays, format, parseISO } from "date-fns";
 import { CheckSquare } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 interface OpenTodosPanelProps {
   onSelectDate: (d: Date) => void;
@@ -52,12 +53,12 @@ export function OpenTodosPanel({ onSelectDate }: OpenTodosPanelProps) {
       <div className="space-y-2">
         {Array.from(grouped.entries()).map(([date, items]) => (
           <div key={date}>
-            <button
+            <Button variant="quiet"
               onClick={() => onSelectDate(parseISO(date + "T12:00:00"))}
-              className="text-[10px] font-mono text-text-muted hover:text-accent transition-colors mb-0.5"
+              className="h-auto p-0 text-[10px] font-mono text-text-muted hover:text-accent transition-colors mb-0.5"
             >
               {format(parseISO(date), "EEE, MMM d")}
-            </button>
+            </Button>
             <div className="space-y-0.5">
               {items.map((todo, i) => (
                 <button

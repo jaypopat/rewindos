@@ -3,6 +3,7 @@ import { isBookmarked, toggleBookmark } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import { Star } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 
 interface BookmarkButtonProps {
   screenshotId: number;
@@ -38,13 +39,15 @@ export function BookmarkButton({ screenshotId, size = "sm", className }: Bookmar
   const iconSize = size === "sm" ? "size-3.5" : "size-4";
 
   return (
-    <button
+    <Button
+      variant="quiet"
+      size="icon-xs"
       onClick={(e) => {
         e.stopPropagation();
         mutation.mutate();
       }}
       className={cn(
-        "transition-colors",
+        "size-auto",
         bookmarked
           ? "text-yellow-400 hover:text-yellow-300"
           : "text-text-muted hover:text-yellow-400",
@@ -57,6 +60,6 @@ export function BookmarkButton({ screenshotId, size = "sm", className }: Bookmar
         strokeWidth={1.5}
         fill={bookmarked ? "currentColor" : "none"}
       />
-    </button>
+    </Button>
   );
 }

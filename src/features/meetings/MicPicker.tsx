@@ -111,7 +111,7 @@ export function MicPicker({ active }: { active: boolean }) {
       </Select>
 
       {active ? (
-        <span className="inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.1em] text-signal-error">
+        <span className="inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-widest text-signal-error">
           <span className="size-1.5 rounded-full bg-signal-error animate-led-pulse" />
           recording
         </span>

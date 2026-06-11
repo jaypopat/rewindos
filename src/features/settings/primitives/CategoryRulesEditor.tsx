@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 
 const DEFAULT_CATEGORIES = [
   "Development", "Browsing", "Communication", "Media", "Productivity", "System",
@@ -65,12 +66,14 @@ export function CategoryRulesEditor({
                   placeholder="add keyword..."
                   className="h-6 flex-1 rounded-none px-2 text-[11px] font-mono"
                 />
-                <button type="button"
+                <Button type="button"
+                  variant="editorial-accent"
+                  size="editorial"
                   onClick={() => addKeyword(cat)}
-                  className="px-1.5 py-0.5 font-mono text-[10px] text-accent border border-accent/30 hover:bg-accent/10"
+                  className="h-auto px-1.5 py-0.5 text-[10px]"
                 >
                   +
-                </button>
+                </Button>
               </div>
             </div>
           );
@@ -88,12 +91,14 @@ export function CategoryRulesEditor({
                   placeholder="add keyword..."
                   className="h-6 flex-1 rounded-none px-2 text-[11px] font-mono"
                 />
-                <button type="button"
+                <Button type="button"
+                  variant="editorial-accent"
+                  size="editorial"
                   onClick={() => addKeyword(cat)}
-                  className="px-1.5 py-0.5 font-mono text-[10px] text-accent border border-accent/30 hover:bg-accent/10"
+                  className="h-auto px-1.5 py-0.5 text-[10px]"
                 >
                   +
-                </button>
+                </Button>
               </div>
             </div>
             {keywords.length > 0 && (
@@ -101,9 +106,9 @@ export function CategoryRulesEditor({
                 {keywords.map((kw, i) => (
                   <span key={kw} className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-surface-overlay text-[10px] font-mono text-text-secondary">
                     {kw}
-                    <button type="button" onClick={() => removeKeyword(cat, i)} className="text-text-muted hover:text-signal-error text-[10px]">
+                    <Button type="button" variant="quiet" size="editorial" onClick={() => removeKeyword(cat, i)} className="h-auto p-0 text-text-muted hover:text-signal-error text-[10px]">
                       x
-                    </button>
+                    </Button>
                   </span>
                 ))}
               </div>
@@ -120,12 +125,14 @@ export function CategoryRulesEditor({
           placeholder="New category name..."
           className="h-7 flex-1 rounded-none px-2 text-xs font-mono"
         />
-        <button type="button"
+        <Button type="button"
+          variant="editorial-accent"
+          size="editorial"
           onClick={addCategory}
-          className="px-2 py-1 font-mono text-[10px] text-accent border border-accent/30 hover:bg-accent/10"
+          className="h-auto px-2 py-1 text-[10px]"
         >
           + Category
-        </button>
+        </Button>
       </div>
     </div>
   );

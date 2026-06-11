@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Copy, RefreshCw, Check } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 interface MessageActionsProps {
@@ -41,14 +42,16 @@ function ActionButton({
   label: string;
 }) {
   return (
-    <button
+    <Button
+      variant="quiet"
+      size="xs"
       type="button"
       onClick={onClick}
       disabled={disabled}
       title={label}
       aria-label={label}
       className={cn(
-        "flex items-center gap-1 px-1.5 py-0.5",
+        "flex items-center gap-1 px-1.5 py-0.5 h-auto",
         "font-mono text-[10px] uppercase tracking-wider",
         "text-text-muted hover:text-text-primary border border-transparent hover:border-border/40",
         "disabled:opacity-40 disabled:hover:text-text-muted disabled:hover:border-transparent",
@@ -57,6 +60,6 @@ function ActionButton({
     >
       {children}
       <span>{label}</span>
-    </button>
+    </Button>
   );
 }

@@ -2,7 +2,7 @@ import { useCallback, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { updateConfig } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
-import { type AppConfig } from "@/lib/config";
+import type { AppConfig } from "@/lib/config";
 import { useConfigQuery } from "@/hooks/useConfigQuery";
 
 export function useConfig() {

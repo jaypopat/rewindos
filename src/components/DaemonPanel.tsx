@@ -9,6 +9,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { RefreshCw } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 export function DaemonPanel() {
   const queryClient = useQueryClient();
@@ -46,14 +47,15 @@ export function DaemonPanel() {
       <TooltipProvider>
         <Tooltip>
           <TooltipTrigger asChild>
-            <button
+            <Button
+              variant="ghost"
               onClick={() => queryClient.invalidateQueries({ queryKey: queryKeys.daemonStatus() })}
-              className="flex items-center gap-2 text-xs font-mono text-signal-error/80 hover:text-signal-error transition-colors"
+              className="h-auto p-0 flex items-center gap-2 text-xs font-mono text-signal-error/80 hover:text-signal-error hover:bg-transparent"
             >
               <span className="h-2 w-2 bg-signal-error" />
               daemon offline
               <RefreshCw className="size-3 text-text-muted" strokeWidth={2} />
-            </button>
+            </Button>
           </TooltipTrigger>
           <TooltipContent>
             <div className="space-y-1 text-xs">
@@ -103,10 +105,11 @@ export function DaemonPanel() {
         {/* Capture toggle */}
         <Tooltip>
           <TooltipTrigger asChild>
-            <button
+            <Button
+              variant="ghost"
               onClick={handleToggle}
               disabled={isToggling}
-              className="flex items-center gap-1.5 text-text-secondary hover:text-text-primary transition-colors disabled:opacity-50"
+              className="h-auto p-0 flex items-center gap-1.5 text-text-secondary hover:text-text-primary hover:bg-transparent"
             >
               <span className="relative flex h-2 w-2">
                 {display.ping && (
@@ -115,7 +118,7 @@ export function DaemonPanel() {
                 <span className={`relative inline-flex h-2 w-2 ${display.color}`} />
               </span>
               {display.label}
-            </button>
+            </Button>
           </TooltipTrigger>
           <TooltipContent>{toggleHint}{reasonHint}</TooltipContent>
         </Tooltip>

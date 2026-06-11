@@ -3,6 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { deleteScreenshotsInRange } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import { Play } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { HourGroupRow } from "./HourGroup";
 import { RangeSelectToolbar } from "./RangeSelectToolbar";
 import type { DayGroup, HourGroup } from "./history-utils";
@@ -138,20 +139,22 @@ export function TimelineMode({
                   <span className="font-mono font-medium text-text-primary">{targetGroup.label}</span>, including their OCR data and files on disk.
                 </p>
                 <div className="flex gap-2 justify-end">
-                  <button
+                  <Button
+                    variant="outline"
                     onClick={() => setConfirmDeleteKey(null)}
                     disabled={deleting}
-                    className="px-3 py-1.5 text-sm rounded-lg border border-border text-text-secondary hover:bg-surface-raised transition-colors"
+                    className="h-auto px-3 py-1.5 text-sm rounded-lg border border-border text-text-secondary hover:bg-surface-raised"
                   >
                     Cancel
-                  </button>
-                  <button
+                  </Button>
+                  <Button
+                    variant="destructive"
                     onClick={() => handleDeleteHour(targetGroup!)}
                     disabled={deleting}
-                    className="px-3 py-1.5 text-sm rounded-lg bg-red-500/90 hover:bg-red-500 text-white font-medium transition-colors disabled:opacity-50"
+                    className="h-auto px-3 py-1.5 text-sm rounded-lg bg-red-500/90 hover:bg-red-500 text-white font-medium disabled:opacity-50"
                   >
                     {deleting ? "Deleting..." : "Delete"}
-                  </button>
+                  </Button>
                 </div>
               </div>
             </div>
@@ -167,16 +170,18 @@ export function TimelineMode({
                 {day.totalEntries} capture{day.totalEntries !== 1 ? "s" : ""} across {day.hours.length} hour{day.hours.length !== 1 ? "s" : ""}
               </span>
               {onRewindToRange && (
-                <button
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
                   onClick={() => {
                     const dayStart = Math.floor(new Date(day.date + "T00:00:00").getTime() / 1000);
                     onRewindToRange(dayStart, dayStart + 86400);
                   }}
-                  className="p-1 text-text-muted hover:text-accent transition-colors rounded-md hover:bg-accent/10"
+                  className="p-1 size-auto text-text-muted hover:text-accent rounded-md hover:bg-accent/10"
                   title={`Rewind ${day.label}`}
                 >
                   <Play className="size-3.5" />
-                </button>
+                </Button>
               )}
               <div className="flex-1 h-px bg-border/30" />
             </div>

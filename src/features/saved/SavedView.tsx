@@ -7,6 +7,7 @@ import {
   updateCollection,
 } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
+import { Button } from "@/components/ui/button";
 import { BookmarkButton } from "@/components/BookmarkButton";
 import { CollectionDetailView } from "./CollectionDetailView";
 import { SaveMomentDialog } from "./SaveMomentDialog";
@@ -103,29 +104,32 @@ export function SavedView({ onSelectScreenshot, onRewindToRange, selectedCollect
           <h2 className="font-display text-xl text-text-primary">Saved</h2>
           <div className="flex gap-0.5 bg-surface-raised rounded-lg p-0.5">
             {(["favorites", "moments"] as const).map((t) => (
-              <button type="button"
+              <Button type="button"
                 key={t}
+                variant="quiet"
                 onClick={() => setTab(t)}
                 className={cn(
-                  "px-2.5 py-1 text-xs rounded-md transition-colors capitalize",
+                  "h-auto px-2.5 py-1 text-xs rounded-md capitalize",
                   t === tab
                     ? "bg-accent/15 text-accent font-medium"
                     : "text-text-muted hover:text-text-secondary",
                 )}
               >
                 {t}
-              </button>
+              </Button>
             ))}
           </div>
         </div>
         {tab === "moments" && (
-          <button type="button"
+          <Button type="button"
+            variant="editorial-accent"
+            size="editorial"
             onClick={() => setShowNewMoment(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-accent/10 text-accent hover:bg-accent/20 rounded-lg transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs border-transparent bg-accent/10 hover:bg-accent/20 rounded-lg font-sans"
           >
             <Plus className="size-3" strokeWidth={2} />
             New Moment
-          </button>
+          </Button>
         )}
       </div>
 
@@ -242,25 +246,27 @@ export function SavedView({ onSelectScreenshot, onRewindToRange, selectedCollect
                       </span>
                     </div>
                   </button>
-                  <button type="button"
+                  <Button type="button"
+                    variant="quiet"
                     onClick={(e) => {
                       e.stopPropagation();
                       renaming.start(col.id, col.name);
                     }}
-                    className="p-1.5 text-text-muted hover:text-text-primary opacity-0 group-hover:opacity-100 transition-all"
+                    className="h-auto p-1.5 text-text-muted hover:text-text-primary opacity-0 group-hover:opacity-100 transition-all"
                     title="Rename moment"
                   >
                     <Pencil className="size-3.5" strokeWidth={1.5} />
-                  </button>
-                  <button type="button"
+                  </Button>
+                  <Button type="button"
+                    variant="quiet"
                     onClick={(e) => {
                       e.stopPropagation();
                       setConfirmDeleteId(col.id);
                     }}
-                    className="p-1.5 text-text-muted hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all"
+                    className="h-auto p-1.5 text-text-muted hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all"
                   >
                     <Trash2 className="size-3.5" strokeWidth={1.5} />
-                  </button>
+                  </Button>
                 </div>
               ))}
               </>

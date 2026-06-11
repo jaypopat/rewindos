@@ -1,4 +1,5 @@
 import { useHotkey } from "@tanstack/react-hotkeys";
+import { Button } from "@/components/ui/button";
 
 interface ConfirmDialogProps {
   title: string;
@@ -29,24 +30,26 @@ export function ConfirmDialog({
         <h3 className="text-base font-medium text-text-primary mb-2">{title}</h3>
         <div className="text-sm text-text-secondary mb-4">{description}</div>
         <div className="flex gap-2 justify-end">
-          <button
+          <Button
+            variant="outline"
             onClick={onCancel}
             disabled={loading}
-            className="px-3 py-1.5 text-sm rounded-lg border border-border text-text-secondary hover:bg-surface-raised transition-colors"
+            className="h-auto px-3 py-1.5 text-sm rounded-lg border border-border bg-transparent shadow-none text-text-secondary hover:bg-surface-raised hover:border-border"
           >
             {cancelLabel}
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="ghost"
             onClick={onConfirm}
             disabled={loading}
-            className={`px-3 py-1.5 text-sm rounded-lg font-medium transition-colors disabled:opacity-50 ${
+            className={`h-auto px-3 py-1.5 text-sm rounded-lg font-medium transition-colors disabled:opacity-50 ${
               destructive
                 ? "bg-red-500/90 hover:bg-red-500 text-white"
                 : "bg-accent/15 hover:bg-accent/25 text-accent"
             }`}
           >
             {loading ? "..." : confirmLabel}
-          </button>
+          </Button>
         </div>
       </div>
     </div>

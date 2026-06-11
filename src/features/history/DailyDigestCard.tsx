@@ -4,6 +4,7 @@ import { getDailySummary } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import { AppDot } from "@/components/AppDot";
 import { getAppColor } from "@/lib/app-colors";
+import { Button } from "@/components/ui/button";
 import { Sparkles, ChevronDown, RefreshCw } from "lucide-react";
 
 interface DailyDigestCardProps {
@@ -156,17 +157,19 @@ export function DailyDigestCard({
                   </span>
                 )}
                 <span className="flex-1" />
-                <button
+                <Button
+                  variant="link"
+                  size="xs"
                   onClick={(e) => {
                     e.stopPropagation();
                     handleRegenerate();
                   }}
                   disabled={busy}
-                  className="flex items-center gap-1 text-[10px] text-accent hover:text-accent/80 font-medium transition-colors disabled:opacity-50"
+                  className="flex items-center gap-1 px-0 text-[10px] text-accent hover:text-accent/80 font-medium disabled:opacity-50 no-underline hover:no-underline"
                 >
                   <RefreshCw className={`size-3 ${isRegenerating ? "animate-spin" : ""}`} strokeWidth={2} />
                   Regenerate
-                </button>
+                </Button>
               </div>
             </>
           )}

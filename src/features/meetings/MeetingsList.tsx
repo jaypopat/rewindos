@@ -1,5 +1,6 @@
 import { Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 import type { Meeting } from "@/lib/api";
 import { useMeetingsList, useMeetingActions } from "./useMeetings";
 
@@ -70,18 +71,19 @@ export function MeetingsList({
                 )}
               </div>
             </button>
-            <button
+            <Button
+              variant="quiet"
               onClick={(e) => {
                 e.stopPropagation();
                 remove.mutate(m.id);
               }}
               disabled={recording}
-              className="rounded-[6px] p-1.5 text-text-faint opacity-0 transition-all hover:text-signal-error group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-0"
+              className="h-auto rounded-[6px] p-1.5 text-text-faint opacity-0 transition-all hover:text-signal-error group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-0"
               aria-label="Delete meeting"
               title={recording ? "Stop the recording before deleting" : "Delete meeting"}
             >
               <Trash2 className="size-[15px]" strokeWidth={1.7} />
-            </button>
+            </Button>
           </li>
         );
       })}

@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle } from "lucide-react";
 import { getDaemonStatus, setUnfilteredCapture } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
+import { Button } from "@/components/ui/button";
 
 /// Persistent, NON-DISMISSIBLE warning shown whenever capture is running with
 /// privacy exclusions unenforced (the user opted into the escape hatch). The
@@ -23,15 +24,17 @@ export function UnfilteredWarningBanner() {
         Recording <strong>unfiltered</strong> — privacy exclusions (password
         managers, incognito) are not being enforced.
       </span>
-      <button
+      <Button
+        variant="editorial-muted"
+        size="editorial"
         onClick={async () => {
           await setUnfilteredCapture(false);
           await refetch();
         }}
-        className="px-2 py-0.5 font-mono text-[11px] uppercase tracking-wider bg-surface border border-border/60 hover:bg-surface-overlay transition-all"
+        className="px-2 py-0.5 text-[11px] uppercase tracking-wider bg-surface border border-border/60 hover:bg-surface-overlay"
       >
         Re-enable filtering
-      </button>
+      </Button>
     </div>
   );
 }

@@ -27,6 +27,7 @@ import {
 import { SaveMomentDialog } from "@/features/saved/SaveMomentDialog";
 import { FirstRunWizard } from "@/features/onboarding/FirstRunWizard";
 import { RecallPalette } from "@/components/RecallPalette";
+import { Button } from "@/components/ui/button";
 import { Clock, Search } from "lucide-react";
 
 const VIEW_LABELS: Record<View, string> = {
@@ -232,25 +233,27 @@ function App() {
             Rewind<span className="mx-2 text-text-ghost">/</span>
             <b className="font-medium text-text-secondary">{VIEW_LABELS[view]}</b>
           </div>
-          <button
+          <Button
             type="button"
+            variant="ghost"
             onClick={() => setPaletteOpen(true)}
-            className="ml-auto flex items-center gap-2 h-[34px] px-3 min-w-[240px] rounded-lg border border-line-2 hover:border-line-hi text-text-muted text-[13px] transition-colors whitespace-nowrap"
+            className="ml-auto justify-start h-[34px] px-3 min-w-[240px] rounded-lg border border-line-2 hover:border-line-hi hover:bg-transparent text-text-muted hover:text-text-muted text-[13px] transition-colors whitespace-nowrap"
           >
             <Search className="size-[15px]" strokeWidth={1.7} />
             <span>Describe what you remember…</span>
             <span className="ml-auto font-mono text-[10.5px] border border-line-2 rounded px-1.5 py-px text-text-faint">
               ⌘K
             </span>
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
+            variant="ghost"
             onClick={() => setShowSaveMoment(true)}
             className="size-[34px] grid place-items-center rounded-lg text-text-muted hover:text-text-primary hover:bg-panel transition-colors"
             title="Save moment"
           >
             <Clock className="size-[18px]" strokeWidth={1.7} />
-          </button>
+          </Button>
           <DaemonPanel />
         </header>
 

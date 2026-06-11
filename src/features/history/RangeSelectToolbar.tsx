@@ -1,5 +1,6 @@
 import { Crosshair, FolderPlus, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 
 interface RangeSelectToolbarProps {
   rangeStart: number | null;
@@ -58,24 +59,30 @@ export function RangeSelectToolbar({
               placeholder="Collection name..."
               className="w-44 rounded bg-transparent px-2 text-xs"
             />
-            <button
+            <Button
+              variant="link"
+              size="xs"
               type="submit"
               disabled={!rangeSaveName.trim() || rangeSaving}
-              className="text-accent hover:text-accent/80 text-xs font-medium disabled:opacity-40 transition-colors"
+              className="text-accent hover:text-accent/80 text-xs font-medium disabled:opacity-40 px-0 no-underline hover:no-underline"
             >
               {rangeSaving ? "Saving..." : "Save"}
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="quiet"
+              size="xs"
               type="button"
               onClick={() => { setShowRangeNameInput(false); setRangeSaveName(""); }}
-              className="text-text-muted hover:text-text-secondary text-xs transition-colors"
+              className="text-text-muted hover:text-text-secondary text-xs px-0"
             >
               Back
-            </button>
+            </Button>
           </form>
         ) : (
           <div className="flex items-center gap-2">
-            <button type="button"
+            <Button
+              variant="default"
+              type="button"
               onClick={() => {
                 if (rangeEnd !== null && rangeStart !== null) {
                   const sd = new Date(rangeStart * 1000);
@@ -86,24 +93,29 @@ export function RangeSelectToolbar({
                 setShowRangeNameInput(true);
               }}
               disabled={rangeEnd === null}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-accent text-white hover:bg-accent/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              className="flex items-center gap-1.5 h-auto px-3 py-1.5 text-xs font-medium rounded-lg bg-accent text-white hover:bg-accent/90 disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <FolderPlus className="size-3" />
               Save as Collection
-            </button>
-            <button type="button"
+            </Button>
+            <Button
+              variant="quiet"
+              type="button"
               onClick={onClear}
-              className="px-2.5 py-1.5 text-xs text-text-muted hover:text-text-secondary transition-colors"
+              className="h-auto px-2.5 py-1.5 text-xs text-text-muted hover:text-text-secondary"
             >
               Clear
-            </button>
-            <button type="button"
+            </Button>
+            <Button
+              variant="quiet"
+              size="icon-sm"
+              type="button"
               onClick={onExit}
-              className="p-1.5 text-text-muted hover:text-text-secondary transition-colors"
+              className="p-1.5 size-auto text-text-muted hover:text-text-secondary"
               title="Exit range select"
             >
               <X className="size-3.5" />
-            </button>
+            </Button>
           </div>
         )}
       </div>

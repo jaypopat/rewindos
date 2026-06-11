@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { browseScreenshots, getImageUrl } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Button } from "@/components/ui/button";
 import { AppDot } from "./AppDot";
 import { formatTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -100,21 +101,22 @@ export function TimelineView({ onSelectScreenshot }: TimelineViewProps) {
         </div>
         <div className="flex gap-0.5 bg-surface-raised rounded-lg p-0.5">
           {TIME_RANGES.map((r, i) => (
-            <button
+            <Button
+              variant="ghost"
               key={r.label}
               onClick={() => {
                 setRangeIdx(i);
                 setSelectedIdx(0);
               }}
               className={cn(
-                "px-3 py-1 text-xs rounded-md transition-colors",
+                "h-auto px-3 py-1 text-xs rounded-md",
                 i === rangeIdx
-                  ? "bg-accent/15 text-accent font-medium"
-                  : "text-text-muted hover:text-text-secondary",
+                  ? "bg-accent/15 text-accent font-medium hover:bg-accent/15 hover:text-accent"
+                  : "text-text-muted hover:text-text-secondary hover:bg-transparent",
               )}
             >
               {r.label}
-            </button>
+            </Button>
           ))}
         </div>
       </div>

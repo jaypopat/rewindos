@@ -3,6 +3,7 @@ import { usePomodoroTimer, type PomodoroConfig, type PomodoroPhase } from "@/hoo
 import { useFocusScore } from "@/hooks/useFocusScore";
 import { useConfigQuery } from "@/hooks/useConfigQuery";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 import { getCategoryColor, buildCategoryRules } from "@/lib/app-categories";
 
 function phaseLabel(phase: PomodoroPhase): string {
@@ -80,12 +81,14 @@ export function FocusView() {
           )}
         </div>
         {(state.phase !== "idle" || state.completedSessions > 0) && (
-          <button
+          <Button
+            variant="editorial-muted"
+            size="editorial"
             onClick={reset}
-            className="flex items-center gap-1.5 px-2 py-1 font-mono text-[11px] text-text-muted hover:text-text-secondary border border-border/50 hover:border-border transition-all"
+            className="flex items-center gap-1.5 px-2 py-1 text-[11px] text-text-muted hover:text-text-secondary hover:bg-transparent hover:border-border normal-case tracking-normal"
           >
             reset
-          </button>
+          </Button>
         )}
       </div>
 
@@ -137,34 +140,37 @@ export function FocusView() {
         {/* Controls */}
         <div className="flex items-center gap-3">
           {!state.isRunning ? (
-            <button
+            <Button
+              variant="editorial-accent"
               onClick={start}
-              className="flex items-center justify-center w-12 h-12 border border-accent/40 bg-accent/10 hover:bg-accent/20 transition-all group"
+              className="h-auto flex items-center justify-center w-12 h-12 border-accent/40 bg-accent/10 hover:bg-accent/20 group"
             >
               <svg className="size-5 text-accent" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M8 5v14l11-7z" />
               </svg>
-            </button>
+            </Button>
           ) : (
-            <button
+            <Button
+              variant="editorial"
               onClick={pause}
-              className="flex items-center justify-center w-12 h-12 border border-semantic/40 bg-semantic/10 hover:bg-semantic/20 transition-all group"
+              className="h-auto flex items-center justify-center w-12 h-12 border-semantic/40 bg-semantic/10 hover:bg-semantic/20 group"
             >
               <svg className="size-5 text-semantic" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M6 4h4v16H6zm8 0h4v16h-4z" />
               </svg>
-            </button>
+            </Button>
           )}
 
           {state.phase !== "idle" && (
-            <button
+            <Button
+              variant="editorial-muted"
               onClick={skip}
-              className="flex items-center justify-center w-10 h-10 border border-border/50 hover:border-border bg-surface-raised/30 hover:bg-surface-raised/50 transition-all"
+              className="h-auto flex items-center justify-center w-10 h-10 border-border/50 hover:border-border bg-surface-raised/30 hover:bg-surface-raised/50 hover:text-text-muted"
             >
               <svg className="size-4 text-text-muted" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M3 8.689c0-.864.933-1.406 1.683-.977l7.108 4.061a1.125 1.125 0 0 1 0 1.954l-7.108 4.061A1.125 1.125 0 0 1 3 16.811V8.69ZM12.75 8.689c0-.864.933-1.406 1.683-.977l7.108 4.061a1.125 1.125 0 0 1 0 1.954l-7.108 4.061a1.125 1.125 0 0 1-1.683-.977V8.69Z" />
               </svg>
-            </button>
+            </Button>
           )}
         </div>
 

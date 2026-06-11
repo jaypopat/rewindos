@@ -1,5 +1,6 @@
 import { cn } from "@/lib/utils";
 import { LayoutGrid, List } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 interface ViewToggleProps {
   view: "grid" | "list";
@@ -9,10 +10,12 @@ interface ViewToggleProps {
 export function ViewToggle({ view, onViewChange }: ViewToggleProps) {
   return (
     <div className="flex gap-0.5 bg-surface-raised border border-border/30 p-0.5">
-      <button
+      <Button
+        variant="ghost"
+        size="icon-xs"
         onClick={() => onViewChange("grid")}
         className={cn(
-          "p-1.5 transition-colors",
+          "size-auto p-1.5 rounded-none",
           view === "grid"
             ? "bg-accent/15 text-accent"
             : "text-text-muted hover:text-text-secondary"
@@ -20,11 +23,13 @@ export function ViewToggle({ view, onViewChange }: ViewToggleProps) {
         title="Grid view"
       >
         <LayoutGrid className="size-4" strokeWidth={1.8} />
-      </button>
-      <button
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon-xs"
         onClick={() => onViewChange("list")}
         className={cn(
-          "p-1.5 transition-colors",
+          "size-auto p-1.5 rounded-none",
           view === "list"
             ? "bg-accent/15 text-accent"
             : "text-text-muted hover:text-text-secondary"
@@ -32,7 +37,7 @@ export function ViewToggle({ view, onViewChange }: ViewToggleProps) {
         title="List view"
       >
         <List className="size-4" strokeWidth={1.8} />
-      </button>
+      </Button>
     </div>
   );
 }

@@ -19,6 +19,7 @@ import {
 import { formatMins } from "@/lib/format";
 import { useConfigQuery } from "@/hooks/useConfigQuery";
 import { Rise, CountNum } from "@/components/motion";
+import { Button } from "@/components/ui/button";
 import { ScrollHint } from "@/components/ScrollHint";
 import { EditorialBarChart } from "@/components/charts/EditorialBarChart";
 import { DayRibbon } from "./DayRibbon";
@@ -299,20 +300,22 @@ export function DashboardView({
               </div>
             </Rise>
             <Rise i={2} className="flex gap-2.5 mt-[26px]">
-              <button
+              <Button
+                variant="default"
                 onClick={() => onRewindToRange?.(todayStart, now)}
-                className="inline-flex items-center gap-2 h-9 px-[15px] rounded-lg text-[13px] font-semibold bg-accent text-[#1c1208] border border-accent-deep hover:bg-accent-hi transition-colors"
+                className="inline-flex items-center gap-2 h-9 px-[15px] rounded-lg text-[13px] font-semibold bg-accent text-[#1c1208] border border-accent-deep hover:bg-accent-hi"
               >
                 <Play className="size-[15px] fill-current" strokeWidth={0} />
                 Rewind the day
-              </button>
-              <button
+              </Button>
+              <Button
+                variant="outline"
                 onClick={() => onGoToSearch?.()}
-                className="inline-flex items-center gap-2 h-9 px-[15px] rounded-lg text-[13px] font-medium border border-line-2 hover:border-line-hi hover:bg-panel transition-colors"
+                className="inline-flex items-center gap-2 h-9 px-[15px] rounded-lg text-[13px] font-medium border border-line-2 hover:border-line-hi hover:bg-panel"
               >
                 <Search className="size-[15px]" strokeWidth={1.7} />
                 Search
-              </button>
+              </Button>
             </Rise>
           </div>
           <div className="grid grid-cols-2 gap-x-10 gap-y-[26px]">

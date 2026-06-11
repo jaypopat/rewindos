@@ -1,3 +1,5 @@
+import { Button } from "@/components/ui/button";
+
 interface AskEmptyStateProps {
   onSuggest: (question: string) => void;
 }
@@ -24,13 +26,14 @@ export function AskEmptyState({ onSuggest }: AskEmptyStateProps) {
 
         <div className="flex flex-wrap gap-2">
           {SUGGESTED.map((q) => (
-            <button
+            <Button
+              variant="outline"
               key={q}
               onClick={() => onSuggest(q)}
               className="inline-flex items-center h-8 px-3.5 rounded-[7px] text-[12.5px] font-[450] text-text-secondary border border-line-2 hover:border-line-hi hover:text-text-primary hover:bg-panel transition-colors"
             >
               {q}
-            </button>
+            </Button>
           ))}
         </div>
       </div>

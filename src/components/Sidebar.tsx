@@ -18,6 +18,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 export type View =
   | "dashboard"
@@ -110,11 +111,13 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps) {
         <span className="text-base font-semibold tracking-tight leading-none">
           R{!collapsed && <>ewind<b className="text-accent font-semibold">OS</b></>}
         </span>
-        <button
+        <Button
+          variant="ghost"
+          size="icon"
           onClick={toggleCollapsed}
           title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           className={cn(
-            "grid place-items-center size-7 rounded-md text-text-muted hover:text-text-primary hover:bg-panel transition-colors",
+            "grid place-items-center size-7 rounded-md text-text-muted hover:text-text-primary hover:bg-panel",
             !collapsed && "ml-auto",
           )}
         >
@@ -123,7 +126,7 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps) {
           ) : (
             <PanelLeftClose className="size-4" strokeWidth={1.7} />
           )}
-        </button>
+        </Button>
       </div>
 
       {/* Nav groups */}
@@ -140,12 +143,13 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps) {
             {group.items.map(({ view, label, shortcut, icon }) => {
               const active = activeView === view;
               return (
-                <button
+                <Button
+                  variant="ghost"
                   key={view}
                   onClick={() => onViewChange(view)}
                   title={`${label} (${shortcut})`}
                   className={cn(
-                    "group relative w-full flex items-center rounded-[7px] cursor-pointer transition-colors text-left",
+                    "group relative w-full h-auto flex items-center justify-start rounded-[7px] cursor-pointer text-left",
                     collapsed ? "justify-center py-2" : "gap-[11px] px-2.5 py-2",
                     active
                       ? "text-accent-hi"
@@ -171,7 +175,7 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps) {
                     {icon}
                   </span>
                   {!collapsed && <span className="text-sm font-[450] tracking-tight">{label}</span>}
-                </button>
+                </Button>
               );
             })}
           </div>

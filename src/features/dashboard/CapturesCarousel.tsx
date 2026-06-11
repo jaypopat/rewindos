@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getImageUrl, type TimelineEntry } from "@/lib/api";
 import { ChevronLeft, ChevronRight } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 interface CapturesCarouselProps {
   captures: TimelineEntry[];
@@ -47,22 +48,26 @@ export function CapturesCarousel({ captures, onSelect }: CapturesCarouselProps) 
         </h2>
         <div className="flex items-center gap-2">
           {/* Arrow buttons */}
-          <button
+          <Button
+            variant="quiet"
+            size="icon-xs"
             onClick={() => scroll(-1)}
             disabled={!canScrollLeft}
-            className="p-1 rounded text-text-muted hover:text-text-primary disabled:opacity-20 disabled:cursor-default transition-colors"
+            className="p-1 rounded text-text-muted hover:text-text-primary disabled:opacity-20 disabled:cursor-default"
             aria-label="Scroll left"
           >
             <ChevronLeft className="size-4" strokeWidth={2} />
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="quiet"
+            size="icon-xs"
             onClick={() => scroll(1)}
             disabled={!canScrollRight}
-            className="p-1 rounded text-text-muted hover:text-text-primary disabled:opacity-20 disabled:cursor-default transition-colors"
+            className="p-1 rounded text-text-muted hover:text-text-primary disabled:opacity-20 disabled:cursor-default"
             aria-label="Scroll right"
           >
             <ChevronRight className="size-4" strokeWidth={2} />
-          </button>
+          </Button>
           <span className="text-[10px] text-text-muted font-mono tabular-nums">
             {captures.length} captures
           </span>
