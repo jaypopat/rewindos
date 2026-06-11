@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useConfig } from "./hooks/useConfig";
 import { getDaemonStatus } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 import { GeneralTab } from "./tabs/GeneralTab";
 import { CaptureTab } from "./tabs/CaptureTab";
 import { PrivacyTab } from "./tabs/PrivacyTab";
@@ -10,8 +11,9 @@ import { MeetingTab } from "./tabs/MeetingTab";
 import { FocusTab } from "./tabs/FocusTab";
 import { StorageTab } from "./tabs/StorageTab";
 import { OCRTab } from "./tabs/OCRTab";
+import { ExportTab } from "./tabs/ExportTab";
 
-type Tab = "general" | "capture" | "privacy" | "ai" | "meeting" | "storage" | "ocr" | "focus";
+type Tab = "general" | "capture" | "privacy" | "ai" | "meeting" | "storage" | "ocr" | "focus" | "export";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "general", label: "General" },
@@ -22,6 +24,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "focus", label: "Focus" },
   { id: "storage", label: "Storage" },
   { id: "ocr", label: "OCR" },
+  { id: "export", label: "Export" },
 ];
 
 export function SettingsView() {
@@ -54,6 +57,7 @@ export function SettingsView() {
     focus: <FocusTab config={config} update={update} />,
     storage: <StorageTab config={config} update={update} />,
     ocr: <OCRTab config={config} update={update} />,
+    export: <ExportTab config={config} update={update} />,
   };
 
   return (
@@ -74,13 +78,14 @@ export function SettingsView() {
             {saved && (
               <span className="font-mono text-[10.5px] text-signal-active">saved</span>
             )}
-            <button
+            <Button
+              variant="ghost"
               onClick={handleSave}
               disabled={saving}
               className="inline-flex items-center h-9 px-[15px] rounded-lg text-[13px] font-semibold bg-accent text-[#1c1208] border border-accent-deep hover:bg-accent-hi transition-colors disabled:opacity-50"
             >
               {saving ? "Saving…" : "Save changes"}
-            </button>
+            </Button>
           </div>
         </div>
 
@@ -88,18 +93,19 @@ export function SettingsView() {
           {/* Tab rail */}
           <div className="w-[180px] shrink-0 sticky top-6 self-start">
             {TABS.map((t) => (
-              <button
+              <Button
                 key={t.id}
+                variant="ghost"
                 onClick={() => setTab(t.id)}
                 className={cn(
-                  "w-full text-left px-3 py-2 rounded-[7px] text-[13.5px] font-[450] transition-colors",
+                  "w-full justify-start text-left px-3 py-2 h-auto rounded-[7px] text-[13.5px] font-[450] transition-colors",
                   tab === t.id
                     ? "bg-accent-muted text-accent-hi"
                     : "text-text-secondary hover:text-text-primary hover:bg-panel",
                 )}
               >
                 {t.label}
-              </button>
+              </Button>
             ))}
           </div>
 
