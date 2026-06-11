@@ -11,14 +11,16 @@ pub use gather::DayMemory;
 // Shared time-formatting helpers (pub(crate) so emitters can use them).
 // ---------------------------------------------------------------------------
 
-/// Unix timestamp → "HHMM" string in local time (e.g. 1435 → "1435").
-pub(crate) fn hhmm(ts: i64) -> String {
+/// Unix timestamp → "HHMMSS" string in local time (e.g. 14:35:07 → "143507").
+/// Second granularity so multiple key moments in the same minute get distinct
+/// thumbnail filenames.
+pub(crate) fn hhmmss(ts: i64) -> String {
     use chrono::{Local, TimeZone};
     Local
         .timestamp_opt(ts, 0)
         .single()
-        .map(|dt| dt.format("%H%M").to_string())
-        .unwrap_or_else(|| "0000".into())
+        .map(|dt| dt.format("%H%M%S").to_string())
+        .unwrap_or_else(|| "000000".into())
 }
 
 /// Unix timestamp → "HH:MM" string in local time (e.g. 1435 → "14:35").

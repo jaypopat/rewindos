@@ -1,6 +1,6 @@
 use crate::vault::{
     gather::DayMemory,
-    continuation_safe, dur_label, hh_mm_label, hhmm, mmss, Emitter, RenderedDay, ThumbnailCopy,
+    continuation_safe, dur_label, hh_mm_label, hhmmss, mmss, Emitter, RenderedDay, ThumbnailCopy,
 };
 use std::path::PathBuf;
 
@@ -64,7 +64,7 @@ impl Emitter for LogseqEmitter {
                 let fname = format!(
                     "rewindos-{}-{}.webp",
                     mem.date_key,
-                    hhmm(moment.timestamp)
+                    hhmmss(moment.timestamp)
                 );
 
                 md.push_str(&format!("  - {} · {}\n", time, moment.app_name));

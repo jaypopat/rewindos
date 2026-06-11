@@ -498,9 +498,19 @@ pub async fn run_export(
     let db_clone = db.clone();
     let date_owned = date.to_string();
     let max = cfg.max_moments;
+    // Real capture cadence (clamped ≥ 1) so on-screen/app stats aren't skewed
+    // for users who changed capture.interval_seconds.
+    let capture_interval_secs = (config.capture.interval_seconds as i64).max(1);
     let (mut mem, cached, screenshot_count) = tokio::task::spawn_blocking(move || {
         let db = lock_db(&db_clone);
-        let mem = DayMemory::for_date(&db, &date_owned, day_start, day_end, max)?;
+        let mem = DayMemory::for_date(
+            &db,
+            &date_owned,
+            day_start,
+            day_end,
+            max,
+            capture_interval_secs,
+        )?;
         // A whitespace-only cache row is not a usable recap; treat it as
         // absent so the fresh AI recap below still gets cached.
         let cached = db

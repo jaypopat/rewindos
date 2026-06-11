@@ -1,6 +1,6 @@
 use crate::vault::{
     gather::DayMemory,
-    continuation_safe, dur_label, hh_mm_label, hhmm, mmss, Emitter, RenderedDay, ThumbnailCopy,
+    continuation_safe, dur_label, hh_mm_label, hhmmss, mmss, Emitter, RenderedDay, ThumbnailCopy,
 };
 use std::path::PathBuf;
 
@@ -62,7 +62,7 @@ impl Emitter for ObsidianEmitter {
             for moment in &mem.moments {
                 let time = hh_mm_label(moment.timestamp);
                 // Namespaced by the companion dir, so no prefix needed here.
-                let fname = format!("{}-{}.webp", mem.date_key, hhmm(moment.timestamp));
+                let fname = format!("{}-{}.webp", mem.date_key, hhmmss(moment.timestamp));
 
                 if copy_thumbnails {
                     if let Some(thumb) = &moment.thumbnail_abs {
@@ -170,6 +170,22 @@ mod tests {
         assert!(r.markdown.contains("shipped the export"), "journal leads");
         assert_eq!(r.thumbnails.len(), 1);
         assert!(r.thumbnails[0].dest_rel.starts_with("_rewindos/img"));
+    }
+
+    #[test]
+    fn same_minute_moments_get_distinct_thumbnail_names() {
+        let mut mem = sample();
+        // Two moments 30s apart, inside the same minute.
+        let base = mem.moments[0].timestamp;
+        let mut second = mem.moments[0].clone();
+        second.timestamp = base + 30;
+        mem.moments.push(second);
+        let r = ObsidianEmitter.render(&mem, "_rewindos", true);
+        assert_eq!(r.thumbnails.len(), 2);
+        assert_ne!(
+            r.thumbnails[0].dest_rel, r.thumbnails[1].dest_rel,
+            "same-minute moments must not collide on thumbnail filename"
+        );
     }
 
     #[test]

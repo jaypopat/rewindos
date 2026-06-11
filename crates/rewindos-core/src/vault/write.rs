@@ -22,11 +22,19 @@ pub fn export_day(
     date_key: &str,
     day_start: i64,
     day_end: i64,
+    capture_interval_secs: i64,
 ) -> Result<ExportOutcome> {
     if !cfg.enabled || cfg.vault_path.is_empty() {
         return Ok(ExportOutcome { wrote: false, recap_is_ai: false });
     }
-    let mut mem = DayMemory::for_date(db, date_key, day_start, day_end, cfg.max_moments)?;
+    let mut mem = DayMemory::for_date(
+        db,
+        date_key,
+        day_start,
+        day_end,
+        cfg.max_moments,
+        capture_interval_secs,
+    )?;
     if mem.is_empty() {
         return Ok(ExportOutcome { wrote: false, recap_is_ai: false });
     }
@@ -48,9 +56,37 @@ pub fn export_day(
     Ok(ExportOutcome { wrote: true, recap_is_ai })
 }
 
+/// Prune sections NOT listed in `sections` (journal | summary | meetings |
+/// moments | stats). Runs at write time so the daemon's direct write_memory
+/// path is covered too; the is_empty/skip-day check stays based on unpruned data.
+fn apply_sections(mem: &mut DayMemory, sections: &[String]) {
+    let has = |name: &str| sections.iter().any(|s| s == name);
+    if !has("journal") {
+        mem.journal_text = None;
+    }
+    if !has("summary") {
+        mem.recap = None;
+    }
+    if !has("meetings") {
+        mem.meetings.clear();
+    }
+    if !has("moments") {
+        mem.moments.clear();
+    }
+    if !has("stats") {
+        mem.stats.on_screen_secs = 0;
+        mem.stats.peak_hour = None;
+        mem.stats.app_minutes.clear();
+        mem.stats.todos.clear();
+    }
+}
+
 /// Render with the configured emitter and write files. Separated so the daemon
 /// can set an AI recap on `mem` first, then call this.
 pub fn write_memory(cfg: &VaultExportConfig, mem: &DayMemory) -> Result<()> {
+    let mut mem = mem.clone();
+    apply_sections(&mut mem, &cfg.sections);
+    let mem = &mem;
     let format = VaultFormat::parse(&cfg.format);
     let rendered = match format {
         VaultFormat::Obsidian => {
@@ -112,7 +148,7 @@ mod tests {
         cfg.vault_path = vault.path().to_string_lossy().into();
 
         let day_start = 1_780_000_000;
-        let res = export_day(&db, &cfg, "2026-06-10", day_start, day_start + 86400).unwrap();
+        let res = export_day(&db, &cfg, "2026-06-10", day_start, day_start + 86400, 5).unwrap();
         assert!(res.wrote, "should write a non-empty day");
         let note = vault.path().join("_rewindos/2026-06-10.md");
         assert!(note.exists());
@@ -120,7 +156,7 @@ mod tests {
         assert!(body.contains("hello"));
 
         // idempotent: second run overwrites, no error, same content
-        export_day(&db, &cfg, "2026-06-10", day_start, day_start + 86400).unwrap();
+        export_day(&db, &cfg, "2026-06-10", day_start, day_start + 86400, 5).unwrap();
         assert_eq!(std::fs::read_to_string(&note).unwrap(), body);
     }
 
@@ -132,8 +168,48 @@ mod tests {
         cfg.enabled = true;
         cfg.vault_path = vault.path().to_string_lossy().into();
         let res =
-            export_day(&db, &cfg, "2026-06-10", 1_780_000_000, 1_780_000_000 + 86400).unwrap();
+            export_day(&db, &cfg, "2026-06-10", 1_780_000_000, 1_780_000_000 + 86400, 5).unwrap();
         assert!(!res.wrote);
         assert!(!vault.path().join("_rewindos/2026-06-10.md").exists());
+    }
+
+    #[test]
+    fn sections_config_prunes_unlisted_sections() {
+        use crate::vault::gather::{DayMemory, MeetingMemory, StatsMemory};
+        let vault = tempfile::tempdir().unwrap();
+        let mut cfg = crate::config::VaultExportConfig::default();
+        cfg.enabled = true;
+        cfg.format = "obsidian".into();
+        cfg.vault_path = vault.path().to_string_lossy().into();
+        cfg.sections = vec!["journal".into()];
+
+        let mem = DayMemory {
+            date_key: "2026-06-10".into(),
+            journal_text: Some("only the journal survives".into()),
+            recap: Some("a recap".into()),
+            meetings: vec![MeetingMemory {
+                title: "Standup".into(),
+                started_at: 1_780_000_000,
+                duration_secs: 720,
+                minutes: None,
+                transcript: vec![],
+            }],
+            moments: vec![],
+            stats: StatsMemory {
+                on_screen_secs: 4 * 3600,
+                peak_hour: Some(14),
+                app_minutes: vec![("VS Code".into(), 120)],
+                todos: vec!["reply to thread".into()],
+            },
+        };
+        write_memory(&cfg, &mem).unwrap();
+
+        let body =
+            std::fs::read_to_string(vault.path().join("_rewindos/2026-06-10.md")).unwrap();
+        assert!(body.contains("only the journal survives"), "journal kept");
+        assert!(!body.contains("## Meetings"), "meetings pruned");
+        assert!(!body.contains("## By the numbers"), "stats pruned");
+        assert!(!body.contains("## Today"), "recap pruned");
+        assert!(!body.contains("## To-dos surfaced"), "todos pruned");
     }
 }
