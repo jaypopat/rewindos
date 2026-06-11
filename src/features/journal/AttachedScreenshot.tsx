@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { getImageUrl, type JournalScreenshot } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
+import { Button } from "@/components/ui/button";
 import { X, ImageIcon } from "lucide-react";
 
 interface AttachedScreenshotProps {
@@ -40,15 +41,18 @@ export function AttachedScreenshot({
           </div>
         )}
       </button>
-      <button
+      <Button
+        variant="quiet"
+        size="icon-xs"
+        type="button"
         onClick={(e) => {
           e.stopPropagation();
           onRemove();
         }}
-        className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-surface border border-border/50 rounded-full flex items-center justify-center text-text-muted hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all"
+        className="absolute -top-1.5 -right-1.5 size-4 bg-surface border border-border/50 rounded-full text-text-muted hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all"
       >
         <X className="size-2.5" strokeWidth={2} />
-      </button>
+      </Button>
       {journalScreenshot.caption && (
         <p className="text-[9px] text-text-muted truncate w-24 mt-0.5">
           {journalScreenshot.caption}

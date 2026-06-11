@@ -130,21 +130,23 @@ export function ExportTab({ config, update }: TabProps) {
           {ALL_SECTIONS.map(({ id, label }) => {
             const active = vc.sections.includes(id);
             return (
-              <button
+              <Button
                 key={id}
+                variant="ghost"
+                size="xs"
                 type="button"
                 onClick={() => toggleSection(id, !active)}
-                className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-mono transition-colors border ${
+                className={`h-auto gap-1.5 px-3 py-1 rounded-md text-xs font-mono transition-colors border ${
                   active
-                    ? "bg-accent/15 border-accent/40 text-accent"
-                    : "bg-panel border-line text-text-secondary hover:text-text-primary hover:border-line/80"
+                    ? "bg-accent/15 border-accent/40 text-accent hover:bg-accent/15 hover:text-accent"
+                    : "bg-panel border-line text-text-secondary hover:bg-panel hover:text-text-primary hover:border-line/80"
                 }`}
               >
                 {active && (
                   <span className="w-1.5 h-1.5 rounded-full bg-accent shrink-0" />
                 )}
                 {label}
-              </button>
+              </Button>
             );
           })}
         </div>
