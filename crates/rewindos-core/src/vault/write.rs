@@ -86,6 +86,12 @@ fn apply_sections(mem: &mut DayMemory, sections: &[String]) {
 pub fn write_memory(cfg: &VaultExportConfig, mem: &DayMemory) -> Result<()> {
     let mut mem = mem.clone();
     apply_sections(&mut mem, &cfg.sections);
+    // Never write an empty companion: section pruning can hollow out a day
+    // that gather considered non-empty (e.g. journal-only day with
+    // sections = ["stats"]).
+    if mem.is_empty() {
+        return Ok(());
+    }
     let mem = &mem;
     let format = VaultFormat::parse(&cfg.format);
     let rendered = match format {
@@ -103,16 +109,28 @@ pub fn write_memory(cfg: &VaultExportConfig, mem: &DayMemory) -> Result<()> {
         VaultFormat::Obsidian => {
             root.join(&cfg.companion_dir).join(format!("{}.md", mem.date_key))
         }
+        // Logseq stores namespaced pages as FLAT files directly under pages/,
+        // with the namespace separator encoded in the filename. The modern
+        // default (`:file/name-format :triple-lowbar`, Logseq >= 0.8.9) maps
+        // page "a/b" to "a___b.md". The page NAME stays
+        // "<companion_dir>/<date>", so embeds like
+        // {{embed [[_rewindos/2026-06-10]]}} resolve unchanged, and the flat
+        // location keeps the emitters' `../assets/` image refs valid. Legacy
+        // graphs still on the url-encoded format (`%2F`) may need the file
+        // renamed by hand.
         VaultFormat::Logseq => root
             .join("pages")
-            .join(&cfg.companion_dir)
-            .join(format!("{}.md", mem.date_key)),
+            .join(format!("{}___{}.md", cfg.companion_dir, mem.date_key)),
     };
     if let Some(parent) = note_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    // atomic write: use an explicit tmp filename to avoid any extension-replacement surprises
-    let tmp = note_path.with_file_name(format!("{}.md.tmp", mem.date_key));
+    // atomic write: tmp name derives from the final filename (avoids any
+    // extension-replacement surprises and collisions in the shared pages/ dir)
+    let tmp = note_path.with_file_name(match note_path.file_name() {
+        Some(n) => format!("{}.tmp", n.to_string_lossy()),
+        None => format!("{}.md.tmp", mem.date_key),
+    });
     std::fs::write(&tmp, rendered.markdown.as_bytes())?;
     std::fs::rename(&tmp, &note_path)?;
 
@@ -158,6 +176,33 @@ mod tests {
         // idempotent: second run overwrites, no error, same content
         export_day(&db, &cfg, "2026-06-10", day_start, day_start + 86400, 5).unwrap();
         assert_eq!(std::fs::read_to_string(&note).unwrap(), body);
+    }
+
+    #[test]
+    fn logseq_note_is_flat_triple_lowbar_under_pages() {
+        let db = Database::open_in_memory().unwrap();
+        db.upsert_journal_entry(&crate::schema::UpsertJournalEntry {
+            date: "2026-06-10".into(),
+            content: r#"{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"hello"}]}]}"#.into(),
+        }).unwrap();
+        let vault = tempfile::tempdir().unwrap();
+        let mut cfg = crate::config::VaultExportConfig::default();
+        cfg.enabled = true;
+        cfg.format = "logseq".into();
+        cfg.vault_path = vault.path().to_string_lossy().into();
+
+        let day_start = 1_780_000_000;
+        let res = export_day(&db, &cfg, "2026-06-10", day_start, day_start + 86400, 5).unwrap();
+        assert!(res.wrote);
+        // Triple-lowbar convention: namespaced page "_rewindos/2026-06-10" is
+        // a flat file under pages/, not a nested directory.
+        let flat = vault.path().join("pages/_rewindos___2026-06-10.md");
+        assert!(flat.exists(), "flat triple-lowbar page file must exist");
+        assert!(
+            !vault.path().join("pages/_rewindos/2026-06-10.md").exists(),
+            "must not create a nested namespace directory"
+        );
+        assert!(std::fs::read_to_string(&flat).unwrap().contains("hello"));
     }
 
     #[test]
@@ -211,5 +256,36 @@ mod tests {
         assert!(!body.contains("## By the numbers"), "stats pruned");
         assert!(!body.contains("## Today"), "recap pruned");
         assert!(!body.contains("## To-dos surfaced"), "todos pruned");
+    }
+
+    #[test]
+    fn pruned_empty_memory_writes_no_file() {
+        use crate::vault::gather::{DayMemory, StatsMemory};
+        let vault = tempfile::tempdir().unwrap();
+        let mut cfg = crate::config::VaultExportConfig::default();
+        cfg.enabled = true;
+        cfg.format = "obsidian".into();
+        cfg.vault_path = vault.path().to_string_lossy().into();
+        // journal-only day, but only "stats" is enabled → pruning empties it
+        cfg.sections = vec!["stats".into()];
+
+        let mem = DayMemory {
+            date_key: "2026-06-10".into(),
+            journal_text: Some("only a journal entry today".into()),
+            recap: None,
+            meetings: vec![],
+            moments: vec![],
+            stats: StatsMemory {
+                on_screen_secs: 0,
+                peak_hour: None,
+                app_minutes: vec![],
+                todos: vec![],
+            },
+        };
+        write_memory(&cfg, &mem).unwrap();
+        assert!(
+            !vault.path().join("_rewindos/2026-06-10.md").exists(),
+            "an empty pruned memory must not produce a companion note"
+        );
     }
 }

@@ -406,6 +406,7 @@ impl DaemonService {
         // Validate eagerly so garbage input still errors at the call site.
         local_day_bounds(date)
             .map_err(|e| zbus::fdo::Error::Failed(format!("export {date}: {e:#}")))?;
+        check_export_ready(&self.config)?;
 
         let db = self.db.clone();
         let config = self.config.clone();
@@ -436,6 +437,7 @@ impl DaemonService {
                 "range too large (max 366 days)".into(),
             ));
         }
+        check_export_ready(&self.config)?;
 
         let db = self.db.clone();
         let config = self.config.clone();
@@ -464,6 +466,36 @@ impl DaemonService {
     fn capture_interval(&self) -> u32 {
         self.config.capture.interval_seconds
     }
+}
+
+/// Precondition check for the "Write now"/backfill D-Bus handlers: reload
+/// config from disk (the UI edits config.toml without notifying the daemon,
+/// falling back to the startup config if the reload fails) and fail loudly
+/// when an export cannot possibly write, so the UI surfaces an honest error
+/// instead of the background task silently no-opping.
+fn check_export_ready(startup_config: &AppConfig) -> zbus::fdo::Result<()> {
+    let cfg = match AppConfig::load() {
+        Ok(c) => c.vault_export,
+        Err(e) => {
+            warn!("config reload failed, using startup config: {e:#}");
+            startup_config.vault_export.clone()
+        }
+    };
+    if !cfg.enabled {
+        return Err(zbus::fdo::Error::Failed(
+            "vault export is disabled in settings".into(),
+        ));
+    }
+    if cfg.vault_path.is_empty() {
+        return Err(zbus::fdo::Error::Failed("vault path not set".into()));
+    }
+    if !std::path::Path::new(&cfg.vault_path).is_dir() {
+        return Err(zbus::fdo::Error::Failed(format!(
+            "vault path does not exist: {}",
+            cfg.vault_path
+        )));
+    }
+    Ok(())
 }
 
 /// Run a full export of `date`: fresh config from disk, gather (blocking),
@@ -530,58 +562,63 @@ pub async fn run_export(
         return Ok(());
     }
 
-    // Three-tier recap: cached AI summary → generate via chat backend → digest.
-    let digest = DigestInput {
-        on_screen_secs: mem.stats.on_screen_secs,
-        peak_hour: mem.stats.peak_hour,
-        app_minutes: mem.stats.app_minutes.clone(),
-        meeting_count: mem.meetings.len(),
-    };
-    let prompt = summary::build_daily_prompt_from_memory(&mem);
-    let was_cached = cached.is_some();
-    let (recap, is_ai) = summary::resolve_recap(cached, &config.chat, &prompt, &digest).await;
-    if is_ai && !was_cached {
-        // Freshly generated — cache it so the app and re-renders reuse it.
-        // Never cache the digest tier: a cached digest would read as a
-        // non-upgradeable AI summary. Field shapes mirror the Tauri app's
-        // `set_daily_summary_cache` writer (its reader trusts this cache for
-        // past days): `app_breakdown` is a JSON array of AppTimeEntry
-        // {app_name, minutes, session_count}, `time_range` is "{start}-{end}"
-        // unix seconds.
-        let app_breakdown = serde_json::to_string(
-            &mem.stats
-                .app_minutes
-                .iter()
-                .map(|(app_name, minutes)| {
-                    serde_json::json!({
-                        "app_name": app_name,
-                        "minutes": *minutes as f64,
-                        "session_count": 0,
-                    })
-                })
-                .collect::<Vec<_>>(),
-        )
-        .unwrap_or_else(|_| "[]".to_string());
-        let entry = CachedDailySummary {
-            date_key: date.to_string(),
-            summary_text: Some(recap.clone()),
-            app_breakdown,
-            total_sessions: 0,
-            time_range: format!("{day_start}-{day_end}"),
-            model_name: Some(config.chat.model.clone()),
-            generated_at: chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string(),
-            screenshot_count,
+    // Recap only when the "summary" section is enabled: skip the LLM/cache
+    // work entirely otherwise (write_memory's section pruning would drop the
+    // recap anyway, so generating one would be pure waste).
+    if cfg.sections.iter().any(|s| s == "summary") {
+        // Three-tier recap: cached AI summary → generate via chat backend → digest.
+        let digest = DigestInput {
+            on_screen_secs: mem.stats.on_screen_secs,
+            peak_hour: mem.stats.peak_hour,
+            app_minutes: mem.stats.app_minutes.clone(),
+            meeting_count: mem.meetings.len(),
         };
-        let db_clone = db.clone();
-        tokio::task::spawn_blocking(move || {
-            let db = lock_db(&db_clone);
-            if let Err(e) = db.set_daily_summary_cache(&entry) {
-                warn!("failed to cache daily summary: {e:#}");
-            }
-        })
-        .await?;
+        let prompt = summary::build_daily_prompt_from_memory(&mem);
+        let was_cached = cached.is_some();
+        let (recap, is_ai) = summary::resolve_recap(cached, &config.chat, &prompt, &digest).await;
+        if is_ai && !was_cached {
+            // Freshly generated — cache it so the app and re-renders reuse it.
+            // Never cache the digest tier: a cached digest would read as a
+            // non-upgradeable AI summary. Field shapes mirror the Tauri app's
+            // `set_daily_summary_cache` writer (its reader trusts this cache for
+            // past days): `app_breakdown` is a JSON array of AppTimeEntry
+            // {app_name, minutes, session_count}, `time_range` is "{start}-{end}"
+            // unix seconds.
+            let app_breakdown = serde_json::to_string(
+                &mem.stats
+                    .app_minutes
+                    .iter()
+                    .map(|(app_name, minutes)| {
+                        serde_json::json!({
+                            "app_name": app_name,
+                            "minutes": *minutes as f64,
+                            "session_count": 0,
+                        })
+                    })
+                    .collect::<Vec<_>>(),
+            )
+            .unwrap_or_else(|_| "[]".to_string());
+            let entry = CachedDailySummary {
+                date_key: date.to_string(),
+                summary_text: Some(recap.clone()),
+                app_breakdown,
+                total_sessions: 0,
+                time_range: format!("{day_start}-{day_end}"),
+                model_name: Some(config.chat.model.clone()),
+                generated_at: chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string(),
+                screenshot_count,
+            };
+            let db_clone = db.clone();
+            tokio::task::spawn_blocking(move || {
+                let db = lock_db(&db_clone);
+                if let Err(e) = db.set_daily_summary_cache(&entry) {
+                    warn!("failed to cache daily summary: {e:#}");
+                }
+            })
+            .await?;
+        }
+        mem.recap = Some(recap);
     }
-    mem.recap = Some(recap);
 
     let cfg2 = cfg.clone();
     tokio::task::spawn_blocking(move || write_memory(&cfg2, &mem)).await??;

@@ -60,6 +60,17 @@ The capture daemon exposes a D-Bus service on the **session bus** for control by
       <arg name="enabled" type="b" direction="in"/>
     </method>
 
+    <!-- Write one day's vault companion note (returns when STARTED, not finished) -->
+    <method name="ExportDay">
+      <arg name="date" type="s" direction="in"/>
+    </method>
+
+    <!-- Write a vault companion note for each day in an inclusive date range -->
+    <method name="ExportRange">
+      <arg name="start_date" type="s" direction="in"/>
+      <arg name="end_date" type="s" direction="in"/>
+    </method>
+
     <!-- Start recording a meeting (mic + system audio → Whisper transcription) -->
     <method name="StartMeeting">
       <arg name="title" type="s" direction="in"/>
@@ -263,6 +274,47 @@ Recomputes the privacy gate immediately.
 
 **Response:** (none)
 
+### ExportDay(date)
+
+Renders and writes the vault companion note for one local day (gather →
+recap → emit → write). Returns as soon as the export is *enqueued/started*,
+not when it finishes: the work (which may wait minutes on an LLM recap) runs
+in a background task serialized with other exports, so it cannot stall the
+sequential D-Bus dispatcher. Background failures are logged, not reported to
+the caller. Validation runs eagerly before the task is spawned, so bad input
+or an unusable configuration errors at the call site.
+
+**Request:**
+- `date` (string): Local calendar day, `"YYYY-MM-DD"`.
+
+**Response:** (none — "export started")
+
+**Errors** (`org.freedesktop.DBus.Error.Failed`):
+- invalid `date` (not `YYYY-MM-DD`)
+- `vault export is disabled in settings`
+- `vault path not set` — `vault_path` is empty
+- `vault path does not exist: <path>` — `vault_path` is not an existing directory
+
+### ExportRange(start_date, end_date)
+
+Renders and writes the vault companion note for each day in
+`[start_date, end_date]` *inclusive* (local dates). Like `ExportDay`, returns
+when the backfill is started, not finished: days are processed sequentially
+in a background task, and per-day failures are logged without aborting the
+rest of the range.
+
+**Request:**
+- `start_date` (string): First day, `"YYYY-MM-DD"`.
+- `end_date` (string): Last day (inclusive), `"YYYY-MM-DD"`.
+
+**Response:** (none — "export started")
+
+**Errors** (`org.freedesktop.DBus.Error.Failed`):
+- `invalid date range` — unparseable dates or `start_date > end_date`
+- `range too large (max 366 days)` — the inclusive range exceeds 366 days
+- `vault export is disabled in settings`
+- `vault path not set` / `vault path does not exist: <path>`
+
 ## Properties
 
 ### IsCapturing (bool, read-only)
@@ -304,6 +356,9 @@ impl DaemonService {
     async fn set_unfiltered_capture(&mut self, enabled: bool) -> zbus::fdo::Result<()>;
     async fn start_meeting(&self, title: &str) -> zbus::fdo::Result<i64>;
     async fn stop_meeting(&self) -> zbus::fdo::Result<()>;
+    // Vault export (returns when the background export is STARTED).
+    async fn export_day(&self, date: &str) -> zbus::fdo::Result<()>;
+    async fn export_range(&self, start_date: &str, end_date: &str) -> zbus::fdo::Result<()>;
     // Mic source selection + live level meter (used by the Meetings UI picker).
     async fn list_audio_sources(&self) -> zbus::fdo::Result<String>; // JSON [{id,name,description}]
     async fn start_mic_monitor(&self, source: &str) -> zbus::fdo::Result<()>; // "" = default
@@ -357,4 +412,10 @@ busctl --user call com.rewindos.Daemon /com/rewindos/Daemon com.rewindos.Daemon 
 
 # Stop the active meeting
 busctl --user call com.rewindos.Daemon /com/rewindos/Daemon com.rewindos.Daemon StopMeeting
+
+# Write one day's vault companion note
+busctl --user call com.rewindos.Daemon /com/rewindos/Daemon com.rewindos.Daemon ExportDay s "2026-06-10"
+
+# Backfill vault notes for a date range (inclusive)
+busctl --user call com.rewindos.Daemon /com/rewindos/Daemon com.rewindos.Daemon ExportRange ss "2026-06-01" "2026-06-10"
 ```

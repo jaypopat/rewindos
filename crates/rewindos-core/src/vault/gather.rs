@@ -43,7 +43,11 @@ pub struct DayMemory {
 
 impl DayMemory {
     pub fn is_empty(&self) -> bool {
+        // recap is included so write_memory's post-pruning emptiness check
+        // doesn't drop a recap-only note; gather-time callers check before any
+        // recap is set, so this doesn't change skip-day behavior.
         self.journal_text.is_none()
+            && self.recap.is_none()
             && self.meetings.is_empty()
             && self.moments.is_empty()
             && self.stats.on_screen_secs == 0

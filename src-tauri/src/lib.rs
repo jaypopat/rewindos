@@ -1347,8 +1347,24 @@ fn upsert_journal_entry(
 #[tauri::command]
 fn delete_journal_entry(state: State<'_, AppState>, date: String) -> Result<bool, String> {
     let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
-    db.delete_journal_entry(&date)
-        .map_err(|e| format!("db error: {e}"))
+    let deleted = db
+        .delete_journal_entry(&date)
+        .map_err(|e| format!("db error: {e}"))?;
+    // Fire-and-forget vault export so the companion note drops the journal
+    // section; failures must not fail the delete.
+    let dbus = state.dbus.clone();
+    tauri::async_runtime::spawn(async move {
+        let _ = dbus
+            .call_method(
+                Some("com.rewindos.Daemon"),
+                "/com/rewindos/Daemon",
+                Some("com.rewindos.Daemon"),
+                "ExportDay",
+                &(date.as_str(),),
+            )
+            .await;
+    });
+    Ok(deleted)
 }
 
 #[tauri::command]
