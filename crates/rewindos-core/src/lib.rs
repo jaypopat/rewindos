@@ -1,3 +1,4 @@
+pub mod app_label;
 pub mod chat;
 pub mod chat_store;
 pub mod config;
