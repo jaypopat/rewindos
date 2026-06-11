@@ -802,6 +802,7 @@ async fn run_daemon() -> anyhow::Result<()> {
     }
 
     // Register D-Bus service
+    let export_lock: Arc<tokio::sync::Mutex<()>> = Arc::new(tokio::sync::Mutex::new(()));
     let dbus_service = service::DaemonService {
         db: db.clone(),
         config: config.clone(),
@@ -821,7 +822,7 @@ async fn run_daemon() -> anyhow::Result<()> {
         meeting_tx,
         meeting_state,
         mic_monitor: std::sync::Mutex::new(None),
-        export_lock: Arc::new(tokio::sync::Mutex::new(())),
+        export_lock: export_lock.clone(),
     };
 
     dbus_conn
@@ -831,6 +832,55 @@ async fn run_daemon() -> anyhow::Result<()> {
 
     dbus_conn.request_name("com.rewindos.Daemon").await?;
     info!("D-Bus service registered at com.rewindos.Daemon");
+
+    // End-of-day vault export scheduler: polls every 5 minutes and exports the
+    // appropriate day once past the configured end_of_day_hour.
+    {
+        let db = db.clone();
+        let config = config.clone();
+        let export_lock = export_lock.clone();
+        tokio::spawn(async move {
+            use chrono::{Local, Timelike};
+            let mut last_finalized: Option<String> = None;
+            let mut tick = tokio::time::interval(std::time::Duration::from_secs(300));
+            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                tick.tick().await;
+                // Fresh config each tick: the UI edits config.toml without telling us.
+                // Skip WITHOUT marking finalized when disabled, so enabling later
+                // still exports today.
+                let vault_cfg = match rewindos_core::config::AppConfig::load() {
+                    Ok(c) => c.vault_export,
+                    Err(_) => config.vault_export.clone(),
+                };
+                if !vault_cfg.enabled || vault_cfg.vault_path.is_empty() {
+                    continue;
+                }
+                let now = Local::now();
+                let today = now.format("%Y-%m-%d").to_string();
+                let yesterday = (now.date_naive() - chrono::Duration::days(1))
+                    .format("%Y-%m-%d")
+                    .to_string();
+                // Past the configured hour → finalize today; before it → make sure
+                // yesterday got finalized (covers a machine asleep at the hour and
+                // the midnight rollover).
+                let past_hour = now.hour() >= vault_cfg.end_of_day_hour.min(23);
+                let target = if past_hour { today } else { yesterday };
+                if last_finalized.as_deref() != Some(target.as_str()) {
+                    let _guard = export_lock.lock().await;
+                    match crate::service::run_export(&db, &config, &target).await {
+                        Ok(()) => {
+                            tracing::info!(date = %target, "scheduled vault export done");
+                            last_finalized = Some(target);
+                        }
+                        Err(e) => {
+                            tracing::warn!(date = %target, "scheduled vault export failed: {e:#}")
+                        }
+                    }
+                }
+            }
+        });
+    }
 
     // Start window info provider (must be after D-Bus service registration
     // so KWin script can call back to us)
