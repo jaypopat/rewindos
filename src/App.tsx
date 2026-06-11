@@ -26,6 +26,7 @@ import {
 } from "@/app/routes";
 import { SaveMomentDialog } from "@/features/saved/SaveMomentDialog";
 import { FirstRunWizard } from "@/features/onboarding/FirstRunWizard";
+import { TourOverlay } from "@/features/tour/TourOverlay";
 import { RecallPalette } from "@/components/RecallPalette";
 import { Button } from "@/components/ui/button";
 import { Clock, Search } from "lucide-react";
@@ -370,6 +371,7 @@ function App() {
         onRewindTo={(ts) => handleRewindToRange(ts - 120, ts + 120)}
       />
       <FirstRunWizard />
+      <TourOverlay onNavigate={handleViewChange} />
     </main>
   );
 }
