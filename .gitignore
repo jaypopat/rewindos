@@ -56,3 +56,4 @@ rewindos-test-bundle.tar.gz
 # internal dev scaffolding — kept local, not in the public repo
 docs/superpowers/
 tests/
+/doc/
