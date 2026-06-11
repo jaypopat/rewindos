@@ -27,6 +27,7 @@ import {
 import { SaveMomentDialog } from "@/features/saved/SaveMomentDialog";
 import { FirstRunWizard } from "@/features/onboarding/FirstRunWizard";
 import { TourOverlay } from "@/features/tour/TourOverlay";
+import { useTour } from "@/features/tour/TourContext";
 import { RecallPalette } from "@/components/RecallPalette";
 import { Button } from "@/components/ui/button";
 import { Clock, Search } from "lucide-react";
@@ -119,6 +120,10 @@ function App() {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const debouncedQuery = useDebounce(query, 300);
 
+  const { active: tourActive } = useTour();
+  const tourActiveRef = useRef(tourActive);
+  tourActiveRef.current = tourActive;
+
   const datePresetDef = DATE_PRESETS[datePreset];
   const startTime = datePresetDef.value ? datePresetDef.value() : undefined;
 
@@ -162,7 +167,9 @@ function App() {
   const handleViewChange = useCallback((v: View) => {
     dispatch({ type: "CHANGE_VIEW", view: v });
     if (v === "search") {
-      setTimeout(() => searchInputRef.current?.focus(), 100);
+      setTimeout(() => {
+        if (!tourActiveRef.current) searchInputRef.current?.focus();
+      }, 100);
     }
   }, []);
 

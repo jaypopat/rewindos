@@ -34,7 +34,7 @@ export function FinishStep({ verdict, onStartTour }: FinishStepProps) {
       <div className="flex flex-col gap-2 rounded-md border border-border/50 bg-background/40 p-4 text-sm text-text-secondary">
         <p className="font-medium text-text-primary">See what RewindOS can do</p>
         <p className="text-xs text-text-muted">
-          Six quick stops — search, ask, rewind, journal, vault export, and AI setup.
+          Six quick stops — search, ask, history, journal, vault export, and AI setup.
         </p>
         <div>
           <Button size="sm" onClick={onStartTour}>

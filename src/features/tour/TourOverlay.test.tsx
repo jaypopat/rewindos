@@ -41,7 +41,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  document.querySelectorAll("[data-tour]").forEach((el) => el.remove());
+  document.querySelectorAll("[data-tour]").forEach((el) => { el.remove(); });
 });
 
 describe("TourOverlay", () => {
