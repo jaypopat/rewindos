@@ -122,7 +122,7 @@ export function ExportTab({ config, update }: TabProps) {
       <SectionTitle>Note Content</SectionTitle>
 
       <div className="py-3.5 border-b border-line">
-        <label className="text-sm font-medium text-text-primary">Sections</label>
+        <p className="text-sm font-medium text-text-primary">Sections</p>
         <p className="text-[12.5px] text-text-muted mt-0.5 leading-relaxed">
           Choose which sections appear in each daily note.
         </p>
@@ -238,10 +238,11 @@ export function ExportTab({ config, update }: TabProps) {
           <div className="space-y-3 pl-0">
             <div className="flex gap-3">
               <div className="flex-1">
-                <label className="text-[10px] text-text-muted font-mono uppercase tracking-wider">
+                <label htmlFor="vault-backfill-from" className="text-[10px] text-text-muted font-mono uppercase tracking-wider">
                   From
                 </label>
                 <Input
+                  id="vault-backfill-from"
                   type="date"
                   value={backfillFrom}
                   onChange={(e) => setBackfillFrom(e.target.value)}
@@ -249,10 +250,11 @@ export function ExportTab({ config, update }: TabProps) {
                 />
               </div>
               <div className="flex-1">
-                <label className="text-[10px] text-text-muted font-mono uppercase tracking-wider">
+                <label htmlFor="vault-backfill-to" className="text-[10px] text-text-muted font-mono uppercase tracking-wider">
                   To
                 </label>
                 <Input
+                  id="vault-backfill-to"
                   type="date"
                   value={backfillTo}
                   onChange={(e) => setBackfillTo(e.target.value)}
@@ -265,7 +267,7 @@ export function ExportTab({ config, update }: TabProps) {
                 variant="editorial"
                 size="editorial"
                 onClick={() => backfill.mutate()}
-                disabled={backfill.isPending}
+                disabled={backfill.isPending || !backfillFrom || !backfillTo || backfillFrom > backfillTo}
               >
                 {backfill.isPending ? "running..." : "Run backfill"}
               </Button>
