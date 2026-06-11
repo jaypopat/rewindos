@@ -38,6 +38,7 @@ Core flow: capture → OCR → full-text search, with optional semantic search v
 - `config.rs` — Config loading (SemanticConfig, ChatConfig, FocusConfig, etc.)
 - `vault/` — vault export: DayMemory gather, Obsidian/Logseq emitters, idempotent writer
 - `summary.rs` — shared day-recap generation (cached → LLM → digest)
+- `app_label.rs` — raw app-id → display-name resolution (.desktop lookup) + history backfill
 
 ## Key Documentation
 - `docs/architecture.md` — Full system architecture
