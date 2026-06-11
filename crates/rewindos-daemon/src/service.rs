@@ -44,6 +44,9 @@ pub struct DaemonService {
     pub meeting_tx: mpsc::Sender<MeetingCmd>,
     pub meeting_state: Arc<MeetingState>,
     pub mic_monitor: std::sync::Mutex<Option<crate::capture::audio::MicMonitor>>,
+    /// Serializes vault exports spawned by `ExportDay`/`ExportRange`. Runs are
+    /// idempotent, but overlapping exports would just duplicate work.
+    pub export_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
 /// Lock a mutex, logging a warning if it was poisoned.
@@ -394,26 +397,61 @@ impl DaemonService {
         Ok(lvl as f64)
     }
 
-    /// Render + write one day's vault companion note. `date` is "YYYY-MM-DD" (local).
+    /// Render + write one day's vault companion note. `date` is "YYYY-MM-DD"
+    /// (local). Returns when the export is STARTED, not finished: the export
+    /// (which may wait ~minutes on an LLM recap) runs in a background task so
+    /// it can't stall the sequential D-Bus dispatcher.
     async fn export_day(&self, date: &str) -> zbus::fdo::Result<()> {
         info!(date, "vault export day requested via D-Bus");
-        run_export(&self.db, &self.config, date)
-            .await
-            .map_err(|e| zbus::fdo::Error::Failed(format!("export {date}: {e}")))
+        // Validate eagerly so garbage input still errors at the call site.
+        local_day_bounds(date)
+            .map_err(|e| zbus::fdo::Error::Failed(format!("export {date}: {e:#}")))?;
+
+        let db = self.db.clone();
+        let config = self.config.clone();
+        let lock = self.export_lock.clone();
+        let date = date.to_string();
+        tokio::spawn(async move {
+            let _guard = lock.lock().await;
+            match run_export(&db, &config, &date).await {
+                Ok(()) => info!(%date, "vault export finished"),
+                Err(e) => warn!(%date, "vault export failed: {e:#}"),
+            }
+        });
+        Ok(())
     }
 
-    /// Render + write each day in [start_date, end_date] inclusive (local dates).
+    /// Render + write each day in [start_date, end_date] inclusive (local
+    /// dates). Returns when the backfill is STARTED, not finished: the days
+    /// are processed sequentially in a background task, and per-day failures
+    /// are logged without aborting the rest of the range.
     async fn export_range(&self, start_date: &str, end_date: &str) -> zbus::fdo::Result<()> {
         info!(start_date, end_date, "vault export range requested via D-Bus");
         let dates = dates_inclusive(start_date, end_date);
         if dates.is_empty() {
             return Err(zbus::fdo::Error::Failed("invalid date range".into()));
         }
-        for date in dates {
-            run_export(&self.db, &self.config, &date)
-                .await
-                .map_err(|e| zbus::fdo::Error::Failed(format!("export {date}: {e}")))?;
+        if dates.len() > 366 {
+            return Err(zbus::fdo::Error::Failed(
+                "range too large (max 366 days)".into(),
+            ));
         }
+
+        let db = self.db.clone();
+        let config = self.config.clone();
+        let lock = self.export_lock.clone();
+        tokio::spawn(async move {
+            let _guard = lock.lock().await;
+            let total = dates.len();
+            let mut failed = 0usize;
+            for date in dates {
+                if let Err(e) = run_export(&db, &config, &date).await {
+                    failed += 1;
+                    warn!(%date, "vault export failed: {e:#}");
+                }
+            }
+            info!(total, failed, "vault export range finished");
+        });
         Ok(())
     }
 
@@ -435,8 +473,7 @@ impl DaemonService {
 /// the daemon, so "enable export in Settings → Write now" must work without a
 /// daemon restart. Falls back to `startup_config` only if the reload fails.
 ///
-/// Shared by the D-Bus `ExportDay`/`ExportRange` methods and the end-of-day
-/// timer in main.rs.
+/// Shared by the D-Bus handlers and the end-of-day scheduler.
 pub async fn run_export(
     db: &Arc<Mutex<Database>>,
     startup_config: &Arc<AppConfig>,
@@ -446,7 +483,7 @@ pub async fn run_export(
     let config = match AppConfig::load() {
         Ok(c) => c,
         Err(e) => {
-            warn!("config reload failed, using startup config: {e}");
+            warn!("config reload failed, using startup config: {e:#}");
             (**startup_config).clone()
         }
     };
@@ -456,13 +493,26 @@ pub async fn run_export(
     }
     let (day_start, day_end) = local_day_bounds(date)?;
 
-    // Gather: blocking DB work off the async thread.
+    // Gather: blocking DB work off the async thread. Also reads the summary
+    // cache and the day's screenshot count while the lock is held.
     let db_clone = db.clone();
     let date_owned = date.to_string();
     let max = cfg.max_moments;
-    let mut mem = tokio::task::spawn_blocking(move || {
+    let (mut mem, cached, screenshot_count) = tokio::task::spawn_blocking(move || {
         let db = lock_db(&db_clone);
-        DayMemory::for_date(&db, &date_owned, day_start, day_end, max)
+        let mem = DayMemory::for_date(&db, &date_owned, day_start, day_end, max)?;
+        // A whitespace-only cache row is not a usable recap; treat it as
+        // absent so the fresh AI recap below still gets cached.
+        let cached = db
+            .get_daily_summary_cache(&date_owned)
+            .ok()
+            .flatten()
+            .and_then(|c| c.summary_text)
+            .filter(|t| !t.trim().is_empty());
+        let screenshot_count = db
+            .get_screenshot_count_in_range(day_start, day_end)
+            .unwrap_or(0);
+        anyhow::Ok((mem, cached, screenshot_count))
     })
     .await??;
 
@@ -471,13 +521,6 @@ pub async fn run_export(
     }
 
     // Three-tier recap: cached AI summary → generate via chat backend → digest.
-    let cached = {
-        let db = lock_db(db);
-        db.get_daily_summary_cache(date)
-            .ok()
-            .flatten()
-            .and_then(|c| c.summary_text)
-    };
     let digest = DigestInput {
         on_screen_secs: mem.stats.on_screen_secs,
         peak_hour: mem.stats.peak_hour,
@@ -490,18 +533,43 @@ pub async fn run_export(
     if is_ai && !was_cached {
         // Freshly generated — cache it so the app and re-renders reuse it.
         // Never cache the digest tier: a cached digest would read as a
-        // non-upgradeable AI summary.
-        let db = lock_db(db);
-        let _ = db.set_daily_summary_cache(&CachedDailySummary {
+        // non-upgradeable AI summary. Field shapes mirror the Tauri app's
+        // `set_daily_summary_cache` writer (its reader trusts this cache for
+        // past days): `app_breakdown` is a JSON array of AppTimeEntry
+        // {app_name, minutes, session_count}, `time_range` is "{start}-{end}"
+        // unix seconds.
+        let app_breakdown = serde_json::to_string(
+            &mem.stats
+                .app_minutes
+                .iter()
+                .map(|(app_name, minutes)| {
+                    serde_json::json!({
+                        "app_name": app_name,
+                        "minutes": *minutes as f64,
+                        "session_count": 0,
+                    })
+                })
+                .collect::<Vec<_>>(),
+        )
+        .unwrap_or_else(|_| "[]".to_string());
+        let entry = CachedDailySummary {
             date_key: date.to_string(),
             summary_text: Some(recap.clone()),
-            app_breakdown: "[]".to_string(),
+            app_breakdown,
             total_sessions: 0,
-            time_range: String::new(),
+            time_range: format!("{day_start}-{day_end}"),
             model_name: Some(config.chat.model.clone()),
             generated_at: chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string(),
-            screenshot_count: 0,
-        });
+            screenshot_count,
+        };
+        let db_clone = db.clone();
+        tokio::task::spawn_blocking(move || {
+            let db = lock_db(&db_clone);
+            if let Err(e) = db.set_daily_summary_cache(&entry) {
+                warn!("failed to cache daily summary: {e:#}");
+            }
+        })
+        .await?;
     }
     mem.recap = Some(recap);
 
@@ -510,15 +578,18 @@ pub async fn run_export(
     Ok(())
 }
 
-/// Local timestamp of `d`'s midnight; `None` if midnight does not exist
-/// locally (DST gap) — callers fall back or error.
+/// Local timestamp of `d`'s midnight. When local midnight does not exist
+/// (spring-forward DST gap at 00:00, e.g. America/Santiago), falls back to
+/// 01:00; `None` only if both are unrepresentable.
 fn local_midnight_ts(d: chrono::NaiveDate) -> Option<i64> {
     use chrono::TimeZone;
-    let dt = d.and_hms_opt(0, 0, 0)?;
-    chrono::Local
-        .from_local_datetime(&dt)
-        .earliest()
-        .map(|t| t.timestamp())
+    [(0, 0), (1, 0)].into_iter().find_map(|(h, m)| {
+        let dt = d.and_hms_opt(h, m, 0)?;
+        chrono::Local
+            .from_local_datetime(&dt)
+            .earliest()
+            .map(|t| t.timestamp())
+    })
 }
 
 /// Local-day `[start, end)` unix-second bounds for a "YYYY-MM-DD" date.

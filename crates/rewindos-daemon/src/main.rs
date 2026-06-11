@@ -821,6 +821,7 @@ async fn run_daemon() -> anyhow::Result<()> {
         meeting_tx,
         meeting_state,
         mic_monitor: std::sync::Mutex::new(None),
+        export_lock: Arc::new(tokio::sync::Mutex::new(())),
     };
 
     dbus_conn
