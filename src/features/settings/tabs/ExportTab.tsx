@@ -150,7 +150,7 @@ export function ExportTab({ config, update }: TabProps) {
         </div>
       </div>
 
-      <Field label="Key moments" hint="Max screenshot moments per day (0 = unlimited)">
+      <Field label="Key moments" hint="Max screenshot moments per day (0 disables key moments)">
         <NumberInput
           value={vc.max_moments}
           min={0}
@@ -168,7 +168,7 @@ export function ExportTab({ config, update }: TabProps) {
 
       <SectionTitle>Schedule</SectionTitle>
 
-      <Field label="Finalize day at hour" hint="Hour (0–23) after which the previous day's note is written">
+      <Field label="Finalize day at hour" hint="Hour (0–23) after which the day's note is finalized; if the machine was asleep, the previous day is caught up on wake or after midnight">
         <NumberInput
           value={vc.end_of_day_hour}
           min={0}
@@ -212,7 +212,7 @@ export function ExportTab({ config, update }: TabProps) {
             {writeToday.isPending ? "writing..." : "Write today now"}
           </Button>
           {writeToday.isSuccess && (
-            <span className="font-mono text-[11px] text-signal-success">
+            <span className="font-mono text-[11px] text-signal-active">
               export started
             </span>
           )}
@@ -272,7 +272,7 @@ export function ExportTab({ config, update }: TabProps) {
                 {backfill.isPending ? "running..." : "Run backfill"}
               </Button>
               {backfill.isSuccess && (
-                <span className="font-mono text-[11px] text-signal-success">
+                <span className="font-mono text-[11px] text-signal-active">
                   export started
                 </span>
               )}

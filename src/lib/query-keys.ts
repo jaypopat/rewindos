@@ -1,5 +1,17 @@
 import type { SearchFilters } from "./api";
 
+/** Non-reversible fingerprint so secrets never appear in cache keys
+ * (query keys are visible in devtools and cache dumps). djb2, not crypto —
+ * it only needs to change when the secret changes. */
+function fingerprint(secret: string): string {
+  if (!secret) return "none";
+  let h = 5381;
+  for (let i = 0; i < secret.length; i++) {
+    h = ((h << 5) + h + secret.charCodeAt(i)) >>> 0;
+  }
+  return h.toString(36);
+}
+
 export const queryKeys = {
   search: (query: string, filters: SearchFilters) =>
     ["search", query, filters] as const,
@@ -13,7 +25,8 @@ export const queryKeys = {
   dailySummary: (dateKey: string) => ["daily-summary", dateKey] as const,
   chatHealth: (baseUrl: string) => ["chat-health", baseUrl] as const,
   claudeStatus: () => ["claude-status"] as const,
-  chatModels: (baseUrl: string, apiKey: string) => ["chat-models", baseUrl, apiKey] as const,
+  chatModels: (baseUrl: string, apiKey: string) =>
+    ["chat-models", baseUrl, fingerprint(apiKey)] as const,
   hourlyBrowse: (startTime: number, endTime: number) =>
     ["hourly-browse", startTime, endTime] as const,
   rewind: (start: number, end: number) => ["rewind", start, end] as const,
