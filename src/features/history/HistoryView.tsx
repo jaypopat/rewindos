@@ -28,7 +28,7 @@ export function HistoryView({ onSelectScreenshot, onRewindToRange }: HistoryView
   return (
     <div className="flex-1 flex flex-col overflow-hidden px-5 py-4">
       {/* Header + Mode toggle + Range selector */}
-      <div className="flex items-center justify-between mb-4">
+      <div data-tour="history-header" className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
           <h2 className="font-display text-xl text-text-primary">History</h2>
           <div className="flex gap-0.5 bg-surface-raised rounded-lg p-0.5">

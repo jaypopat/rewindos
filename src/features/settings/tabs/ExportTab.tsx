@@ -109,15 +109,17 @@ export function ExportTab({ config, update }: TabProps) {
         </Select>
       </Field>
 
-      <Field
-        label="Vault path"
-        hint="Absolute path to your Obsidian vault / Logseq graph root"
-      >
-        <TextInput
-          value={vc.vault_path}
-          onChange={(v) => update("vault_export", "vault_path", v)}
-        />
-      </Field>
+      <div data-tour="export-vault">
+        <Field
+          label="Vault path"
+          hint="Absolute path to your Obsidian vault / Logseq graph root"
+        >
+          <TextInput
+            value={vc.vault_path}
+            onChange={(v) => update("vault_export", "vault_path", v)}
+          />
+        </Field>
+      </div>
 
       <SectionTitle>Note Content</SectionTitle>
 

@@ -3,6 +3,8 @@ import { useConfig } from "./hooks/useConfig";
 import { getDaemonStatus } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { useTour } from "@/features/tour/TourContext";
+import { TOUR_STOPS } from "@/features/tour/tour-stops";
 import { GeneralTab } from "./tabs/GeneralTab";
 import { CaptureTab } from "./tabs/CaptureTab";
 import { PrivacyTab } from "./tabs/PrivacyTab";
@@ -30,6 +32,13 @@ const TABS: { id: Tab; label: string }[] = [
 export function SettingsView() {
   const [tab, setTab] = useState<Tab>("general");
   const { config, saving, saved, error, handleSave, update } = useConfig();
+
+  const { active: tourActive, stepIndex: tourStep } = useTour();
+  useEffect(() => {
+    if (!tourActive) return;
+    const settingsTab = TOUR_STOPS[tourStep]?.settingsTab;
+    if (settingsTab) setTab(settingsTab);
+  }, [tourActive, tourStep]);
 
   const [desktop, setDesktop] = useState<string | null>(null);
   useEffect(() => {

@@ -50,6 +50,7 @@ export function SearchBar(
           <Search className="size-[22px] text-accent flex-none" strokeWidth={1.7} />
           <Input
             ref={ref}
+            data-tour="search-input"
             type="text"
             value={query}
             onChange={(e) => onQueryChange(e.target.value)}

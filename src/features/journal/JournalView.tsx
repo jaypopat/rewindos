@@ -46,7 +46,7 @@ export function JournalView({ onSelectScreenshot }: JournalViewProps) {
       {/* Left panel: Editor */}
       <div className="flex-1 flex flex-col min-w-0 border-r border-border/50">
         {/* Date nav + search */}
-        <div className="flex items-center gap-2 px-5 py-3 border-b border-border/50 shrink-0">
+        <div data-tour="journal-header" className="flex items-center gap-2 px-5 py-3 border-b border-border/50 shrink-0">
           <Button variant="quiet" size="icon-sm"
             onClick={j.goToPrev}
             title="Previous day (Alt+←)"

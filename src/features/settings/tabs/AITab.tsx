@@ -83,7 +83,7 @@ export function AITab({ config, update }: TabProps) {
       </Field>
       <Field label="Provider">
         <Select value={preset.id} onValueChange={onProviderChange}>
-          <SelectTrigger className="font-mono">
+          <SelectTrigger className="font-mono" data-tour="ai-provider">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>

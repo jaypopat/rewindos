@@ -215,6 +215,7 @@ export function AskView({ onSelectScreenshot }: AskViewProps) {
               </div>
             )}
             <PromptInput
+              data-tour="ask-input"
               onSubmit={onPromptSubmit}
               className="border border-line-2 bg-surface-raised focus-within:border-line-hi transition-colors rounded-xl"
             >
