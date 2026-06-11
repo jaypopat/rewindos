@@ -7,9 +7,9 @@ export function WelcomeStep() {
         (OCR), and gives you instant full-text search of everything you've seen.
       </p>
       <p className="text-sm leading-relaxed text-text-secondary">
-        It's <span className="font-medium text-text-primary">100% local</span> — your
-        screenshots and their text never leave this machine. No cloud, no account, no
-        telemetry.
+        It's <span className="font-medium text-text-primary">100% local by default</span> —
+        nothing leaves this machine unless you explicitly connect a cloud AI provider.
+        No account, no telemetry.
       </p>
       <p className="text-xs text-text-muted">
         Next, we'll make sure capture is actually working on your setup.

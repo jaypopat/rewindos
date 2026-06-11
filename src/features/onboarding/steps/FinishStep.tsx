@@ -1,4 +1,5 @@
 import type { CaptureVerdict, VerdictCode } from "../deriveCaptureVerdict";
+import { Button } from "@/components/ui/button";
 
 const CLOSING: Record<VerdictCode, string> = {
   working: "You're all set — capture is working.",
@@ -21,13 +22,26 @@ const CLOSING: Record<VerdictCode, string> = {
 
 interface FinishStepProps {
   verdict: CaptureVerdict;
+  onStartTour: () => void;
 }
 
-export function FinishStep({ verdict }: FinishStepProps) {
+export function FinishStep({ verdict, onStartTour }: FinishStepProps) {
   return (
     <div className="flex flex-col gap-4">
       <h2 className="text-xl font-semibold text-text-primary">You're ready</h2>
       <p className="text-sm leading-relaxed text-text-secondary">{CLOSING[verdict.code]}</p>
+
+      <div className="flex flex-col gap-2 rounded-md border border-border/50 bg-background/40 p-4 text-sm text-text-secondary">
+        <p className="font-medium text-text-primary">See what RewindOS can do</p>
+        <p className="text-xs text-text-muted">
+          Six quick stops — search, ask, rewind, journal, vault export, and AI setup.
+        </p>
+        <div>
+          <Button size="sm" onClick={onStartTour}>
+            Take the tour (1 min)
+          </Button>
+        </div>
+      </div>
 
       <div className="flex flex-col gap-2 rounded-md border border-border/50 bg-background/40 p-4 text-sm text-text-secondary">
         <p>

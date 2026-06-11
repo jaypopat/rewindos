@@ -10,6 +10,7 @@ import {
 } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import { useOnboarding } from "./OnboardingContext";
+import { useTour } from "@/features/tour/TourContext";
 import { deriveCaptureVerdict, type VerdictAction } from "./deriveCaptureVerdict";
 import { WizardShell } from "./WizardShell";
 import { WelcomeStep } from "./steps/WelcomeStep";
@@ -30,6 +31,7 @@ export function FirstRunWizard() {
 
 function WizardBody() {
   const { complete } = useOnboarding();
+  const { start: startTour } = useTour();
   const [stepIndex, setStepIndex] = useState(0);
   const [busy, setBusy] = useState(false);
   const qc = useQueryClient();
@@ -67,6 +69,10 @@ function WizardBody() {
     else setStepIndex((i) => i + 1);
   }, [isLast, complete]);
   const onBack = useCallback(() => setStepIndex((i) => Math.max(0, i - 1)), []);
+  const onStartTour = useCallback(() => {
+    complete();
+    startTour();
+  }, [complete, startTour]);
 
   // Esc skips — matches the app's overlay convention (ConfirmDialog,
   // JournalSearchPanel). Enter advances only via the focused Next button's own
@@ -90,7 +96,7 @@ function WizardBody() {
       {step === "welcome" && <WelcomeStep />}
       {step === "capture" && <CaptureStep verdict={verdict} onAction={(a) => void onAction(a)} busy={busy} />}
       {step === "privacy" && <PrivacyStep />}
-      {step === "finish" && <FinishStep verdict={verdict} />}
+      {step === "finish" && <FinishStep verdict={verdict} onStartTour={onStartTour} />}
     </WizardShell>
   );
 }

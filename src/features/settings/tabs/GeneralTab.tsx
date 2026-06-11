@@ -4,6 +4,7 @@ import { Field } from "../primitives/Field";
 import { TextInput } from "../primitives/TextInput";
 import { Button } from "@/components/ui/button";
 import { useOnboarding } from "@/features/onboarding/OnboardingContext";
+import { useTour } from "@/features/tour/TourContext";
 
 interface TabProps {
   config: AppConfig;
@@ -14,6 +15,7 @@ interface TabProps {
 
 export function GeneralTab({ config, update }: TabProps) {
   const { open } = useOnboarding();
+  const { start: startTour } = useTour();
   return (
     <>
       <SectionTitle>General</SectionTitle>
@@ -26,6 +28,11 @@ export function GeneralTab({ config, update }: TabProps) {
       <Field label="Setup">
         <Button variant="outline" size="xs" onClick={open}>
           Run setup again
+        </Button>
+      </Field>
+      <Field label="Feature tour">
+        <Button variant="outline" size="xs" onClick={startTour}>
+          Replay feature tour
         </Button>
       </Field>
     </>
