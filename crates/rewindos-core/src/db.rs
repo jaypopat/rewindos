@@ -1066,6 +1066,23 @@ impl Database {
         Ok(names)
     }
 
+    /// All distinct non-null app names in the screenshots table.
+    pub fn distinct_app_names(&self) -> Result<Vec<String>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT DISTINCT app_name FROM screenshots WHERE app_name IS NOT NULL")?;
+        let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+        Ok(rows.filter_map(|r| r.ok()).collect())
+    }
+
+    /// Rename every screenshot row with app_name `from` to `to`. Returns rows changed.
+    pub fn rename_app(&self, from: &str, to: &str) -> Result<u64> {
+        let n = self
+            .conn
+            .execute("UPDATE screenshots SET app_name = ?2 WHERE app_name = ?1", [from, to])?;
+        Ok(n as u64)
+    }
+
     /// Full-text search with filters, pagination, snippet highlighting, and scene dedup.
     pub fn search(&self, filters: &SearchFilters) -> Result<SearchResponse> {
         self.search_deduped(filters, DEDUP_THRESHOLD)
@@ -3952,5 +3969,28 @@ mod tests {
             )
             .unwrap();
         assert_eq!(status, "done");
+    }
+
+    #[test]
+    fn test_distinct_app_names_and_rename() {
+        let db = make_test_db();
+        let mut a = make_screenshot(1000);
+        a.app_name = Some("org.kde.dolphin".into());
+        let mut b = make_screenshot(2000);
+        b.app_name = Some("org.kde.dolphin".into());
+        let mut c = make_screenshot(3000);
+        c.app_name = Some("firefox".into());
+        for s in [&a, &b, &c] {
+            db.insert_screenshot(s).unwrap();
+        }
+        let mut names = db.distinct_app_names().unwrap();
+        names.sort();
+        assert_eq!(names, vec!["firefox".to_string(), "org.kde.dolphin".to_string()]);
+
+        let n = db.rename_app("org.kde.dolphin", "Dolphin").unwrap();
+        assert_eq!(n, 2);
+        let mut names = db.distinct_app_names().unwrap();
+        names.sort();
+        assert_eq!(names, vec!["Dolphin".to_string(), "firefox".to_string()]);
     }
 }

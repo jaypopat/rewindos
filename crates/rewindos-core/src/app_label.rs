@@ -6,6 +6,9 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+use crate::db::Database;
+use crate::error::Result;
+
 /// One parsed .desktop entry (the `[Desktop Entry]` group only).
 struct DesktopEntry {
     basename: String, // file name without .desktop
@@ -115,6 +118,26 @@ fn fallback_label(raw: &str) -> String {
         Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
         None => String::new(),
     }
+}
+
+pub const BACKFILL_FLAG: &str = "app_label_backfill_done";
+
+/// One-time rename of historical screenshot app_names to display names.
+/// Guarded by a daemon_state flag; returns the number of distinct names renamed.
+pub fn backfill_app_labels(db: &Database, resolver: &AppLabelResolver) -> Result<usize> {
+    if db.get_daemon_state(BACKFILL_FLAG)?.as_deref() == Some("1") {
+        return Ok(0);
+    }
+    let mut renamed = 0usize;
+    for raw in db.distinct_app_names()? {
+        let resolved = resolver.resolve(&raw);
+        if resolved != raw {
+            db.rename_app(&raw, &resolved)?;
+            renamed += 1;
+        }
+    }
+    db.set_daemon_state(BACKFILL_FLAG, "1")?;
+    Ok(renamed)
 }
 
 /// Minimal .desktop parser: unlocalized Name=, StartupWMClass=, NoDisplay=
@@ -237,5 +260,37 @@ mod tests {
     #[test]
     fn empty_passthrough() {
         assert_eq!(resolver().resolve(""), "");
+    }
+
+    #[test]
+    fn backfill_renames_once_and_sets_flag() {
+        let db = crate::db::Database::open_in_memory().unwrap();
+        let mut s = crate::schema::NewScreenshot {
+            timestamp: 1000,
+            timestamp_ms: 1_000_000,
+            app_name: Some("org.kde.dolphin".into()),
+            window_title: Some("t".into()),
+            window_class: Some("dolphin".into()),
+            file_path: "/f/a.webp".into(),
+            thumbnail_path: None,
+            width: 1,
+            height: 1,
+            file_size_bytes: 1,
+            perceptual_hash: vec![0u8; 8],
+        };
+        db.insert_screenshot(&s).unwrap();
+        s.timestamp = 2000;
+        s.app_name = Some("alreadyfine".into());
+        db.insert_screenshot(&s).unwrap();
+
+        let r = resolver(); // fixture resolver from this module
+        let renamed = backfill_app_labels(&db, &r).unwrap();
+        assert_eq!(renamed, 2); // dolphin -> Dolphin, alreadyfine -> Alreadyfine
+        let names = db.distinct_app_names().unwrap();
+        assert!(names.contains(&"Dolphin".to_string()));
+        assert!(names.contains(&"Alreadyfine".to_string()));
+
+        // second run: flag set, no-op
+        assert_eq!(backfill_app_labels(&db, &r).unwrap(), 0);
     }
 }
