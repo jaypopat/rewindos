@@ -13,9 +13,9 @@ import {
   ModelSelectorTrigger,
 } from "@/components/ai-elements/model-selector";
 import { Button } from "@/components/ui/button";
-import { getConfig, chatListModels } from "@/lib/api";
+import { getConfig, chatListModels, claudeDetect } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
-import { CLAUDE_MODELS, DEFAULT_CLAUDE_MODEL } from "@/lib/claude-models";
+import { CLAUDE_MODELS, resolveChatRoute } from "@/lib/claude-models";
 import { useAskChat } from "@/context/AskContext";
 import { cn } from "@/lib/utils";
 
@@ -42,6 +42,14 @@ export function AskModelPicker() {
     staleTime: 60_000,
   });
 
+  // Shares AskView's cached query — no extra CLI probe on mount.
+  const { data: claudeStatus } = useQuery({
+    queryKey: queryKeys.claudeStatus(),
+    queryFn: claudeDetect,
+    staleTime: 30_000,
+  });
+  const claudeReady = !!(claudeStatus?.available && claudeStatus.mcp_registered);
+
   // Locked state: chat is active and has a model set
   if (activeChat?.model) {
     return (
@@ -55,8 +63,16 @@ export function AskModelPicker() {
     );
   }
 
-  // Editable state: no active chat yet (or chat not yet sent)
-  const currentDisplay = pendingModel ?? defaultOllama ?? DEFAULT_CLAUDE_MODEL;
+  // Editable state: no active chat yet (or chat not yet sent).
+  // Display MUST mirror what a send would actually use: the same resolveChatRoute
+  // the send path calls (AskContext), with the same inputs. Anything else shows a
+  // model that won't be the one answering (e.g. "qwen…" shown, sonnet used).
+  const currentDisplay =
+    resolveChatRoute({
+      selectedModel: pendingModel ?? null,
+      claudeReady,
+      ollamaDefaultModel: defaultOllama ?? "",
+    }).model || "…";
 
   const pick = (id: string) => {
     setPendingModel(id);
