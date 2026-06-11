@@ -1664,6 +1664,18 @@ async fn delete_screenshots_in_range(
 // -- Settings commands --
 
 #[tauri::command]
+async fn chat_health_check(chat: rewindos_core::config::ChatConfig) -> Result<bool, String> {
+    let client = rewindos_core::chat::ChatClient::new(&chat);
+    client.health_check().await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn chat_list_models(chat: rewindos_core::config::ChatConfig) -> Result<Vec<String>, String> {
+    let client = rewindos_core::chat::ChatClient::new(&chat);
+    client.list_models().await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn get_config(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
     let cfg = state
         .config
@@ -1682,7 +1694,8 @@ fn update_config(state: State<'_, AppState>, config_json: serde_json::Value) -> 
     let config_path = base_dir.join("config.toml");
     let toml_str =
         toml::to_string_pretty(&new_config).map_err(|e| format!("serialize toml: {e}"))?;
-    std::fs::write(&config_path, toml_str).map_err(|e| format!("write config: {e}"))?;
+    rewindos_core::config::write_config_file(&config_path, &toml_str)
+        .map_err(|e| format!("write config: {e}"))?;
 
     // Update in-memory config
     let mut cfg = state
@@ -2116,6 +2129,8 @@ pub fn run() {
             delete_screenshots_in_range,
             get_config,
             update_config,
+            chat_health_check,
+            chat_list_models,
             toggle_bookmark,
             is_bookmarked,
             get_bookmarked_ids,

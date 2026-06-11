@@ -412,10 +412,18 @@ pub fn resolve_tilde_pub(path: &str) -> Result<PathBuf> {
 }
 
 /// Write a config TOML file with owner-only (0600) permissions — the chat
-/// section may contain an API key.
+/// section may contain an API key. Creates with 0600 from the start and
+/// re-tightens pre-existing files.
 pub fn write_config_file(path: &Path, toml_str: &str) -> Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-    fs::write(path, toml_str)?;
+    use std::io::Write;
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+    let mut f = fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(path)?;
+    f.write_all(toml_str.as_bytes())?;
     fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
     Ok(())
 }
@@ -584,5 +592,18 @@ model = "llama3"
         write_config_file(&path, "x = 1\n").unwrap();
         let mode = fs::metadata(&path).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o600);
+    }
+
+    #[test]
+    fn write_config_file_repairs_existing_world_readable_file() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        fs::write(&path, "old = 1\n").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        write_config_file(&path, "new = 2\n").unwrap();
+        let mode = fs::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
+        assert_eq!(fs::read_to_string(&path).unwrap(), "new = 2\n");
     }
 }
