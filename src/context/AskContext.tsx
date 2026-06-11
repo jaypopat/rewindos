@@ -194,7 +194,7 @@ export function AskProvider({ children }: { children: ReactNode }) {
 
           abortRef.current = new AbortController();
           await ollamaChat({
-            baseUrl: config.chat.ollama_url,
+            baseUrl: config.chat.base_url,
             model: effectiveModel || config.chat.model,
             temperature: config.chat.temperature,
             messages: ollamaMessages,

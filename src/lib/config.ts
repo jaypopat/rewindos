@@ -35,7 +35,9 @@ export interface AppConfig {
   };
   chat: {
     enabled: boolean;
-    ollama_url: string;
+    provider: string;
+    base_url: string;
+    api_key: string;
     model: string;
     max_context_tokens: number;
     max_history_messages: number;

@@ -74,7 +74,7 @@ export function AskView({ onSelectScreenshot }: AskViewProps) {
     queryKey: queryKeys.ollamaHealth(),
     queryFn: () =>
       config
-        ? ollamaHealth(config.chat.ollama_url)
+        ? ollamaHealth(config.chat.base_url)
         : false,
     enabled: !!config,
     refetchInterval: 60_000,

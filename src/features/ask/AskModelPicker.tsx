@@ -26,7 +26,7 @@ export function AskModelPicker() {
     queryKey: queryKeys.config(),
     queryFn: getConfig,
   });
-  const ollamaUrl = config?.chat.ollama_url ?? "";
+  const ollamaUrl = config?.chat.base_url ?? "";
   const defaultOllama = config?.chat.model;
 
   const { data: ollamaModels = [] } = useQuery({

@@ -135,7 +135,7 @@ export function useJournalEntry() {
   const { data: ollamaAvailable } = useQuery({
     queryKey: queryKeys.ollamaHealth(),
     queryFn: () =>
-      journalConfig ? ollamaHealth(journalConfig.chat.ollama_url) : false,
+      journalConfig ? ollamaHealth(journalConfig.chat.base_url) : false,
     enabled: !!journalConfig,
     staleTime: 120_000,
   });

@@ -423,8 +423,10 @@ pub fn write_config_file(path: &Path, toml_str: &str) -> Result<()> {
         .truncate(true)
         .mode(0o600)
         .open(path)?;
+    // Tighten perms before writing the secret-bearing content (fchmod on the
+    // handle — repairs pre-existing world-readable files with no window).
+    f.set_permissions(fs::Permissions::from_mode(0o600))?;
     f.write_all(toml_str.as_bytes())?;
-    fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
     Ok(())
 }
 

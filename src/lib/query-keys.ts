@@ -13,6 +13,7 @@ export const queryKeys = {
   dailySummary: (dateKey: string) => ["daily-summary", dateKey] as const,
   ollamaHealth: () => ["ollama-health"] as const,
   claudeStatus: () => ["claude-status"] as const,
+  chatModels: (baseUrl: string, apiKey: string) => ["chat-models", baseUrl, apiKey] as const,
   hourlyBrowse: (startTime: number, endTime: number) =>
     ["hourly-browse", startTime, endTime] as const,
   rewind: (start: number, end: number) => ["rewind", start, end] as const,

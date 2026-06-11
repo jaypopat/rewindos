@@ -716,11 +716,11 @@ export async function updateConfig(
   return invoke("update_config", { configJson: config });
 }
 
-export function chatHealthCheck(chat: AppConfig["chat"]): Promise<boolean> {
+export async function chatHealthCheck(chat: AppConfig["chat"]): Promise<boolean> {
   return invoke("chat_health_check", { chat });
 }
 
-export function chatListModels(chat: AppConfig["chat"]): Promise<string[]> {
+export async function chatListModels(chat: AppConfig["chat"]): Promise<string[]> {
   return invoke("chat_list_models", { chat });
 }
 
