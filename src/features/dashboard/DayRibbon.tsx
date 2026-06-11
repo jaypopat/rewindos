@@ -20,7 +20,10 @@ export function DayRibbon({
   onPickMoment?: (timestamp: number) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  // Position survives mouse-leave so the playhead fades out in place instead
+  // of sweeping back across the strip.
   const [hoverX, setHoverX] = useState<number | null>(null);
+  const [hovering, setHovering] = useState(false);
 
   if (spans.length === 0) return null;
   const d0 = spans[0].startTime;
@@ -32,6 +35,7 @@ export function DayRibbon({
     if (!ref.current) return;
     const r = ref.current.getBoundingClientRect();
     setHoverX(Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)));
+    setHovering(true);
   };
 
   // Mono axis: five evenly spaced clock ticks, ending on "now"
@@ -42,7 +46,7 @@ export function DayRibbon({
       <div
         ref={ref}
         onMouseMove={onMove}
-        onMouseLeave={() => setHoverX(null)}
+        onMouseLeave={() => setHovering(false)}
         onClick={() => {
           if (hoverX != null && onPickMoment) onPickMoment(Math.floor(atX(hoverX)));
         }}
@@ -79,12 +83,13 @@ export function DayRibbon({
             </Rise>
           ))}
         </div>
-        {/* Playhead — sits at "now", follows the cursor on hover */}
+        {/* Playhead — follows the cursor, fades out in place on leave */}
         <div
           className="absolute -top-[5px] -bottom-[5px] w-[1.5px] bg-accent"
           style={{
-            left: hoverX != null ? `${hoverX * 100}%` : "100%",
-            transition: hoverX != null ? "none" : "left .4s ease",
+            left: `${(hoverX ?? 1) * 100}%`,
+            opacity: hovering ? 1 : 0,
+            transition: "opacity .15s ease",
             boxShadow: "0 0 10px 1px var(--color-accent-line)",
           }}
         >
