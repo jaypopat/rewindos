@@ -67,4 +67,15 @@ export interface AppConfig {
     mic_source: string;
     echo_cancel: boolean;
   };
+  vault_export: {
+    enabled: boolean;
+    format: "obsidian" | "logseq";
+    vault_path: string;
+    companion_dir: string;
+    sections: string[];
+    max_moments: number;
+    copy_thumbnails: boolean;
+    end_of_day_hour: number;
+    create_daily_note_if_absent: boolean;
+  };
 }

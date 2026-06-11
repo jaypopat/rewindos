@@ -704,6 +704,16 @@ export async function downloadWhisperModel(): Promise<void> {
   return invoke("download_whisper_model");
 }
 
+// -- Vault Export --
+
+export async function vaultExportDay(date: string): Promise<void> {
+  return invoke("vault_export_day", { date });
+}
+
+export async function vaultExportRange(start: string, end: string): Promise<void> {
+  return invoke("vault_export_range", { start, end });
+}
+
 // -- Settings --
 
 export async function getConfig(): Promise<AppConfig> {
