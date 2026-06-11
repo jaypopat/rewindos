@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { useEffect } from "react";
 import { TourProvider, useTour } from "./TourContext";
 import { TourOverlay } from "./TourOverlay";
@@ -58,6 +58,10 @@ describe("TourOverlay", () => {
     render(<Harness />);
     expect(navigateSpy).toHaveBeenCalledWith(TOUR_STOPS[0].view);
     expect(await screen.findByText(TOUR_STOPS[0].title)).toBeTruthy();
+
+    // Spotlight cutout should be present; full-dim backdrop should be absent.
+    expect(screen.getByTestId("tour-spotlight")).toBeTruthy();
+    expect(screen.queryByTestId("tour-dim")).toBeNull();
   });
 
   it("falls back to a centered card when the anchor never appears", async () => {
@@ -69,7 +73,11 @@ describe("TourOverlay", () => {
       vi.runAllTimers();
     });
     vi.useRealTimers();
+
+    // Full-dim backdrop should be present; spotlight cutout should be absent.
     expect(await screen.findByText(TOUR_STOPS[0].title)).toBeTruthy();
+    expect(screen.getByTestId("tour-dim")).toBeTruthy();
+    expect(screen.queryByTestId("tour-spotlight")).toBeNull();
   });
 
   it("Escape ends the tour", async () => {
@@ -87,5 +95,22 @@ describe("TourOverlay", () => {
 
     expect(screen.queryByText(TOUR_STOPS[0].title)).toBeNull();
     expect(localStorage.getItem("rewindos-tour-seen")).toBe("1");
+  });
+
+  it("clicking Next advances to stop 2 and calls onNavigate with its view", async () => {
+    // Add anchors for both stops so the card renders immediately after Next.
+    [TOUR_STOPS[0].anchor, TOUR_STOPS[1].anchor].forEach((a) => {
+      const el = document.createElement("div");
+      el.setAttribute("data-tour", a);
+      document.body.appendChild(el);
+    });
+
+    render(<Harness />);
+    await screen.findByText(TOUR_STOPS[0].title);
+
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+
+    expect(await screen.findByText(TOUR_STOPS[1].title)).toBeTruthy();
+    expect(navigateSpy).toHaveBeenCalledWith(TOUR_STOPS[1].view);
   });
 });

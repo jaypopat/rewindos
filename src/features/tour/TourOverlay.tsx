@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { autoUpdate, flip, offset, shift, useFloating } from "@floating-ui/react";
 import { useHotkey } from "@tanstack/react-hotkeys";
@@ -115,16 +115,28 @@ function TourStep({
     });
   }, [rect, refs]);
 
+  // Focus the primary action button when the card appears.
+  const primaryBtnRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (rect != null || timedOut) {
+      primaryBtnRef.current?.focus();
+    }
+  }, [rect, timedOut]);
+
   // Esc ends — same overlay convention as ConfirmDialog/JournalSearchPanel.
   useHotkey("Escape", () => end());
 
   const isLast = stepIndex === TOUR_STOPS.length - 1;
   const spotlight = rect != null && !timedOut;
+  // While still polling (no rect yet and not timed out) render only the dim
+  // backdrop so the card doesn't flash centered before jumping to spotlight.
+  const cardReady = rect != null || timedOut;
 
   return createPortal(
-    <div className="fixed inset-0 z-[60]" role="dialog" aria-label="Feature tour">
+    <div className="fixed inset-0 z-[60]" role="dialog" aria-modal="true" aria-label="Feature tour">
       {spotlight ? (
         <div
+          data-testid="tour-spotlight"
           className="absolute rounded-lg"
           style={{
             top: rect.top - SPOTLIGHT_PAD,
@@ -135,49 +147,51 @@ function TourStep({
           }}
         />
       ) : (
-        <div className="absolute inset-0" style={{ background: DIM }} />
+        <div data-testid="tour-dim" className="absolute inset-0" style={{ background: DIM }} />
       )}
 
-      <div
-        ref={refs.setFloating}
-        style={spotlight ? floatingStyles : undefined}
-        className={
-          spotlight
-            ? "w-[340px]"
-            : "absolute left-1/2 top-1/2 w-[340px] -translate-x-1/2 -translate-y-1/2"
-        }
-      >
-        <div className="flex flex-col gap-3 rounded-lg border border-border/60 bg-surface p-5 shadow-2xl">
-          <h3 className="text-sm font-semibold text-text-primary">{stop.title}</h3>
-          <p className="text-[12.5px] leading-relaxed text-text-secondary">{stop.body}</p>
-          <div className="flex items-center justify-between pt-1">
-            <div className="flex items-center gap-1.5" aria-hidden>
-              {TOUR_STOPS.map((s, i) => (
-                <span
-                  key={s.id}
-                  className={`size-1.5 rounded-full ${i === stepIndex ? "bg-accent" : "bg-border/60"}`}
-                />
-              ))}
-            </div>
-            <div className="flex items-center gap-2">
-              <Button
-                variant="editorial-muted"
-                size="editorial"
-                onClick={end}
-                className="border-0 px-0 hover:bg-transparent hover:text-text-primary"
-              >
-                End tour
-              </Button>
-              <Button variant="ghost" size="sm" onClick={back} disabled={stepIndex === 0}>
-                Back
-              </Button>
-              <Button size="sm" onClick={next}>
-                {isLast ? "Finish" : "Next"}
-              </Button>
+      {cardReady && (
+        <div
+          ref={refs.setFloating}
+          style={spotlight ? floatingStyles : undefined}
+          className={
+            spotlight
+              ? "w-[340px]"
+              : "absolute left-1/2 top-1/2 w-[340px] -translate-x-1/2 -translate-y-1/2"
+          }
+        >
+          <div className="flex flex-col gap-3 rounded-lg border border-border/60 bg-surface p-5 shadow-2xl">
+            <h3 className="text-sm font-semibold text-text-primary">{stop.title}</h3>
+            <p className="text-[12.5px] leading-relaxed text-text-secondary">{stop.body}</p>
+            <div className="flex items-center justify-between pt-1">
+              <div className="flex items-center gap-1.5" aria-hidden>
+                {TOUR_STOPS.map((s, i) => (
+                  <span
+                    key={s.id}
+                    className={`size-1.5 rounded-full ${i === stepIndex ? "bg-accent" : "bg-border/60"}`}
+                  />
+                ))}
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="editorial-muted"
+                  size="editorial"
+                  onClick={end}
+                  className="border-0 px-0 hover:bg-transparent hover:text-text-primary"
+                >
+                  End tour
+                </Button>
+                <Button variant="ghost" size="sm" onClick={back} disabled={stepIndex === 0}>
+                  Back
+                </Button>
+                <Button ref={primaryBtnRef} size="sm" onClick={next}>
+                  {isLast ? "Finish" : "Next"}
+                </Button>
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      )}
     </div>,
     document.body,
   );
