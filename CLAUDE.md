@@ -20,7 +20,7 @@ Core flow: capture → OCR → full-text search, with optional semantic search v
 - **Package manager**: Bun
 - **Semantic search**: Ollama + nomic-embed-text → sqlite-vec → hybrid search (RRF)
 - **Scene dedup**: Post-search grouping by perceptual hash hamming distance (≤ 5)
-- **Chat**: Ollama (qwen2.5:3b) with intent detection and screenshot context
+- **Chat**: any OpenAI-compatible endpoint (Ollama default, LM Studio/OpenAI/OpenRouter/custom via Settings → AI) with intent detection and screenshot context
 
 ## Project Layout (Cargo workspace)
 - `crates/rewindos-core/` — shared lib (DB, OCR, hashing, config, embedding, chat, types)
@@ -32,7 +32,7 @@ Core flow: capture → OCR → full-text search, with optional semantic search v
 - `db.rs` — SQLite + FTS5 + vector search, hybrid search (RRF), scene dedup, bookmarks, collections, journal, summaries
 - `schema.rs` — All shared types (Screenshot, SearchResult, Bookmark, Collection, JournalEntry, JournalTag, JournalTemplate, etc.)
 - `embedding.rs` — OllamaClient (embed, health_check, has_model, pull_model)
-- `chat.rs` — OllamaChatClient, intent detection, streaming chat with screenshot context
+- `chat.rs` — ChatClient (OpenAI-compatible: chat_stream/complete/health_check/list_models), intent detection, screenshot context
 - `hasher.rs` — Perceptual hashing, hamming distance, WebP save, thumbnails
 - `ocr.rs` — Tesseract CLI wrapper, TSV parsing
 - `config.rs` — Config loading (SemanticConfig, ChatConfig, FocusConfig, etc.)
