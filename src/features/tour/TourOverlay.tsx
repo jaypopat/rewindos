@@ -78,7 +78,8 @@ function TourStep({
     return () => cancelAnimationFrame(raf);
   }, [stop.anchor]);
 
-  // Track the anchor while visible (resize, layout shifts).
+  // Track the anchor while visible (resize, layout shifts). Re-subscribing on
+  // every remeasure is cheap; the closure never reads `rect`.
   useEffect(() => {
     if (rect == null) return;
     const remeasure = () => {
@@ -90,7 +91,7 @@ function TourStep({
     };
     window.addEventListener("resize", remeasure);
     return () => window.removeEventListener("resize", remeasure);
-  }, [rect == null, stop.anchor]);
+  }, [rect, stop.anchor]);
 
   const { refs, floatingStyles } = useFloating({
     placement: "bottom",
