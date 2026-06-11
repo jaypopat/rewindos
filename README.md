@@ -30,6 +30,7 @@ Timer (5s) → Screen Capture → Hash & Dedupe → OCR → SQLite FTS5
 - **AI chat** — ask questions about your screen history with inline citations, a Sources card, and click-through to cited screenshots. Backed by Claude Code (opus / sonnet / haiku) or local Ollama via a per-chat model picker. Pin screenshots as prompt context, copy or regenerate replies, and get follow-up suggestions (Ollama).
 - **Journaling** — rich text editor (Tiptap) with tags, templates, screenshot attachments, AI summaries, and export
 - **Bookmarks & collections** — save and organize screenshots into named collections
+- **Vault export** — daily memory notes (journal, recap, meetings, key moments, stats) written into your Obsidian or Logseq vault
 - **Focus mode** — Pomodoro timer with productivity tracking and distraction detection
 - **Privacy controls** — exclude specific apps or window title patterns
 - **Global hotkey** — `Ctrl+Shift+Space` to instantly open search

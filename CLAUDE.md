@@ -36,6 +36,8 @@ Core flow: capture → OCR → full-text search, with optional semantic search v
 - `hasher.rs` — Perceptual hashing, hamming distance, WebP save, thumbnails
 - `ocr.rs` — Tesseract CLI wrapper, TSV parsing
 - `config.rs` — Config loading (SemanticConfig, ChatConfig, FocusConfig, etc.)
+- `vault/` — vault export: DayMemory gather, Obsidian/Logseq emitters, idempotent writer
+- `summary.rs` — shared day-recap generation (cached → LLM → digest)
 
 ## Key Documentation
 - `docs/architecture.md` — Full system architecture
@@ -60,6 +62,7 @@ Core flow: capture → OCR → full-text search, with optional semantic search v
 - **Saved** — Bookmarks and collections browser
 - **Focus** — Pomodoro timer with productivity tracking
 - **Settings** — Full config UI (General, Capture, OCR, Privacy, Storage, AI, Focus)
+- **Export** — daily memory companion note written into a Logseq/Obsidian vault (config in Settings → Export)
 
 ## Target Platform
 Linux (Wayland) — KDE Plasma, GNOME, Hyprland, Sway
