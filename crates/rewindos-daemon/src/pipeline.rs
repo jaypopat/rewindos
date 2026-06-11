@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
+use rewindos_core::app_label::AppLabelResolver;
 use rewindos_core::config::AppConfig;
 use rewindos_core::db::Database;
 use rewindos_core::embedding::OllamaClient;
@@ -81,6 +82,7 @@ pub async fn start_pipeline(
     capture_backend: Box<dyn CaptureBackend>,
     window_info: SharedProvider,
     gate: Arc<CaptureGate>,
+    app_labels: Arc<AppLabelResolver>,
 ) -> Result<PipelineHandle, CaptureError> {
     let metrics = Arc::new(PipelineMetrics::new());
 
@@ -119,8 +121,9 @@ pub async fn start_pipeline(
         let db = db.clone();
         let metrics = metrics.clone();
         let screenshots_dir = screenshots_dir.clone();
+        let app_labels = app_labels.clone();
         tokio::spawn(async move {
-            run_hash_stage(&config, db, raw_rx, processed_tx, metrics, screenshots_dir).await;
+            run_hash_stage(&config, db, raw_rx, processed_tx, metrics, screenshots_dir, app_labels).await;
         })
     };
 
@@ -201,6 +204,7 @@ async fn run_hash_stage(
     processed_tx: mpsc::Sender<ProcessedFrame>,
     metrics: Arc<PipelineMetrics>,
     screenshots_dir: PathBuf,
+    app_labels: Arc<AppLabelResolver>,
 ) {
     let hasher = PerceptualHasher::new();
     let threshold = config.capture.change_threshold;
@@ -292,7 +296,7 @@ async fn run_hash_stage(
         let new_screenshot = NewScreenshot {
             timestamp: timestamp_secs,
             timestamp_ms,
-            app_name: frame.app_name,
+            app_name: frame.app_name.as_deref().map(|raw| app_labels.resolve(raw)),
             window_title: frame.window_title,
             window_class: frame.window_class,
             file_path: file_path.to_string_lossy().to_string(),

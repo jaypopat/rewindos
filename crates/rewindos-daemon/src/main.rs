@@ -525,6 +525,9 @@ async fn run_daemon() -> anyhow::Result<()> {
         warn!("tesseract not found — OCR will be disabled");
     }
 
+    // Build the app-label resolver once (scans .desktop files on disk).
+    let app_labels = Arc::new(rewindos_core::app_label::AppLabelResolver::system());
+
     // Open database and run migrations
     let db_path = config.db_path()?;
     let db = Database::open(&db_path)?;
@@ -675,6 +678,7 @@ async fn run_daemon() -> anyhow::Result<()> {
         capture_backend,
         window_info.clone(),
         gate.clone(),
+        app_labels.clone(),
     )
     .await?;
 
@@ -730,6 +734,25 @@ async fn run_daemon() -> anyhow::Result<()> {
                     // Small delay to avoid overwhelming Ollama
                     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
                 }
+            }
+        });
+    }
+
+    // One-time app-label backfill: rename historical raw app IDs to display names.
+    {
+        let db = db.clone();
+        let app_labels = app_labels.clone();
+        tokio::spawn(async move {
+            let res = tokio::task::spawn_blocking(move || {
+                let db = db.lock().unwrap_or_else(|e| e.into_inner());
+                rewindos_core::app_label::backfill_app_labels(&db, &app_labels)
+            })
+            .await;
+            match res {
+                Ok(Ok(0)) => {}
+                Ok(Ok(n)) => info!(renamed = n, "app-label backfill renamed historical app names"),
+                Ok(Err(e)) => warn!("app-label backfill failed: {e:#}"),
+                Err(e) => warn!("app-label backfill task panicked: {e}"),
             }
         });
     }
