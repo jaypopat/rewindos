@@ -60,7 +60,8 @@ export async function providerChat(opts: ProviderChatOptions): Promise<string> {
         try {
           const obj = JSON.parse(payload);
           if (obj?.error) {
-            throw new Error(String(obj.error.message ?? "provider stream error"));
+            const msg = typeof obj.error === "string" ? obj.error : obj.error?.message;
+            throw new Error(String(msg ?? "provider stream error"));
           }
           const token = obj?.choices?.[0]?.delta?.content ?? "";
           if (token) {

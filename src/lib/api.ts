@@ -876,21 +876,3 @@ export async function setModel(chatId: number, model: string): Promise<void> {
   return invoke("set_model", { chatId, model });
 }
 
-export interface ProviderModelInfo {
-  name: string;
-}
-
-/**
- * Lists models from any OpenAI-compatible endpoint (GET /models).
- * Excludes embedding-only models. Direct browser → provider HTTP call, no Tauri roundtrip.
- */
-export async function providerListModels(baseUrl: string, apiKey: string): Promise<ProviderModelInfo[]> {
-  const headers: Record<string, string> = apiKey ? { Authorization: `Bearer ${apiKey}` } : {};
-  const res = await fetch(`${baseUrl.replace(/\/$/, "")}/models`, { headers });
-  if (!res.ok) throw new Error(`models: ${res.status}`);
-  const data = (await res.json()) as { data?: Array<{ id: string }> };
-  return (data.data ?? [])
-    .map((m) => ({ name: m.id }))
-    .filter((m) => !m.name.toLowerCase().includes("embed"))
-    .sort((a, b) => a.name.localeCompare(b.name));
-}

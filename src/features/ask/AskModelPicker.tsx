@@ -13,7 +13,7 @@ import {
   ModelSelectorTrigger,
 } from "@/components/ai-elements/model-selector";
 import { Button } from "@/components/ui/button";
-import { getConfig, providerListModels } from "@/lib/api";
+import { getConfig, chatListModels } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import { CLAUDE_MODELS, DEFAULT_CLAUDE_MODEL } from "@/lib/claude-models";
 import { useAskChat } from "@/context/AskContext";
@@ -33,8 +33,12 @@ export function AskModelPicker() {
 
   const { data: ollamaModels = [] } = useQuery({
     queryKey: queryKeys.chatModels(ollamaUrl, apiKey),
-    queryFn: () => providerListModels(ollamaUrl, apiKey),
-    enabled: !!ollamaUrl,
+    queryFn: async () => {
+      if (!config?.chat) return [];
+      const models = await chatListModels(config.chat);
+      return models.filter((name) => !name.toLowerCase().includes("embed"));
+    },
+    enabled: !!ollamaUrl && !!config,
     staleTime: 60_000,
   });
 
@@ -104,14 +108,14 @@ export function AskModelPicker() {
             ) : (
               ollamaModels.map((m) => (
                 <ModelSelectorItem
-                  key={m.name}
-                  value={m.name}
-                  onSelect={() => pick(m.name)}
+                  key={m}
+                  value={m}
+                  onSelect={() => pick(m)}
                   className={cn(
-                    currentDisplay === m.name && "bg-semantic/10",
+                    currentDisplay === m && "bg-semantic/10",
                   )}
                 >
-                  <span className="text-sm text-text-primary">{m.name}</span>
+                  <span className="text-sm text-text-primary">{m}</span>
                 </ModelSelectorItem>
               ))
             )}
