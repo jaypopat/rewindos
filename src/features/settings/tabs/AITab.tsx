@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import type { AppConfig } from "@/lib/config";
 import { SectionTitle } from "../primitives/SectionTitle";
 import { Field } from "../primitives/Field";
@@ -16,6 +16,15 @@ import {
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { claudeDetect, claudeRegisterMcp, chatHealthCheck, chatListModels } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
+
+function useDebounced<T>(value: T, ms: number): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(value), ms);
+    return () => clearTimeout(t);
+  }, [value, ms]);
+  return debounced;
+}
 
 const PROVIDER_PRESETS = [
   { id: "ollama", label: "Ollama", baseUrl: "http://localhost:11434/v1", needsKey: false },
@@ -38,6 +47,9 @@ export function AITab({ config, update }: TabProps) {
     PROVIDER_PRESETS[PROVIDER_PRESETS.length - 1];
   const [testResult, setTestResult] = useState<string | null>(null);
 
+  const debouncedBaseUrl = useDebounced(config.chat.base_url, 500);
+  const debouncedApiKey = useDebounced(config.chat.api_key, 500);
+
   const test = useMutation({
     mutationFn: () => chatHealthCheck(config.chat),
     onSuccess: (ok) => setTestResult(ok ? "connected" : "unreachable"),
@@ -45,8 +57,9 @@ export function AITab({ config, update }: TabProps) {
   });
 
   const { data: models } = useQuery({
-    queryKey: queryKeys.chatModels(config.chat.base_url, config.chat.api_key),
-    queryFn: () => chatListModels(config.chat),
+    queryKey: queryKeys.chatModels(debouncedBaseUrl, debouncedApiKey),
+    queryFn: () => chatListModels({ ...config.chat, base_url: debouncedBaseUrl, api_key: debouncedApiKey }),
+    enabled: config.chat.enabled && !!debouncedBaseUrl,
     retry: false,
     staleTime: 30_000,
   });
@@ -85,7 +98,7 @@ export function AITab({ config, update }: TabProps) {
       <Field label="Base URL">
         <TextInput
           value={config.chat.base_url}
-          onChange={(v) => update("chat", "base_url", v)}
+          onChange={(v) => { update("chat", "base_url", v); setTestResult(null); }}
           disabled={preset.id !== "custom"}
         />
       </Field>
@@ -94,7 +107,8 @@ export function AITab({ config, update }: TabProps) {
           <TextInput
             type="password"
             value={config.chat.api_key}
-            onChange={(v) => update("chat", "api_key", v)}
+            onChange={(v) => { update("chat", "api_key", v); setTestResult(null); }}
+            autoComplete="off"
           />
         </Field>
       )}
@@ -125,7 +139,7 @@ export function AITab({ config, update }: TabProps) {
           {testResult && (
             <span
               className={`font-mono text-[11px] ${
-                testResult === "connected" ? "text-signal-success" : "text-text-muted"
+                testResult === "connected" ? "text-signal-active" : "text-text-muted"
               }`}
             >
               {testResult}
@@ -188,7 +202,7 @@ function ClaudeCodeSection() {
         <div className="flex items-center gap-2">
           <span
             className={`w-1.5 h-1.5 rounded-full ${
-              status?.available ? "bg-signal-success" : "bg-text-muted/40"
+              status?.available ? "bg-signal-active" : "bg-text-muted/40"
             }`}
           />
           <span className="font-mono text-xs text-text-secondary">

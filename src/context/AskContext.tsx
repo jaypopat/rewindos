@@ -29,7 +29,7 @@ import {
 } from "@/lib/api";
 import { invoke } from "@tauri-apps/api/core";
 import { resolveChatRoute } from "@/lib/claude-models";
-import { ollamaChat, type OllamaMessage } from "@/lib/ollama-chat";
+import { providerChat, type ProviderMessage } from "@/lib/provider-chat";
 import { queryKeys } from "@/lib/query-keys";
 import { decodeAttachments, encodeAttachments } from "@/lib/attachments";
 
@@ -182,22 +182,23 @@ export function AskProvider({ children }: { children: ReactNode }) {
                 ({
                   role: m.role,
                   content: parseBlockText(m.content_json, m.block_type),
-                }) satisfies OllamaMessage,
+                }) satisfies ProviderMessage,
             );
 
           const systemContent = `You are RewindOS. Answer directly. Cite screenshots with [REF:ID]. Context may include meeting transcripts ("You" = the user, "Remote" = the other party) — use them when the question concerns conversations or meetings.\n\nCurrent time: ${new Date().toISOString()}\n\n${ctx.context}`;
-          const ollamaMessages: OllamaMessage[] = [
+          const providerMessages: ProviderMessage[] = [
             { role: "system", content: systemContent },
             ...prevMessages,
             { role: "user", content: expandedText },
           ];
 
           abortRef.current = new AbortController();
-          await ollamaChat({
+          await providerChat({
             baseUrl: config.chat.base_url,
+            apiKey: config.chat.api_key,
             model: effectiveModel || config.chat.model,
             temperature: config.chat.temperature,
-            messages: ollamaMessages,
+            messages: providerMessages,
             signal: abortRef.current.signal,
             onToken: (token) => {
               accumulated += token;

@@ -876,31 +876,21 @@ export async function setModel(chatId: number, model: string): Promise<void> {
   return invoke("set_model", { chatId, model });
 }
 
-export interface OllamaModelInfo {
+export interface ProviderModelInfo {
   name: string;
-  parameter_size?: string;
-  family?: string;
 }
 
 /**
- * Lists locally-pulled Ollama models suitable for chat (excludes embedding-only
- * models like nomic-bert). Direct browser → Ollama HTTP call, no Tauri roundtrip.
+ * Lists models from any OpenAI-compatible endpoint (GET /models).
+ * Excludes embedding-only models. Direct browser → provider HTTP call, no Tauri roundtrip.
  */
-export async function ollamaListModels(baseUrl: string): Promise<OllamaModelInfo[]> {
-  const res = await fetch(`${baseUrl.replace(/\/$/, "")}/api/tags`);
-  if (!res.ok) throw new Error(`ollama tags: ${res.status}`);
-  const data = (await res.json()) as {
-    models: Array<{
-      name: string;
-      details?: { family?: string; parameter_size?: string };
-    }>;
-  };
-  const EMBEDDING_FAMILIES = new Set(["nomic-bert", "bert"]);
-  return data.models
-    .filter((m) => !EMBEDDING_FAMILIES.has(m.details?.family ?? ""))
-    .map((m) => ({
-      name: m.name,
-      parameter_size: m.details?.parameter_size,
-      family: m.details?.family,
-    }));
+export async function providerListModels(baseUrl: string, apiKey: string): Promise<ProviderModelInfo[]> {
+  const headers: Record<string, string> = apiKey ? { Authorization: `Bearer ${apiKey}` } : {};
+  const res = await fetch(`${baseUrl.replace(/\/$/, "")}/models`, { headers });
+  if (!res.ok) throw new Error(`models: ${res.status}`);
+  const data = (await res.json()) as { data?: Array<{ id: string }> };
+  return (data.data ?? [])
+    .map((m) => ({ name: m.id }))
+    .filter((m) => !m.name.toLowerCase().includes("embed"))
+    .sort((a, b) => a.name.localeCompare(b.name));
 }

@@ -6,12 +6,14 @@ export function TextInput({
   type = "text",
   list,
   disabled,
+  autoComplete,
 }: {
   value: string;
   onChange: (v: string) => void;
   type?: string;
   list?: string;
   disabled?: boolean;
+  autoComplete?: string;
 }) {
   return (
     <Input
@@ -21,6 +23,7 @@ export function TextInput({
       className="font-mono"
       list={list}
       disabled={disabled}
+      autoComplete={autoComplete}
     />
   );
 }

@@ -5,8 +5,9 @@ import { Loader2, Paperclip, PanelLeftClose, PanelLeftOpen, Plus } from "lucide-
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { queryKeys } from "@/lib/query-keys";
 import { claudeDetect, getConfig, getScreenshotsByIds, listChats } from "@/lib/api";
-import { ollamaHealth } from "@/lib/ollama-chat";
+import { providerHealth } from "@/lib/provider-chat";
 import { useAskChat } from "@/context/AskContext";
+import { Button } from "@/components/ui/button";
 import { AskMessages } from "./AskMessages";
 import { AskEmptyState } from "./AskEmptyState";
 import { AskModelPicker } from "./AskModelPicker";
@@ -74,7 +75,7 @@ export function AskView({ onSelectScreenshot }: AskViewProps) {
     queryKey: queryKeys.ollamaHealth(),
     queryFn: () =>
       config
-        ? ollamaHealth(config.chat.base_url)
+        ? providerHealth(config.chat.base_url, config.chat.api_key)
         : false,
     enabled: !!config,
     refetchInterval: 60_000,
@@ -128,7 +129,10 @@ export function AskView({ onSelectScreenshot }: AskViewProps) {
       <div className="flex-1 flex flex-col min-h-0">
         {/* Header */}
         <div className="flex items-center gap-3 px-5 h-12 border-b border-line shrink-0">
-          <button type="button"
+          <Button
+            variant="quiet"
+            size="sm"
+            type="button"
             onClick={toggleChats}
             title={chatsOpen ? "Hide chat history" : "Show chat history"}
             className="flex items-center gap-2 h-8 px-2.5 rounded-[7px] text-text-muted hover:text-text-primary hover:bg-panel transition-colors"
@@ -142,17 +146,20 @@ export function AskView({ onSelectScreenshot }: AskViewProps) {
             {chats.length > 0 && (
               <span className="font-mono text-[10px] text-text-faint">{chats.length}</span>
             )}
-          </button>
+          </Button>
           <span className="w-px h-4 bg-line-2" />
           <AskModelPicker />
-          <button type="button"
+          <Button
+            variant="quiet"
+            size="sm"
+            type="button"
             onClick={startNewChat}
             title="New chat"
             className="ml-auto flex items-center gap-1.5 h-8 px-2.5 rounded-[7px] text-text-muted hover:text-text-primary hover:bg-panel transition-colors"
           >
             <Plus className="size-4" strokeWidth={1.7} />
             <span className="text-[12.5px] font-[450]">New chat</span>
-          </button>
+          </Button>
         </div>
 
         {/* Messages or empty state */}
@@ -232,16 +239,18 @@ export function AskView({ onSelectScreenshot }: AskViewProps) {
               />
               <PromptInputFooter className="px-3 pb-2 pt-1">
                 <div className="flex items-center gap-3 text-text-muted">
-                  <button
+                  <Button
+                    variant="quiet"
+                    size="icon-sm"
                     type="button"
                     onClick={() => setPickerOpen(true)}
                     disabled={isStreaming || !chatReady}
-                    className="text-text-muted hover:text-accent-hi disabled:opacity-40 disabled:hover:text-text-muted transition-colors"
+                    className="size-auto p-0 text-text-muted hover:text-accent-hi disabled:opacity-40 disabled:hover:text-text-muted transition-colors"
                     title="attach screenshot"
                     aria-label="attach screenshot"
                   >
                     <Paperclip className="size-4" strokeWidth={1.7} />
-                  </button>
+                  </Button>
                   <span className="font-mono text-[10px] text-text-faint">
                     {usingClaude ? "⇧⏎ newline · ⏎ send" : "⏎ send"}
                   </span>

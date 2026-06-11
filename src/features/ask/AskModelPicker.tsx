@@ -12,7 +12,8 @@ import {
   ModelSelectorSeparator,
   ModelSelectorTrigger,
 } from "@/components/ai-elements/model-selector";
-import { getConfig, ollamaListModels } from "@/lib/api";
+import { Button } from "@/components/ui/button";
+import { getConfig, providerListModels } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import { CLAUDE_MODELS, DEFAULT_CLAUDE_MODEL } from "@/lib/claude-models";
 import { useAskChat } from "@/context/AskContext";
@@ -27,11 +28,12 @@ export function AskModelPicker() {
     queryFn: getConfig,
   });
   const ollamaUrl = config?.chat.base_url ?? "";
+  const apiKey = config?.chat.api_key ?? "";
   const defaultOllama = config?.chat.model;
 
   const { data: ollamaModels = [] } = useQuery({
-    queryKey: queryKeys.ollamaModels(ollamaUrl),
-    queryFn: () => ollamaListModels(ollamaUrl),
+    queryKey: queryKeys.chatModels(ollamaUrl, apiKey),
+    queryFn: () => providerListModels(ollamaUrl, apiKey),
     enabled: !!ollamaUrl,
     staleTime: 60_000,
   });
@@ -60,14 +62,16 @@ export function AskModelPicker() {
   return (
     <ModelSelector open={open} onOpenChange={setOpen}>
       <ModelSelectorTrigger asChild>
-        <button
+        <Button
+          variant="outline"
+          size="sm"
           type="button"
-          className="flex items-center gap-1.5 px-2 py-0.5 border border-border/40 bg-surface-raised/30 hover:border-border/60 focus:outline-none font-mono text-[10px] uppercase tracking-wider text-text-primary"
+          className="h-auto flex items-center gap-1.5 px-2 py-0.5 border border-border/40 bg-surface-raised/30 hover:border-border/60 focus:outline-none font-mono text-[10px] uppercase tracking-wider text-text-primary"
         >
           <Zap className="size-3 text-semantic" />
           {currentDisplay}
           <ChevronDown className="size-3 text-text-muted" />
-        </button>
+        </Button>
       </ModelSelectorTrigger>
       <ModelSelectorContent title="Choose a model">
         <ModelSelectorInput placeholder="search models..." />
@@ -104,16 +108,10 @@ export function AskModelPicker() {
                   value={m.name}
                   onSelect={() => pick(m.name)}
                   className={cn(
-                    "flex flex-col items-start gap-0.5",
                     currentDisplay === m.name && "bg-semantic/10",
                   )}
                 >
                   <span className="text-sm text-text-primary">{m.name}</span>
-                  {m.parameter_size && (
-                    <span className="font-mono text-[10px] text-text-muted">
-                      {m.parameter_size}
-                    </span>
-                  )}
                 </ModelSelectorItem>
               ))
             )}

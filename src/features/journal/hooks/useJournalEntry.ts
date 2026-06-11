@@ -18,7 +18,7 @@ import {
   type JournalEntry,
   type JournalDateInfo,
 } from "@/lib/api";
-import { ollamaHealth } from "@/lib/ollama-chat";
+import { providerHealth } from "@/lib/provider-chat";
 import { queryKeys } from "@/lib/query-keys";
 import { useDebounce } from "@/hooks/useDebounce";
 import { dateToKey, dayStartEnd } from "@/lib/time-ranges";
@@ -135,7 +135,7 @@ export function useJournalEntry() {
   const { data: ollamaAvailable } = useQuery({
     queryKey: queryKeys.ollamaHealth(),
     queryFn: () =>
-      journalConfig ? ollamaHealth(journalConfig.chat.base_url) : false,
+      journalConfig ? providerHealth(journalConfig.chat.base_url, journalConfig.chat.api_key) : false,
     enabled: !!journalConfig,
     staleTime: 120_000,
   });

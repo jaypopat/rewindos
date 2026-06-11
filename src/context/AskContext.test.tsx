@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import React from "react";
+import type React from "react";
 
 vi.mock("@/lib/api", () => ({
   askClaudeCancel: vi.fn(async () => {}),
@@ -15,7 +15,8 @@ vi.mock("@/lib/api", () => ({
   getConfig: vi.fn(async () => ({
     chat: {
       model: "qwen2.5:3b",
-      ollama_url: "http://127.0.0.1:11434",
+      base_url: "http://127.0.0.1:11434/v1",
+      api_key: "",
       temperature: 0.2,
       max_history_messages: 10,
     },
@@ -28,10 +29,10 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(async () => {}),
   convertFileSrc: vi.fn((path: string) => `asset://localhost/${path}`),
 }));
-vi.mock("@/lib/ollama-chat", () => ({ ollamaChat: vi.fn() }));
+vi.mock("@/lib/provider-chat", () => ({ providerChat: vi.fn() }));
 
 import { AskProvider, useAskChat } from "./AskContext";
-import { ollamaChat } from "@/lib/ollama-chat";
+import { providerChat } from "@/lib/provider-chat";
 import { invoke } from "@tauri-apps/api/core";
 
 function makeWrapper() {
@@ -50,7 +51,7 @@ describe("AskContext abort handling", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it("persists the streamed partial text when the stream aborts", async () => {
-    vi.mocked(ollamaChat).mockImplementation(async (opts) => {
+    vi.mocked(providerChat).mockImplementation(async (opts) => {
       opts.onToken("partial ");
       opts.onToken("answer");
       throw new DOMException("aborted", "AbortError");
