@@ -257,6 +257,45 @@ async fn set_unfiltered_capture(state: State<'_, AppState>, enabled: bool) -> Re
     Ok(())
 }
 
+/// Ask the daemon to render + write one day's vault companion note.
+/// Returns when the export is STARTED (daemon enqueues it).
+#[tauri::command]
+async fn vault_export_day(state: State<'_, AppState>, date: String) -> Result<(), String> {
+    state
+        .dbus
+        .call_method(
+            Some("com.rewindos.Daemon"),
+            "/com/rewindos/Daemon",
+            Some("com.rewindos.Daemon"),
+            "ExportDay",
+            &(date.as_str(),),
+        )
+        .await
+        .map_err(|e| format!("dbus call: {e}"))?;
+    Ok(())
+}
+
+/// Ask the daemon to export each day in [start, end] (max 366 days).
+#[tauri::command]
+async fn vault_export_range(
+    state: State<'_, AppState>,
+    start: String,
+    end: String,
+) -> Result<(), String> {
+    state
+        .dbus
+        .call_method(
+            Some("com.rewindos.Daemon"),
+            "/com/rewindos/Daemon",
+            Some("com.rewindos.Daemon"),
+            "ExportRange",
+            &(start.as_str(), end.as_str()),
+        )
+        .await
+        .map_err(|e| format!("dbus call: {e}"))?;
+    Ok(())
+}
+
 /// Open the Window Calls Extended page on extensions.gnome.org.
 #[tauri::command]
 fn open_extension_page(app: tauri::AppHandle) -> Result<(), String> {
@@ -1341,8 +1380,24 @@ fn upsert_journal_entry(
     entry: UpsertJournalEntry,
 ) -> Result<i64, String> {
     let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
-    db.upsert_journal_entry(&entry)
-        .map_err(|e| format!("db error: {e}"))
+    let result = db
+        .upsert_journal_entry(&entry)
+        .map_err(|e| format!("db error: {e}"))?;
+    // Fire-and-forget vault export; failures must not fail the save.
+    let dbus = state.dbus.clone();
+    let date = entry.date.clone();
+    tauri::async_runtime::spawn(async move {
+        let _ = dbus
+            .call_method(
+                Some("com.rewindos.Daemon"),
+                "/com/rewindos/Daemon",
+                Some("com.rewindos.Daemon"),
+                "ExportDay",
+                &(date.as_str(),),
+            )
+            .await;
+    });
+    Ok(result)
 }
 
 #[tauri::command]
@@ -2098,6 +2153,8 @@ pub fn run() {
             recheck_window_info,
             open_extension_page,
             set_unfiltered_capture,
+            vault_export_day,
+            vault_export_range,
             get_screenshot,
             get_screenshots_by_ids,
             get_app_names,
