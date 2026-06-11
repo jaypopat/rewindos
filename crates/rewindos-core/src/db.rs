@@ -1539,8 +1539,14 @@ impl Database {
             }
         };
 
-        // Get vector results (up to 300)
-        let vec_results = self.vector_search(query_embedding, FUSION_LIMIT as usize)?;
+        // Get vector results. The KNN runs unfiltered, so when filters are
+        // active we over-fetch — nearest neighbors from other apps/dates are
+        // discarded below and would otherwise starve the vector leg.
+        let has_filters = filters.app_name.is_some()
+            || filters.start_time.is_some()
+            || filters.end_time.is_some();
+        let knn_limit = if has_filters { FUSION_LIMIT * 3 } else { FUSION_LIMIT };
+        let vec_results = self.vector_search(query_embedding, knn_limit as usize)?;
 
         // RRF fusion
         let mut scores: HashMap<i64, f64> = HashMap::new();
@@ -1566,8 +1572,21 @@ impl Database {
             if let Some(fts_result) = fts_map.get(id) {
                 all_results.push((*fts_result).clone());
             } else {
-                // This result came from vector search only — construct a SearchResult
+                // This result came from vector search only — construct a SearchResult.
+                // The KNN ran unfiltered, so enforce the caller's filters here
+                // (the FTS leg already applied them in SQL); same semantics as
+                // search_deduped's WHERE clause: inclusive bounds, exact app match.
                 if let Some(ss) = self.get_screenshot(*id)? {
+                    if let Some(app) = &filters.app_name {
+                        if ss.app_name.as_deref() != Some(app.as_str()) {
+                            continue;
+                        }
+                    }
+                    if filters.start_time.is_some_and(|t| ss.timestamp < t)
+                        || filters.end_time.is_some_and(|t| ss.timestamp > t)
+                    {
+                        continue;
+                    }
                     let matched_text = self.get_ocr_text(*id)?.unwrap_or_default();
                     let snippet = if matched_text.len() > 200 {
                         let end = matched_text
@@ -3899,6 +3918,70 @@ mod tests {
 
         db.rename_meeting(id, None).unwrap();
         assert_eq!(db.get_meeting(id).unwrap().unwrap().title, None);
+    }
+
+    #[test]
+    fn hybrid_search_vector_leg_respects_app_filter() {
+        let db = Database::open_in_memory().unwrap();
+        // Screenshot A: matches the keyword AND the app filter.
+        let mut a = make_screenshot(1000);
+        a.app_name = Some("Ghostty".into());
+        let id_a = db.insert_screenshot(&a).unwrap();
+        db.insert_ocr_text(id_a, "rust compiler output", 3).unwrap();
+        db.insert_embedding(id_a, &[0.5_f32; 768]).unwrap();
+        // Screenshot B: different app, OCR text that does NOT match the
+        // keyword — it can only enter the results through the vector leg.
+        let mut b = make_screenshot(2000);
+        b.app_name = Some("Dolphin".into());
+        let id_b = db.insert_screenshot(&b).unwrap();
+        db.insert_ocr_text(id_b, "file manager browsing", 3).unwrap();
+        db.insert_embedding(id_b, &[0.5_f32; 768]).unwrap();
+
+        let filters = SearchFilters {
+            query: "rust".into(),
+            start_time: None,
+            end_time: None,
+            app_name: Some("Ghostty".into()),
+            limit: 20,
+            offset: 0,
+        };
+        let resp = db.hybrid_search(&filters, Some(&[0.5_f32; 768])).unwrap();
+        assert!(
+            !resp.results.iter().any(|r| r.id == id_b),
+            "vector-only hit from another app must not leak past the app filter"
+        );
+        assert!(resp.results.iter().any(|r| r.id == id_a));
+    }
+
+    #[test]
+    fn hybrid_search_vector_leg_respects_date_filter() {
+        let db = Database::open_in_memory().unwrap();
+        let mut a = make_screenshot(5000);
+        a.app_name = Some("Ghostty".into());
+        let id_a = db.insert_screenshot(&a).unwrap();
+        db.insert_ocr_text(id_a, "rust compiler output", 3).unwrap();
+        db.insert_embedding(id_a, &[0.5_f32; 768]).unwrap();
+        // Outside the queried time range; non-matching OCR → vector-leg only.
+        let mut b = make_screenshot(99_000);
+        b.app_name = Some("Ghostty".into());
+        let id_b = db.insert_screenshot(&b).unwrap();
+        db.insert_ocr_text(id_b, "file manager browsing", 3).unwrap();
+        db.insert_embedding(id_b, &[0.5_f32; 768]).unwrap();
+
+        let filters = SearchFilters {
+            query: "rust".into(),
+            start_time: Some(1000),
+            end_time: Some(10_000),
+            app_name: None,
+            limit: 20,
+            offset: 0,
+        };
+        let resp = db.hybrid_search(&filters, Some(&[0.5_f32; 768])).unwrap();
+        assert!(
+            !resp.results.iter().any(|r| r.id == id_b),
+            "vector-only hit outside the date range must not leak past the date filter"
+        );
+        assert!(resp.results.iter().any(|r| r.id == id_a));
     }
 
     #[test]
