@@ -12,15 +12,15 @@ interface StatCardProps {
   onClick?: () => void;
 }
 
-const baseClass = "bg-surface-raised rounded-xl border border-border/50 p-4 flex flex-col gap-2 h-full";
+const baseClass = "bg-panel/50 rounded-lg border border-line p-4 flex flex-col gap-2 h-full";
 
 export function StatCard({ label, value, sparklineData, detail, accentColor, trend, trendLabel, onClick }: StatCardProps) {
   const content = (
     <>
-      <span className="text-xs font-medium text-text-muted uppercase tracking-wider">{label}</span>
+      <span className="kicker">{label}</span>
       <div className="flex items-end justify-between gap-3">
         <div>
-          <span className="font-display text-2xl text-text-primary leading-none">{value}</span>
+          <span className="num text-3xl text-text-primary leading-none">{value}</span>
           {trend !== undefined ? (
             <TrendIndicator trend={trend} label={trendLabel} />
           ) : (
@@ -38,7 +38,7 @@ export function StatCard({ label, value, sparklineData, detail, accentColor, tre
     return (
       <button
         type="button"
-        className={`${baseClass} cursor-pointer hover:border-accent/30 transition-colors text-left`}
+        className={`${baseClass} cursor-pointer hover:border-accent-line transition-colors text-left`}
         onClick={onClick}
       >
         {content}
@@ -60,7 +60,7 @@ function TrendIndicator({ trend, label }: { trend: number; label?: string }) {
   }
   const isUp = trend > 0;
   return (
-    <p className={`text-xs mt-1 flex items-center gap-1 ${isUp ? "text-emerald-400" : "text-red-400"}`}>
+    <p className={`text-xs mt-1 flex items-center gap-1 ${isUp ? "text-signal-active" : "text-signal-error"}`}>
       {isUp ? (
         <ArrowUpRight className="size-3" strokeWidth={2.5} />
       ) : (

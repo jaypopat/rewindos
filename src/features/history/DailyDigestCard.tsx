@@ -61,15 +61,15 @@ export function DailyDigestCard({
   const totalMinutes = data?.app_breakdown.reduce((sum, a) => sum + a.minutes, 0) ?? 0;
 
   return (
-    <div className="border border-border/50 rounded-lg overflow-hidden">
+    <div className="border border-line rounded-lg overflow-hidden">
       {/* Header */}
       <button
         onClick={() => setIsExpanded((prev) => !prev)}
-        className="w-full flex items-center gap-2.5 px-4 py-2.5 hover:bg-surface-raised/40 transition-colors text-left"
+        className="w-full flex items-center gap-2.5 px-4 py-2.5 hover:bg-panel transition-colors text-left"
       >
-        <Sparkles className="size-4 text-amber-400 shrink-0" strokeWidth={1.5} />
-        <span className="text-sm font-medium text-text-primary">Daily Digest</span>
-        <span className="text-xs text-text-muted">{dateKey}</span>
+        <Sparkles className="size-4 text-accent/70 shrink-0" strokeWidth={1.5} />
+        <span className="font-display text-base text-text-primary">Daily Digest</span>
+        <span className="font-mono text-xs text-text-muted tabular-nums">{dateKey}</span>
         <span className="flex-1" />
         {data?.cached && (
           <span className="text-[10px] text-text-muted font-mono">cached</span>
@@ -112,14 +112,14 @@ export function DailyDigestCard({
               {/* App breakdown bar */}
               {data.app_breakdown.length > 0 && totalMinutes > 0 && (
                 <div>
-                  <div className="flex h-2.5 rounded-full overflow-hidden bg-surface-raised">
+                  <div className="flex h-2 rounded-sm overflow-hidden bg-line-2">
                     {data.app_breakdown.map((app) => {
                       const pct = (app.minutes / totalMinutes) * 100;
                       if (pct < 1) return null;
                       return (
                         <div
                           key={app.app_name}
-                          className="h-full first:rounded-l-full last:rounded-r-full"
+                          className="h-full first:rounded-l-sm last:rounded-r-sm"
                           style={{
                             width: `${pct}%`,
                             backgroundColor: getAppColor(app.app_name),

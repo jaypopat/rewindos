@@ -76,10 +76,8 @@ export function HourGroupRow({
 
   return (
     <div className={cn(
-      "border rounded-lg overflow-hidden transition-colors",
-      isInRange
-        ? "border-accent/50 border-l-2 border-l-accent"
-        : "border-border/50",
+      "border-b border-line transition-colors",
+      isInRange && "bg-accent-muted",
     )}>
       {/* Hour header */}
       <div className="flex items-center">
@@ -199,7 +197,7 @@ export function HourGroupRow({
             e.stopPropagation();
             onRequestDelete(group.key);
           }}
-          className="px-3 py-2.5 size-auto text-red-400/60 hover:text-red-400 shrink-0"
+          className="px-3 py-2.5 size-auto text-text-muted/60 hover:text-signal-error shrink-0"
           title={`Delete all captures from ${group.label}`}
         >
           <Trash2 className="size-4" strokeWidth={1.5} />

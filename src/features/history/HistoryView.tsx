@@ -40,7 +40,7 @@ export function HistoryView({ onSelectScreenshot, onRewindToRange }: HistoryView
                 className={cn(
                   "h-auto px-2.5 py-1 text-xs rounded-md capitalize",
                   m === mode
-                    ? "bg-accent/15 text-accent font-medium hover:bg-accent/15 hover:text-accent"
+                    ? "bg-accent-muted text-accent-hi font-medium hover:bg-accent-muted hover:text-accent-hi"
                     : "text-text-muted hover:text-text-secondary hover:bg-transparent",
                 )}
               >
@@ -55,7 +55,7 @@ export function HistoryView({ onSelectScreenshot, onRewindToRange }: HistoryView
               className={cn(
                 "flex items-center gap-1.5 h-auto px-2.5 py-1 text-xs rounded-lg border",
                 range.rangeSelectMode
-                  ? "bg-accent/15 border-accent/50 text-accent font-medium hover:bg-accent/15 hover:text-accent"
+                  ? "bg-accent-muted border-accent-line text-accent-hi font-medium hover:bg-accent-muted hover:text-accent-hi"
                   : "border-border/50 text-text-muted hover:text-text-secondary hover:border-border hover:bg-transparent",
               )}
             >
@@ -77,7 +77,7 @@ export function HistoryView({ onSelectScreenshot, onRewindToRange }: HistoryView
                 className={cn(
                   "h-auto px-3 py-1 text-xs rounded-md",
                   i === rangeIdx && !customDate
-                    ? "bg-accent/15 text-accent font-medium hover:bg-accent/15 hover:text-accent"
+                    ? "bg-accent-muted text-accent-hi font-medium hover:bg-accent-muted hover:text-accent-hi"
                     : "text-text-muted hover:text-text-secondary hover:bg-transparent",
                 )}
               >
@@ -92,7 +92,7 @@ export function HistoryView({ onSelectScreenshot, onRewindToRange }: HistoryView
                 className={cn(
                   "flex items-center gap-1.5 h-auto px-2.5 py-1 text-xs rounded-lg border bg-surface-raised cursor-pointer",
                   customDate
-                    ? "border-accent/50 text-accent hover:text-accent hover:bg-surface-raised"
+                    ? "border-accent-line text-accent-hi hover:text-accent-hi hover:bg-surface-raised"
                     : "border-border/50 text-text-muted hover:text-text-secondary hover:bg-surface-raised",
                 )}
               >
@@ -131,8 +131,9 @@ export function HistoryView({ onSelectScreenshot, onRewindToRange }: HistoryView
       )}
 
       {data.activity && data.activity.total_screenshots === 0 && (
-        <div className="text-center py-20 text-text-muted text-sm">
-          No captures in this time range.
+        <div className="text-center py-20">
+          <p className="font-display text-xl text-text-secondary">Nothing captured in this window.</p>
+          <p className="text-sm text-text-muted mt-1.5">Try a wider range, or pick another day.</p>
         </div>
       )}
 

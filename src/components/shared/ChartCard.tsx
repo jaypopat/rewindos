@@ -9,10 +9,10 @@ interface ChartCardProps {
 export function ChartCard({ title, children, compact }: ChartCardProps) {
   return (
     <div className={cn(
-      "bg-surface-raised rounded-xl border border-border/50",
+      "bg-panel/50 rounded-lg border border-line",
       compact ? "p-3" : "p-4",
     )}>
-      <h3 className="text-xs font-medium text-text-muted uppercase tracking-wider mb-2">
+      <h3 className="kicker mb-2">
         {title}
       </h3>
       <div className={compact ? "max-h-[180px] overflow-hidden" : ""}>

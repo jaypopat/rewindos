@@ -112,8 +112,9 @@ export function TimelineMode({
   if (dayGroups.length === 0) {
     return (
       <div className="flex-1 flex flex-col min-h-0">
-        <div className="text-center py-20 text-text-muted text-sm">
-          No screenshots found in this time range.
+        <div className="text-center py-20">
+          <p className="font-display text-xl text-text-secondary">No moments on the timeline yet.</p>
+          <p className="text-sm text-text-muted mt-1.5">Nothing was captured in this window.</p>
         </div>
       </div>
     );
@@ -132,8 +133,8 @@ export function TimelineMode({
           if (!targetGroup) return null;
           return (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-              <div className="bg-surface-base border border-border rounded-xl p-5 max-w-sm w-full mx-4 shadow-2xl">
-                <h3 className="text-base font-medium text-text-primary mb-2">Delete captures?</h3>
+              <div className="bg-surface-base border border-line rounded-lg p-5 max-w-sm w-full mx-4 shadow-2xl">
+                <h3 className="font-display text-lg text-text-primary mb-2">Delete captures?</h3>
                 <p className="text-sm text-text-secondary mb-4">
                   This will permanently delete <span className="font-medium text-text-primary">{targetGroup.entries.length}</span> screenshot{targetGroup.entries.length !== 1 ? "s" : ""} from{" "}
                   <span className="font-mono font-medium text-text-primary">{targetGroup.label}</span>, including their OCR data and files on disk.
@@ -143,7 +144,7 @@ export function TimelineMode({
                     variant="outline"
                     onClick={() => setConfirmDeleteKey(null)}
                     disabled={deleting}
-                    className="h-auto px-3 py-1.5 text-sm rounded-lg border border-border text-text-secondary hover:bg-surface-raised"
+                    className="h-auto px-3 py-1.5 text-sm rounded-lg border border-line text-text-secondary hover:bg-surface-raised"
                   >
                     Cancel
                   </Button>
@@ -151,7 +152,7 @@ export function TimelineMode({
                     variant="destructive"
                     onClick={() => handleDeleteHour(targetGroup!)}
                     disabled={deleting}
-                    className="h-auto px-3 py-1.5 text-sm rounded-lg bg-red-500/90 hover:bg-red-500 text-white font-medium disabled:opacity-50"
+                    className="h-auto px-3 py-1.5 text-sm rounded-lg bg-destructive hover:bg-destructive/90 text-destructive-foreground font-medium disabled:opacity-50"
                   >
                     {deleting ? "Deleting..." : "Delete"}
                   </Button>
@@ -165,8 +166,8 @@ export function TimelineMode({
           <div key={day.date}>
             {/* Day header */}
             <div className="flex items-center gap-3 mb-1.5 px-1">
-              <h3 className="text-sm font-medium text-text-primary">{day.label}</h3>
-              <span className="text-xs text-text-muted">
+              <h3 className="font-display text-base text-text-primary">{day.label}</h3>
+              <span className="font-mono text-[11px] text-text-muted tabular-nums">
                 {day.totalEntries} capture{day.totalEntries !== 1 ? "s" : ""} across {day.hours.length} hour{day.hours.length !== 1 ? "s" : ""}
               </span>
               {onRewindToRange && (
@@ -183,11 +184,11 @@ export function TimelineMode({
                   <Play className="size-3.5" />
                 </Button>
               )}
-              <div className="flex-1 h-px bg-border/30" />
+              <div className="flex-1 h-px bg-line" />
             </div>
 
             {/* Hour groups for this day */}
-            <div className="space-y-1">
+            <div className="border-t border-line">
               {day.hours.map((group) => (
                 <HourGroupRow
                   key={group.key}

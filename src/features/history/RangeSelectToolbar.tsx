@@ -32,7 +32,7 @@ export function RangeSelectToolbar({
   if (rangeStart === null) return null;
 
   return (
-    <div className="shrink-0 border-t border-border/50 bg-surface-base/95 backdrop-blur-sm px-4 py-3">
+    <div className="shrink-0 border-t border-line bg-surface-base/95 backdrop-blur-sm px-4 py-3">
       <div className="flex items-center gap-3">
         <div className="flex items-center gap-2 flex-1 min-w-0">
           <Crosshair className="size-3.5 text-accent shrink-0" />
@@ -93,7 +93,7 @@ export function RangeSelectToolbar({
                 setShowRangeNameInput(true);
               }}
               disabled={rangeEnd === null}
-              className="flex items-center gap-1.5 h-auto px-3 py-1.5 text-xs font-medium rounded-lg bg-accent text-white hover:bg-accent/90 disabled:opacity-40 disabled:cursor-not-allowed"
+              className="flex items-center gap-1.5 h-auto px-3 py-1.5 text-xs font-medium rounded-lg bg-accent text-accent-foreground hover:bg-accent/90 disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <FolderPlus className="size-3" />
               Save as Collection

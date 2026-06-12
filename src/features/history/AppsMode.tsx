@@ -70,27 +70,23 @@ export function AppsMode({
           label="Screen Time"
           value={formatDuration(totalActiveTime)}
           detail={`${activeBlocks.length} active blocks`}
-          accentColor="#e8825a"
         />
         <StatCard
           label="Captures"
           value={formatNumber(totalCaptures)}
           detail="View in timeline →"
-          accentColor="#b58bc0"
           onClick={onSwitchToTimeline}
         />
         <StatCard
           label="Active Apps"
           value={uniqueApps}
           detail={topAppNames}
-          accentColor="#9aa873"
         />
         {rangeDays > 1 && (
           <StatCard
             label="Avg Daily"
             value={formatDuration(avgDaily)}
             detail={`over ${rangeDays} day${rangeDays > 1 ? "s" : ""}`}
-            accentColor="#c9925e"
           />
         )}
       </div>
@@ -123,18 +119,18 @@ export function AppsMode({
       {/* Task Breakdown (fills remaining space) */}
       {appGroups.length > 0 && (
         <section className="flex-1 flex flex-col min-h-0">
-          <h2 className="font-mono text-[10px] text-text-muted uppercase tracking-[0.2em] mb-2">
+          <h2 className="kicker mb-2">
             Task Breakdown
           </h2>
-          <div className="border border-border/50 divide-y divide-border/30 flex-1 overflow-y-auto">
+          <div className="border-t border-line flex-1 overflow-y-auto">
             {appGroups.map((group) => {
               const isOpen = expanded.has(group.appName);
               const pct = totalScreenTime > 0 ? (group.totalSeconds / totalScreenTime) * 100 : 0;
               return (
-                <div key={group.appName}>
+                <div key={group.appName} className="border-b border-line">
                   <button
                     onClick={() => toggle(group.appName)}
-                    className="w-full flex items-center gap-3 px-4 py-2 hover:bg-surface-raised/40 transition-colors text-left"
+                    className="w-full flex items-center gap-3 px-1 py-2.5 hover:bg-panel transition-colors text-left"
                   >
                     <AppDot appName={group.appName} size={8} />
                     <span className="text-sm text-text-primary flex-1 truncate">
@@ -143,9 +139,9 @@ export function AppsMode({
                     <span className="text-xs text-text-muted font-mono tabular-nums shrink-0 w-12 text-right">
                       {formatSecs(group.totalSeconds)}
                     </span>
-                    <div className="w-20 h-1.5 bg-surface-raised rounded-full shrink-0 overflow-hidden">
+                    <div className="w-20 h-0.5 bg-line-2 rounded-sm shrink-0 overflow-hidden">
                       <div
-                        className="h-full rounded-full"
+                        className="h-full rounded-sm"
                         style={{
                           width: `${pct}%`,
                           backgroundColor: getAppColor(group.appName),
@@ -156,7 +152,7 @@ export function AppsMode({
                     <ChevronDown className={`size-3.5 transition-transform shrink-0 ${group.titles.length > 0 ? "text-text-muted" : "text-transparent"} ${isOpen ? "rotate-180" : ""}`} strokeWidth={2} />
                   </button>
                   {isOpen && group.titles.length > 0 && (
-                    <div className="bg-surface-raised/20 px-4 pb-2">
+                    <div className="px-1 pb-2">
                       {group.titles.map((t) => (
                         <div
                           key={t.title}
