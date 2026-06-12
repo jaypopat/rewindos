@@ -81,16 +81,19 @@ export function UpdateSection() {
   return (
     <>
       <SectionTitle>Updates</SectionTitle>
-      <Field label="Version">
-        <div className="flex items-center gap-3">
-          <span className="font-mono text-xs text-text-secondary">
-            {data ? data.current : "—"}
-          </span>
-          {data && !data.available && !done && (
-            <span className="font-mono text-[11px] text-text-muted">
-              Up to date
-            </span>
-          )}
+      <Field
+        label="Version"
+        hint={
+          data && (
+            <>
+              <span className="font-mono text-text-secondary">{data.current}</span>
+              {!data.available && !done && " · Up to date"}
+              {done && " · Restart pending"}
+            </>
+          )
+        }
+      >
+        <div className="flex flex-col items-end gap-1">
           <Button
             variant="editorial"
             size="editorial"
@@ -99,17 +102,17 @@ export function UpdateSection() {
           >
             {isFetching ? "Checking…" : "Check for updates"}
           </Button>
+          {error && !isFetching && (
+            <p className="font-mono text-[11px] text-text-muted text-right" role="alert">
+              Could not reach the releases API.
+            </p>
+          )}
         </div>
-        {error && !isFetching && (
-          <p className="font-mono text-[11px] text-text-muted mt-1" role="alert">
-            Could not reach the releases API.
-          </p>
-        )}
       </Field>
       {/* Show the update card while the update is available OR while in the
           done/restart-pending state (available flips false after install). */}
       {(data?.available || done) && (
-        <Field label={done ? `Update to ${data?.latest ?? ""}` : `Update to ${data!.latest}`}>
+        <Field label={`Update to ${data?.latest ?? ""}`}>
           <div className="flex flex-col gap-2 items-start">
             {done ? (
               <Button
@@ -152,7 +155,7 @@ export function UpdateSection() {
               </>
             ) : (
               <p className="font-mono text-[11px] text-text-muted">
-                You&apos;re running a source build — pull the latest and rebuild
+                You&apos;re running a source build: pull the latest and rebuild
                 (make install) to update.
               </p>
             )}

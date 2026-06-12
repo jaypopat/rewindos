@@ -1,4 +1,4 @@
-export function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+export function Field({ label, hint, children }: { label: string; hint?: React.ReactNode; children: React.ReactNode }) {
   return (
     <div className="flex items-center justify-between gap-6 py-3.5 border-b border-line">
       <div className="min-w-0">
