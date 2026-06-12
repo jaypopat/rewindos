@@ -24,6 +24,9 @@ jobs:
     # newer; older distros build from source (the install smoke-check detects a
     # won't-run binary and says so).
     runs-on: ubuntu-24.04
+    outputs:
+      published: ${{ steps.check.outputs.exists == 'false' }}
+      version: ${{ steps.version.outputs.version }}
     permissions:
       contents: write
 
@@ -132,3 +135,29 @@ jobs:
             dist/rewindos-linux-x86_64.tar.gz
             dist/rewindos-linux-x86_64.tar.gz.sha256
           generate_release_notes: true
+
+  publish-aur:
+    needs: release
+    if: needs.release.outputs.published == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fill PKGBUILD template
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.release.outputs.version }}"
+          SHA=$(curl -fsSL "https://github.com/jaypopat/rewindos/releases/download/v$VERSION/rewindos-linux-x86_64.tar.gz.sha256" | awk '{print $1}')
+          [ -n "$SHA" ] || { echo "could not fetch release sha256" >&2; exit 1; }
+          sed -i -e "s/@VERSION@/$VERSION/" -e "s/@SHA256@/$SHA/" packaging/aur/PKGBUILD
+
+      - name: Publish to AUR
+        uses: KSXGitHub/github-actions-deploy-aur@v4.1.3
+        with:
+          pkgname: rewindos-bin
+          pkgbuild: ./packaging/aur/PKGBUILD
+          assets: ./packaging/aur/rewindos.install
+          commit_username: Jay Popat
+          commit_email: jpsubs@tutamail.com
+          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          commit_message: "Update to v${{ needs.release.outputs.version }}"
