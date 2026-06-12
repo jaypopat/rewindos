@@ -655,6 +655,14 @@ mod tests {
             classify_install(Some(Path::new("/usr/lib/rewindos/rewindos")), &env),
             InstallKind::Packaged
         );
+        // A stale script-install marker must not flip a /usr binary to Script:
+        // Script requires BOTH the bin_dir prefix and the marker.
+        std::fs::create_dir_all(env.version_file.parent().unwrap()).unwrap();
+        std::fs::write(&env.version_file, "v1.0.9\n").unwrap();
+        assert_eq!(
+            classify_install(Some(Path::new("/usr/bin/rewindos")), &env),
+            InstallKind::Packaged
+        );
     }
 
     #[test]
