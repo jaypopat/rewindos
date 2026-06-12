@@ -1,55 +1,100 @@
+<div align="center">
+
 # RewindOS
 
-**Search everything you've ever seen on your screen — and keep it 100% on your machine.**
+### Perfect memory for your Linux desktop.
 
-RewindOS continuously captures your screen, reads the text on it with OCR, and indexes it for instant full-text (and optional semantic) search. A private, local "rewind" for Linux: **no cloud, no account, no telemetry — it runs entirely offline.**
+A private, open-source alternative to **Windows Recall** and **Rewind.ai**. Everything you've ever seen on your screen, instantly searchable — **no cloud, no account, no telemetry, 100% on your machine.**
 
-<!-- TODO: drop a short demo GIF here (searching for something you saw last week). A GIF converts far better than a static shot. -->
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE)
+[![Latest release](https://img.shields.io/github/v/release/jaypopat/rewindos?label=release)](https://github.com/jaypopat/rewindos/releases/latest)
+![AUR: coming soon](https://img.shields.io/badge/AUR-coming%20soon-orange)
+![Platform: Linux Wayland](https://img.shields.io/badge/platform-Linux%20%C2%B7%20Wayland-blue)
+[![Stars](https://img.shields.io/github/stars/jaypopat/rewindos?style=social)](https://github.com/jaypopat/rewindos/stargazers)
 
-<img width="2876" height="1650" alt="image" src="https://github.com/user-attachments/assets/210ae7b4-6995-4190-b64d-d9961583433e" />
+</div>
 
-<img width="2866" height="1647" alt="image" src="https://github.com/user-attachments/assets/ed92dd18-2a47-491d-abbf-281bb1bc064d" />
+<!--
+  HERO DEMO GIF — the single highest-converting asset on this page.
+  Shotlist: docs/readme-shotlist.md → "Hero GIF"
+  Capture: Search view → type a real, relatable query ("that error about websocket")
+           → results animate in with snippet highlights. ~8s loop, 1280–1600px wide.
+  Drag-drop the GIF into a GitHub issue/PR to get a user-attachments URL, then paste it below.
+-->
+<div align="center">
 
+<!-- TODO(hero-gif): replace this still with the demo GIF once recorded -->
+<img width="2876" alt="RewindOS search" src="https://github.com/user-attachments/assets/210ae7b4-6995-4190-b64d-d9961583433e" />
 
-## How it works
+</div>
 
-A background daemon captures screenshots every 5 seconds, deduplicates them with perceptual hashing, runs OCR via Tesseract, and indexes the extracted text into SQLite FTS5. A Tauri desktop app provides search, browsing, journaling, and analytics.
+<table>
+<tr>
+<td width="50%">
+<!-- TODO(still-search): Search results grid with scene-dedup + Semantic badges visible -->
+<img alt="Search" src="https://github.com/user-attachments/assets/210ae7b4-6995-4190-b64d-d9961583433e" />
+<p align="center"><sub><b>Search</b> — full-text + semantic, sub-100ms</sub></p>
+</td>
+<td width="50%">
+<!-- TODO(still-ask): Ask view — AI answer with inline citations + Sources card -->
+<img alt="Ask" src="https://github.com/user-attachments/assets/ed92dd18-2a47-491d-abbf-281bb1bc064d" />
+<p align="center"><sub><b>Ask</b> — chat your history with cited screenshots</sub></p>
+</td>
+</tr>
+</table>
 
-```
-Timer (5s) → Screen Capture → Hash & Dedupe → OCR → SQLite FTS5
-```
+## Why RewindOS
+
+- **Truly local.** Capture, OCR, search, and AI all run on your machine. No cloud, no account, no telemetry — it works fully offline.
+- **Open source.** MIT-licensed. Read every line, audit what it stores, fork it.
+- **Built for Linux.** Native Wayland capture via `xdg-desktop-portal` + PipeWire — works on KDE, GNOME, and wlroots compositors. No competitor ships here.
+- **Fast.** SQLite FTS5 gives sub-100ms full-text search across weeks of screen history.
+
+| | RewindOS | Windows Recall | Rewind.ai |
+|---|:---:|:---:|:---:|
+| Runs locally, no cloud | ✅ | ⚠️ partial | ❌ |
+| Open source | ✅ | ❌ | ❌ |
+| Linux support | ✅ | ❌ | ❌ |
+| No subscription | ✅ | ✅ | ❌ |
+| Bring-your-own AI (local or API) | ✅ | ❌ | ❌ |
 
 ## Features
 
-- **Full-text search** across everything on your screen with sub-100ms queries
-- **Hybrid search** — keyword + semantic search via Ollama with Reciprocal Rank Fusion (optional)
-- **Intelligent deduplication** — perceptual hashing skips near-identical frames, scene grouping in search results
-- **Timeline browsing** — scroll through screen history chronologically with hourly grouping
-- **Rewind playback** — timelapse player with scrubber, speed controls, and keyboard navigation
-- **Dashboard** — activity overview, app usage stats, daily/hourly charts, heatmap calendar
-- **AI chat** — ask questions about your screen history with inline citations, a Sources card, and click-through to cited screenshots. Backed by Claude Code (opus / sonnet / haiku) or local Ollama via a per-chat model picker. Pin screenshots as prompt context, copy or regenerate replies, and get follow-up suggestions (Ollama).
-- **Journaling** — rich text editor (Tiptap) with tags, templates, screenshot attachments, AI summaries, and export
-- **Bookmarks & collections** — save and organize screenshots into named collections
-- **Vault export** — daily memory notes (journal, recap, meetings, key moments, stats) written into your Obsidian or Logseq vault
-- **Privacy controls** — exclude specific apps or window title patterns
-- **Global hotkey** — `Ctrl+Shift+Space` to instantly open search
-- **System tray** — runs quietly in the background
+**🔎 Search & Recall**
+Full-text search across everything on your screen in under 100ms. Optional **hybrid search** fuses keyword + semantic results (Ollama embeddings, Reciprocal Rank Fusion). Perceptual hashing skips near-identical frames, and scene grouping keeps results clean.
 
-## Platform support
+**🎞️ Browse & Replay**
+Scroll your screen history chronologically with hourly grouping, or scrub through it as a **timelapse** with speed controls and keyboard navigation. A **dashboard** surfaces app-usage stats, daily/hourly activity charts, and a heatmap calendar.
 
-Linux on **Wayland**. Capture uses `xdg-desktop-portal` + PipeWire, so it works on any compositor that implements the ScreenCast portal.
+**🤖 Ask AI**
+Ask questions about your screen history and get answers with **inline citations**, a Sources card, and click-through to the exact screenshots. Backed by **Claude Code** (opus / sonnet / haiku) or local **Ollama** via a per-chat model picker. Pin screenshots as context; copy, regenerate, and follow-up.
 
-| Desktop | Status |
-|---|---|
-| KDE Plasma 6+ | ✅ Tested |
-| GNOME 46+ | ✅ Tested — install the "Window Calls Extended" extension for app/window names |
-| Hyprland · Sway · other wlroots | ⚠️ Should work via the portal — not yet verified |
+**🗂️ Organize**
+A rich-text **journal** (Tiptap) with tags, templates, screenshot attachments, and AI summaries. **Bookmarks & collections** to save what matters. **Vault export** writes daily memory notes (journal, recap, meetings, key moments, stats) straight into your Obsidian or Logseq vault.
 
-x86_64 only for prebuilt binaries. X11-only sessions aren't supported.
+**🔒 Privacy**
+Exclude specific apps or window-title patterns (password managers, private browsing). Global hotkey `Ctrl+Shift+Space` opens search instantly; the app runs quietly in the system tray.
+
+<div align="center">
+<table>
+<tr>
+<td width="50%">
+<!-- TODO(still-dashboard): Dashboard — heatmap calendar + activity charts -->
+<img alt="Dashboard" src="https://via.placeholder.com/800x500?text=Dashboard+%E2%80%94+see+docs/readme-shotlist.md" />
+<p align="center"><sub><b>Dashboard</b> — activity, app usage, heatmap</sub></p>
+</td>
+<td width="50%">
+<!-- TODO(still-rewind): Rewind — timelapse player with scrubber -->
+<img alt="Rewind" src="https://via.placeholder.com/800x500?text=Rewind+%E2%80%94+see+docs/readme-shotlist.md" />
+<p align="center"><sub><b>Rewind</b> — timelapse playback of your day</sub></p>
+</td>
+</tr>
+</table>
+</div>
 
 ## Install
 
-### Arch Linux
+### Arch Linux <sub>(AUR package coming soon)</sub>
 
 ```bash
 yay -S rewindos-bin     # or: paru -S rewindos-bin
@@ -84,14 +129,57 @@ bash install.sh --uninstall        # remove RewindOS (asks before deleting your 
 
 **Requirements:** x86_64, a modern Wayland desktop (KDE, GNOME, Hyprland, Sway), and a current distro. The prebuilt binary targets recent glibc + `webkit2gtk-4.1`; on older distros, build from source.
 
-## Optional: AI features
+### Optional: AI features
 
 These are off by default; RewindOS works fully without them.
 
 - [Ollama](https://ollama.com) — local semantic search, chat, and journal summaries (everything stays on-device).
 - Claude Code CLI — higher-quality chat; once installed and registered with MCP, the Ask view's model picker exposes its tiers (opus / sonnet / haiku).
 
-## Build from source
+## How it works
+
+A background daemon captures screenshots every 5 seconds, deduplicates them with perceptual hashing, runs OCR via Tesseract, and indexes the extracted text into SQLite FTS5. A Tauri desktop app provides search, browsing, journaling, and analytics.
+
+```
+Timer (5s) → Screen Capture → Hash & Dedupe → OCR → SQLite FTS5
+```
+
+## Platform support
+
+Linux on **Wayland**. Capture uses `xdg-desktop-portal` + PipeWire, so it works on any compositor that implements the ScreenCast portal.
+
+| Desktop | Status |
+|---|---|
+| KDE Plasma 6+ | ✅ Tested |
+| GNOME 46+ | ✅ Tested — install the "Window Calls Extended" extension for app/window names |
+| Hyprland · Sway · other wlroots | ⚠️ Should work via the portal — not yet verified |
+
+x86_64 only for prebuilt binaries. X11-only sessions aren't supported.
+
+## Usage
+
+After installation, the daemon starts automatically. The UI autostarts minimized to the system tray.
+
+- **Open search**: `Ctrl+Shift+Space`
+- **View logs**: `journalctl --user -u rewindos-daemon -f`
+- **Restart daemon**: `systemctl --user restart rewindos-daemon`
+- **Launch UI manually**: `rewindos`
+- **Daemon CLI**: `rewindos-daemon pause | resume | status | backfill`
+
+## Storage
+
+At default settings (~5s interval, 8h/day):
+
+| Metric | Estimate |
+|---|---|
+| Frames/day (after dedup) | ~2,880 |
+| Storage/day | ~210 MB |
+| 90-day retention | ~19 GB |
+
+Screenshots are stored as WebP in `~/.rewindos/`. Retention is configurable.
+
+<details>
+<summary><b>Build from source</b></summary>
 
 The `install.sh` path above installs system dependencies for you — this section is only if you'd rather build it yourself.
 
@@ -111,7 +199,7 @@ just install
 
 This builds the Rust workspace and frontend, installs the daemon as a systemd user service, and sets up the desktop app to autostart minimized to tray on login.
 
-### Manual / dev build
+**Manual / dev build**
 
 ```bash
 cargo build --workspace       # Rust crates
@@ -119,17 +207,24 @@ bun install                   # Frontend deps
 bun run tauri dev             # Run in dev mode
 ```
 
-## Usage
+</details>
 
-After installation, the daemon starts automatically. The UI autostarts minimized to the system tray.
+<details>
+<summary><b>Configuration</b></summary>
 
-- **Open search**: `Ctrl+Shift+Space`
-- **View logs**: `journalctl --user -u rewindos-daemon -f`
-- **Restart daemon**: `systemctl --user restart rewindos-daemon`
-- **Launch UI manually**: `rewindos`
-- **Daemon CLI**: `rewindos-daemon pause | resume | status | backfill`
+Config lives at `~/.rewindos/config.toml`. Key options:
 
-## Project layout
+- **Capture interval** and change sensitivity threshold
+- **Excluded apps** and window title patterns (e.g. password managers, private browsing)
+- **Retention period** and storage limits
+- **OCR language** and worker count
+- **Ollama endpoint** for AI features (semantic search, chat, summaries)
+- **App categories** — custom app→category rules for the activity breakdown (Settings → General)
+
+</details>
+
+<details>
+<summary><b>Project layout</b></summary>
 
 ```
 crates/rewindos-core/     Shared lib (DB, OCR, hashing, config, embedding, chat)
@@ -145,28 +240,7 @@ docs/                     Architecture & design docs
 systemd/                  Service files and desktop entries
 ```
 
-## Storage
-
-At default settings (~5s interval, 8h/day):
-
-| Metric | Estimate |
-|---|---|
-| Frames/day (after dedup) | ~2,880 |
-| Storage/day | ~210 MB |
-| 90-day retention | ~19 GB |
-
-Screenshots are stored as WebP in `~/.rewindos/`. Retention is configurable.
-
-## Configuration
-
-Config lives at `~/.rewindos/config.toml`. Key options:
-
-- **Capture interval** and change sensitivity threshold
-- **Excluded apps** and window title patterns (e.g. password managers, private browsing)
-- **Retention period** and storage limits
-- **OCR language** and worker count
-- **Ollama endpoint** for AI features (semantic search, chat, summaries)
-- **App categories** — custom app→category rules for the activity breakdown (Settings → General)
+</details>
 
 ## License
 
