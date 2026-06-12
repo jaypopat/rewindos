@@ -6,8 +6,9 @@ import { Field } from "./primitives/Field";
 import { installUpdate, restartApp, type UpdateProgress } from "@/lib/api";
 import { useUpdateCheck } from "@/hooks/useUpdateCheck";
 
-function progressLabel(p: UpdateProgress | null): string {
-  if (!p) return "Starting…";
+type RenderableStage = Exclude<UpdateProgress["stage"], "error">;
+
+function progressLabel(p: UpdateProgress & { stage: RenderableStage }): string {
   switch (p.stage) {
     case "downloading":
       return `Downloading… ${p.pct}%`;
@@ -19,8 +20,6 @@ function progressLabel(p: UpdateProgress | null): string {
       return "Restarting daemon…";
     case "done":
       return "Done";
-    case "error":
-      return p.message;
   }
 }
 
@@ -34,7 +33,13 @@ export function UpdateSection() {
   useEffect(() => {
     if (!installing) return;
     const unlisten = listen<UpdateProgress>("update-progress", (e) => {
-      setProgress(e.payload);
+      if (e.payload.stage === "error") {
+        setInstallError(e.payload.message);
+        setInstalling(false);
+        setProgress(null);
+      } else {
+        setProgress(e.payload);
+      }
     });
     return () => {
       unlisten.then((fn) => fn());
@@ -44,6 +49,7 @@ export function UpdateSection() {
   const onInstall = async () => {
     setInstalling(true);
     setInstallError(null);
+    setProgress(null);
     try {
       await installUpdate();
     } catch (e) {
@@ -75,7 +81,7 @@ export function UpdateSection() {
           </Button>
         </div>
         {error && !isFetching && (
-          <p className="font-mono text-[11px] text-text-muted mt-1">
+          <p className="font-mono text-[11px] text-text-muted mt-1" role="alert">
             Could not reach the releases API.
           </p>
         )}
@@ -95,8 +101,14 @@ export function UpdateSection() {
                   </Button>
                 )}
                 {installing && !done && (
-                  <span className="font-mono text-[11px] text-text-muted">
-                    {progressLabel(progress)}
+                  <span
+                    className="font-mono text-[11px] text-text-muted"
+                    role="status"
+                    aria-live="polite"
+                  >
+                    {progress && progress.stage !== "error"
+                      ? progressLabel(progress)
+                      : "Starting…"}
                   </span>
                 )}
                 {done && (
@@ -109,7 +121,10 @@ export function UpdateSection() {
                   </Button>
                 )}
                 {installError && (
-                  <span className="font-mono text-[11px] text-text-muted">
+                  <span
+                    className="font-mono text-[11px] text-text-muted"
+                    role="alert"
+                  >
                     {installError}
                   </span>
                 )}
