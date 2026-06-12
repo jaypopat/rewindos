@@ -14,30 +14,20 @@ A private, open-source alternative to **Windows Recall** and **Rewind.ai**. Ever
 
 </div>
 
-<!--
-  HERO DEMO GIF — the single highest-converting asset on this page.
-  Shotlist: docs/readme-shotlist.md → "Hero GIF"
-  Capture: Search view → type a real, relatable query ("that error about websocket")
-           → results animate in with snippet highlights. ~8s loop, 1280–1600px wide.
-  Drag-drop the GIF into a GitHub issue/PR to get a user-attachments URL, then paste it below.
--->
 <div align="center">
 
-<!-- TODO(hero-gif): replace this still with the demo GIF once recorded -->
-<img width="2876" alt="RewindOS search" src="https://github.com/user-attachments/assets/210ae7b4-6995-4190-b64d-d9961583433e" />
+<img width="90%" alt="RewindOS — search everything you've ever seen on your screen" src="docs/assets/search.png" />
 
 </div>
 
 <table>
 <tr>
 <td width="50%">
-<!-- TODO(still-search): Search results grid with scene-dedup + Semantic badges visible -->
-<img alt="Search" src="https://github.com/user-attachments/assets/210ae7b4-6995-4190-b64d-d9961583433e" />
-<p align="center"><sub><b>Search</b> — full-text + semantic, sub-100ms</sub></p>
+<img alt="Home" src="docs/assets/home.png" />
+<p align="center"><sub><b>Home</b> — your day at a glance, with an AI recap</sub></p>
 </td>
 <td width="50%">
-<!-- TODO(still-ask): Ask view — AI answer with inline citations + Sources card -->
-<img alt="Ask" src="https://github.com/user-attachments/assets/ed92dd18-2a47-491d-abbf-281bb1bc064d" />
+<img alt="Ask" src="docs/assets/ask.png" />
 <p align="center"><sub><b>Ask</b> — chat your history with cited screenshots</sub></p>
 </td>
 </tr>
@@ -81,14 +71,12 @@ Exclude specific apps or window-title patterns (password managers, private brows
 <table>
 <tr>
 <td width="50%">
-<!-- TODO(still-dashboard): Dashboard — heatmap calendar + activity charts -->
-<img alt="Dashboard" src="https://via.placeholder.com/800x500?text=Dashboard+%E2%80%94+see+docs/readme-shotlist.md" />
-<p align="center"><sub><b>Dashboard</b> — activity, app usage, heatmap</sub></p>
+<img alt="Rewind" src="docs/assets/rewind.png" />
+<p align="center"><sub><b>Rewind</b> — replay your day as a timelapse</sub></p>
 </td>
 <td width="50%">
-<!-- TODO(still-rewind): Rewind — timelapse player with scrubber -->
-<img alt="Rewind" src="https://via.placeholder.com/800x500?text=Rewind+%E2%80%94+see+docs/readme-shotlist.md" />
-<p align="center"><sub><b>Rewind</b> — timelapse playback of your day</sub></p>
+<img alt="History" src="docs/assets/history.png" />
+<p align="center"><sub><b>History</b> — daily digest, app distribution, task breakdown</sub></p>
 </td>
 </tr>
 </table>
