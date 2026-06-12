@@ -1,5 +1,6 @@
 # Maintainer: Jay Popat <jpsubs@tutamail.com>
-# Template: CI substitutes @VERSION@ and @SHA256@ on release (see release.yml).
+# Generated from packaging/aur/PKGBUILD in the main repo; CI fills the
+# version and checksum on each release (see release.yml).
 pkgname=rewindos-bin
 pkgver=@VERSION@
 pkgrel=1
