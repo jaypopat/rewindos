@@ -2,9 +2,9 @@
 //! install.sh's --update flow in Rust. Keep the file layout in sync
 //! with install.sh's place_files().
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 pub const REPO: &str = "jaypopat/rewindos";
 const TARBALL_NAME: &str = "rewindos-linux-x86_64.tar.gz";
@@ -91,6 +91,98 @@ pub fn is_newer(latest_tag: &str, current: &str) -> bool {
     matches!((latest, current), (Ok(l), Ok(c)) if l > c)
 }
 
+/// Every path and external command the updater touches, injectable for tests.
+/// Mirrors the variables at the top of install.sh.
+#[derive(Debug, Clone)]
+pub struct UpdaterEnv {
+    pub api_base: String,
+    pub bin_dir: PathBuf,
+    pub app_dir: PathBuf,
+    pub icon_base: PathBuf,
+    pub unit_dir: PathBuf,
+    pub autostart_dir: PathBuf,
+    pub share_dir: PathBuf,
+    pub version_file: PathBuf,
+    pub daemon_reload_cmd: Vec<String>,
+    pub daemon_restart_cmd: Vec<String>,
+}
+
+impl Default for UpdaterEnv {
+    fn default() -> Self {
+        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
+        Self {
+            api_base: "https://api.github.com".into(),
+            bin_dir: home.join(".local/bin"),
+            app_dir: home.join(".local/share/applications"),
+            icon_base: home.join(".local/share/icons/hicolor"),
+            unit_dir: home.join(".config/systemd/user"),
+            autostart_dir: home.join(".config/autostart"),
+            share_dir: home.join(".local/share/rewindos"),
+            version_file: home.join(".rewindos/INSTALLED_VERSION"),
+            daemon_reload_cmd: vec!["systemctl".into(), "--user".into(), "daemon-reload".into()],
+            daemon_restart_cmd: vec![
+                "systemctl".into(),
+                "--user".into(),
+                "restart".into(),
+                "rewindos-daemon.service".into(),
+            ],
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct UpdateStatus {
+    pub current: String,
+    pub latest: String,
+    pub release_notes: String,
+    /// latest > current
+    pub available: bool,
+    /// available AND this is a script install (INSTALLED_VERSION exists);
+    /// source builds get the notice but never a prebuilt binary.
+    pub installable: bool,
+}
+
+pub fn build_update_status(
+    release: &ReleaseInfo,
+    current: &str,
+    script_install: bool,
+) -> UpdateStatus {
+    let available = is_newer(&release.tag, current);
+    UpdateStatus {
+        current: current.to_string(),
+        latest: release.tag.clone(),
+        release_notes: release.notes.clone(),
+        available,
+        installable: available && script_install,
+    }
+}
+
+async fn fetch_latest_release(env: &UpdaterEnv) -> Result<ReleaseInfo, String> {
+    let client = reqwest::Client::builder()
+        .user_agent("rewindos-updater") // GitHub API rejects UA-less requests
+        .build()
+        .map_err(|e| format!("http client: {e}"))?;
+    let json = client
+        .get(format!("{}/repos/{REPO}/releases/latest", env.api_base))
+        .send()
+        .await
+        .map_err(|e| format!("releases API: {e}"))?
+        .error_for_status()
+        .map_err(|e| format!("releases API: {e}"))?
+        .text()
+        .await
+        .map_err(|e| format!("releases API body: {e}"))?;
+    parse_latest_release(&json)
+}
+
+#[tauri::command]
+pub async fn check_for_update(app: tauri::AppHandle) -> Result<UpdateStatus, String> {
+    let env = UpdaterEnv::default();
+    let current = app.package_info().version.to_string();
+    let release = fetch_latest_release(&env).await?;
+    Ok(build_update_status(&release, &current, env.version_file.exists()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -156,5 +248,37 @@ mod tests {
         assert!(!is_newer("not-a-version", "1.0.8"));
         assert!(!is_newer("v1.0.9", "garbage"));
         assert!(!is_newer("", ""));
+    }
+
+    fn sample_release() -> ReleaseInfo {
+        ReleaseInfo {
+            tag: "v1.0.9".into(),
+            notes: "notes".into(),
+            tarball_url: "u".into(),
+            sha_url: "s".into(),
+        }
+    }
+
+    #[test]
+    fn status_update_available_script_install() {
+        let s = build_update_status(&sample_release(), "1.0.8", true);
+        assert!(s.available);
+        assert!(s.installable);
+        assert_eq!(s.current, "1.0.8");
+        assert_eq!(s.latest, "v1.0.9");
+    }
+
+    #[test]
+    fn status_source_build_is_not_installable() {
+        let s = build_update_status(&sample_release(), "1.0.8", false);
+        assert!(s.available);
+        assert!(!s.installable);
+    }
+
+    #[test]
+    fn status_up_to_date() {
+        let s = build_update_status(&sample_release(), "1.0.9", true);
+        assert!(!s.available);
+        assert!(!s.installable);
     }
 }
