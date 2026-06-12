@@ -56,7 +56,7 @@ export function UpdateSection() {
           // Mark the shared cache as settled so no refetch consumer re-shows
           // the "Update to vX" card.
           queryClient.setQueryData<UpdateStatus>(["update-check"], (d) =>
-            d ? { ...d, available: false, installable: false } : d,
+            d ? { ...d, available: false } : d,
           );
         }
       }
@@ -122,7 +122,7 @@ export function UpdateSection() {
               >
                 Restart RewindOS to finish
               </Button>
-            ) : data?.installable ? (
+            ) : data?.install_kind === "script" ? (
               <>
                 {!installing && (
                   <Button
@@ -153,6 +153,10 @@ export function UpdateSection() {
                   </span>
                 )}
               </>
+            ) : data?.install_kind === "packaged" ? (
+              <p className="font-mono text-[11px] text-text-muted">
+                Update through your package manager (pacman, apt, dnf).
+              </p>
             ) : (
               <p className="font-mono text-[11px] text-text-muted">
                 You&apos;re running a source build: pull the latest and rebuild

@@ -883,7 +883,7 @@ export interface UpdateStatus {
   latest: string;
   release_notes: string;
   available: boolean;
-  installable: boolean;
+  install_kind: "script" | "packaged" | "source";
 }
 
 export type UpdateProgress =

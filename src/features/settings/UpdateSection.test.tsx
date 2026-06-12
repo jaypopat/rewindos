@@ -33,7 +33,7 @@ const installableStatus = {
   latest: "v1.0.9",
   release_notes: "",
   available: true,
-  installable: true,
+  install_kind: "script",
 };
 
 /** Resolves on the next microtask tick — lets promises and effects settle. */
@@ -49,7 +49,7 @@ describe("UpdateSection", () => {
   it("shows up-to-date state", async () => {
     (checkForUpdate as ReturnType<typeof vi.fn>).mockResolvedValue({
       current: "1.0.8", latest: "v1.0.8", release_notes: "",
-      available: false, installable: false,
+      available: false, install_kind: "script",
     });
     render(<UpdateSection />, { wrapper });
     expect(await screen.findByText(/1\.0\.8/)).toBeInTheDocument();
@@ -59,7 +59,7 @@ describe("UpdateSection", () => {
   it("shows install button when installable", async () => {
     (checkForUpdate as ReturnType<typeof vi.fn>).mockResolvedValue({
       current: "1.0.8", latest: "v1.0.9", release_notes: "## Notes",
-      available: true, installable: true,
+      available: true, install_kind: "script",
     });
     render(<UpdateSection />, { wrapper });
     expect(
@@ -70,7 +70,7 @@ describe("UpdateSection", () => {
   it("shows rebuild copy for source builds", async () => {
     (checkForUpdate as ReturnType<typeof vi.fn>).mockResolvedValue({
       current: "1.0.8", latest: "v1.0.9", release_notes: "",
-      available: true, installable: false,
+      available: true, install_kind: "source",
     });
     render(<UpdateSection />, { wrapper });
     expect(await screen.findByText(/rebuild/i)).toBeInTheDocument();
@@ -117,6 +117,16 @@ describe("UpdateSection", () => {
 
     // Retry button is back
     expect(screen.getByRole("button", { name: /update now/i })).toBeInTheDocument();
+  });
+
+  it("shows package-manager copy for packaged installs", async () => {
+    (checkForUpdate as ReturnType<typeof vi.fn>).mockResolvedValue({
+      current: "1.0.8", latest: "v1.0.9", release_notes: "",
+      available: true, install_kind: "packaged",
+    });
+    render(<UpdateSection />, { wrapper });
+    expect(await screen.findByText(/package manager/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /update now/i })).toBeNull();
   });
 
   it("done event shows restart button, suppresses toast tag, and flips cache", async () => {
