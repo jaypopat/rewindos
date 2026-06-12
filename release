@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# Cut a RewindOS release: bump the version in src-tauri/tauri.conf.json,
+# commit, push. The Release workflow (.github/workflows/release.yml) builds,
+# tags, publishes the GitHub release, and pushes the AUR package from there.
+#
+# Usage: ./release [patch|minor|major] [--dry-run]
+set -euo pipefail
+
+CONF="src-tauri/tauri.conf.json"
+ACTIONS_URL="https://github.com/jaypopat/rewindos/actions/workflows/release.yml"
+
+die() { printf 'error: %s\n' "$*" >&2; exit 1; }
+
+bump="patch"
+dry_run=0
+for arg in "$@"; do
+  case "$arg" in
+    patch|minor|major) bump="$arg" ;;
+    --dry-run)         dry_run=1 ;;
+    *) die "unknown argument '$arg' (usage: ./release [patch|minor|major] [--dry-run])" ;;
+  esac
+done
+
+command -v jq >/dev/null || die "jq is required"
+[ -f "$CONF" ] || die "run from the repo root ($CONF not found)"
+
+branch=$(git rev-parse --abbrev-ref HEAD)
+[ "$branch" = "master" ] || die "on '$branch', releases cut from master"
+[ -z "$(git status --porcelain)" ] || die "working tree not clean"
+
+git fetch origin master --quiet
+behind=$(git rev-list --count HEAD..origin/master)
+[ "$behind" -eq 0 ] || die "HEAD is $behind commit(s) behind origin/master — pull first"
+
+current=$(jq -r '.version' "$CONF")
+[[ "$current" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "unparseable version '$current' in $CONF"
+IFS=. read -r major minor patch <<<"$current"
+case "$bump" in
+  major) next="$((major + 1)).0.0" ;;
+  minor) next="$major.$((minor + 1)).0" ;;
+  patch) next="$major.$minor.$((patch + 1))" ;;
+esac
+
+! git rev-parse "v$next" >/dev/null 2>&1 || die "tag v$next already exists"
+
+printf 'release: %s -> %s (%s)\n' "$current" "$next" "$bump"
+if [ "$dry_run" -eq 1 ]; then
+  printf 'dry run: would update %s, commit "chore: release v%s", and push.\n' "$CONF" "$next"
+  exit 0
+fi
+
+read -r -p "continue? [y/N] " answer
+[ "$answer" = "y" ] || { echo "aborted."; exit 0; }
+
+sed -i "s|\"version\": \"$current\"|\"version\": \"$next\"|" "$CONF"
+[ "$(jq -r '.version' "$CONF")" = "$next" ] || die "version bump failed — check $CONF"
+
+git add "$CONF"
+git commit -m "chore: release v$next"
+git push origin master
+
+printf 'pushed. watch the release: %s\n' "$ACTIONS_URL"
