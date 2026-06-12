@@ -58,6 +58,8 @@ A private, open-source alternative to **Windows Recall** and **Rewind.ai**. Ever
 | No subscription | ✅ | ✅ | ❌ |
 | Bring-your-own AI (local or API) | ✅ | ❌ | ❌ |
 
+> Also open source: [omi](https://github.com/BasedHardware/omi) — but macOS-only and cloud-backed. RewindOS stays fully local and Linux-native.
+
 ## Features
 
 **🔎 Search & Recall**
