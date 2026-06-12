@@ -15,12 +15,12 @@ describe("Sidebar", () => {
     const onViewChange = vi.fn();
     renderSidebar(<Sidebar activeView="dashboard" onViewChange={onViewChange} />);
 
-    // 4 Overview + 4 Think + 1 System + collapse toggle
+    // 4 Overview + 4 Think + pinned Settings + collapse toggle
     const buttons = screen.getAllByRole("button");
     expect(buttons.length).toBe(10);
     expect(screen.getByText("Overview")).toBeTruthy();
     expect(screen.getByText("Think")).toBeTruthy();
-    expect(screen.getByText("System")).toBeTruthy();
+    expect(screen.getByText("Settings")).toBeTruthy();
   });
 
   it("calls onViewChange when a nav item is clicked", () => {
@@ -43,7 +43,7 @@ describe("Sidebar", () => {
     expect(askButton?.className).toContain("text-accent-hi");
   });
 
-  it("navigates to settings from the System group", () => {
+  it("navigates to settings from the pinned footer button", () => {
     const onViewChange = vi.fn();
     renderSidebar(<Sidebar activeView="dashboard" onViewChange={onViewChange} />);
 

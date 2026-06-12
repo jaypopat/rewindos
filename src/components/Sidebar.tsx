@@ -1,9 +1,5 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
-import { getDaemonStatus } from "@/lib/api";
-import { queryKeys } from "@/lib/query-keys";
-import { useConfigQuery } from "@/hooks/useConfigQuery";
 import {
   LayoutGrid,
   CalendarDays,
@@ -61,11 +57,14 @@ const NAV_GROUPS: { section: string; items: NavItem[] }[] = [
       { view: "meetings", label: "Meetings", shortcut: "g m", icon: <Mic /> },
     ],
   },
-  {
-    section: "System",
-    items: [{ view: "settings", label: "Settings", shortcut: "g ,", icon: <Settings /> }],
-  },
 ];
+
+const SETTINGS_ITEM: NavItem = {
+  view: "settings",
+  label: "Settings",
+  shortcut: "g ,",
+  icon: <Settings />,
+};
 
 const COLLAPSE_KEY = "rewindos-sidebar-collapsed";
 
@@ -79,17 +78,6 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps) {
       return !c;
     });
   };
-
-  const { data: status } = useQuery({
-    queryKey: queryKeys.daemonStatus(),
-    queryFn: getDaemonStatus,
-    refetchInterval: 5000,
-    retry: false,
-  });
-  const { data: config } = useConfigQuery();
-
-  const capturing = status?.is_capturing && (status.capture_state ?? "capturing") === "capturing";
-  const interval = config?.capture.interval_seconds;
 
   return (
     <nav
@@ -137,79 +125,73 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps) {
                 {group.section}
               </div>
             )}
-            {group.items.map(({ view, label, shortcut, icon }) => {
-              const active = activeView === view;
-              return (
-                <Button
-                  variant="ghost"
-                  key={view}
-                  onClick={() => onViewChange(view)}
-                  title={`${label} (${shortcut})`}
-                  className={cn(
-                    "group relative w-full h-auto flex items-center justify-start rounded-[7px] cursor-pointer text-left",
-                    collapsed ? "justify-center py-2" : "gap-[11px] px-2.5 py-2",
-                    active
-                      ? "text-accent-hi"
-                      : "text-text-secondary hover:text-text-primary hover:bg-panel",
-                  )}
-                >
-                  {active && (
-                    <span
-                      className={cn(
-                        "animate-navmark absolute top-1/2 -translate-y-1/2 w-0.5 h-4 bg-accent",
-                        collapsed ? "-left-2" : "-left-5",
-                      )}
-                    />
-                  )}
-                  <span
-                    className={cn(
-                      "[&>svg]:size-[17px] [&>svg]:stroke-[1.7] flex-none transition-transform duration-300",
-                      active
-                        ? "opacity-100"
-                        : "opacity-70 group-hover:opacity-100 group-hover:translate-x-px",
-                    )}
-                  >
-                    {icon}
-                  </span>
-                  {!collapsed && <span className="text-sm font-[450] tracking-tight">{label}</span>}
-                </Button>
-              );
-            })}
+            {group.items.map((item) => (
+              <NavButton
+                key={item.view}
+                item={item}
+                active={activeView === item.view}
+                collapsed={collapsed}
+                onSelect={onViewChange}
+              />
+            ))}
           </div>
         ))}
       </div>
 
-      {/* Capture status footer */}
-      <div className="pt-4 border-t border-line">
-        <div
-          className={cn(
-            "flex items-center py-1",
-            collapsed ? "justify-center" : "gap-2.5 px-1.5",
-          )}
-          title={
-            collapsed
-              ? `${status ? (capturing ? "Capturing" : "Paused") : "Connecting"}${interval ? ` · every ${interval}s` : ""}`
-              : undefined
-          }
-        >
-          <span
-            className={cn(
-              "size-[7px] rounded-full flex-none",
-              capturing ? "bg-signal-active animate-led-pulse" : "bg-signal-paused",
-            )}
-          />
-          {!collapsed && (
-            <div>
-              <div className="text-[12.5px] font-medium text-text-secondary">
-                {status ? (capturing ? "Capturing" : "Paused") : "Connecting"}
-              </div>
-              <div className="font-mono text-[10.5px] tracking-[0.04em] text-text-faint mt-px">
-                {interval ? `every ${interval}s · OCR live` : "rewindos-daemon"}
-              </div>
-            </div>
-          )}
-        </div>
+      {/* Settings — pinned bottom-left */}
+      <div className="pt-3 mt-2 border-t border-line">
+        <NavButton
+          item={SETTINGS_ITEM}
+          active={activeView === SETTINGS_ITEM.view}
+          collapsed={collapsed}
+          onSelect={onViewChange}
+        />
       </div>
     </nav>
+  );
+}
+
+interface NavButtonProps {
+  item: NavItem;
+  active: boolean;
+  collapsed: boolean;
+  onSelect: (view: View) => void;
+}
+
+function NavButton({ item, active, collapsed, onSelect }: NavButtonProps) {
+  const { view, label, shortcut, icon } = item;
+  return (
+    <Button
+      variant="ghost"
+      onClick={() => onSelect(view)}
+      title={`${label} (${shortcut})`}
+      className={cn(
+        "group relative w-full h-auto flex items-center justify-start rounded-[7px] cursor-pointer text-left",
+        collapsed ? "justify-center py-2" : "gap-[11px] px-2.5 py-2",
+        active
+          ? "text-accent-hi"
+          : "text-text-secondary hover:text-text-primary hover:bg-panel",
+      )}
+    >
+      {active && (
+        <span
+          className={cn(
+            "animate-navmark absolute top-1/2 -translate-y-1/2 w-0.5 h-4 bg-accent",
+            collapsed ? "-left-2" : "-left-5",
+          )}
+        />
+      )}
+      <span
+        className={cn(
+          "[&>svg]:size-[17px] [&>svg]:stroke-[1.7] flex-none transition-transform duration-300",
+          active
+            ? "opacity-100"
+            : "opacity-70 group-hover:opacity-100 group-hover:translate-x-px",
+        )}
+      >
+        {icon}
+      </span>
+      {!collapsed && <span className="text-sm font-[450] tracking-tight">{label}</span>}
+    </Button>
   );
 }
