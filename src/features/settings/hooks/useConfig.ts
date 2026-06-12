@@ -21,6 +21,7 @@ export function useConfig() {
     mutationFn: (c: AppConfig) =>
       updateConfig(c as unknown as Record<string, unknown>),
     onSuccess: (_data, sent) => {
+      queryClient.setQueryData(queryKeys.config(), sent);
       queryClient.invalidateQueries({ queryKey: queryKeys.config() });
       // Clear the buffer only if no newer edits arrived while this save was
       // in flight; otherwise keep them for the follow-up save.

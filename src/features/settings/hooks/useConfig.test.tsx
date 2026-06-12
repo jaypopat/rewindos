@@ -177,4 +177,38 @@ describe("useConfig auto-save", () => {
     expect(updateConfig).toHaveBeenCalledTimes(1);
     expect(hotkey()).toEqual(["A"]);
   });
+
+  it("does not start a second save while one is in flight", async () => {
+    const { result } = await renderLoaded();
+
+    // Make the first save hang until released.
+    let release!: () => void;
+    (updateConfig as Mock).mockImplementationOnce(
+      () => new Promise<void>((res) => (release = res)),
+    );
+
+    act(() => result.current.update("ui", "global_hotkey", "A"));
+    await act(async () => {
+      result.current.flush(); // save "A" in flight
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(updateConfig).toHaveBeenCalledTimes(1);
+
+    // Debounce catches up while the flush-save is still pending: must NOT
+    // fire a concurrent duplicate.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(800);
+    });
+    expect(updateConfig).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      release();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    // Settled with no newer edits: nothing more to save.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(800);
+    });
+    expect(updateConfig).toHaveBeenCalledTimes(1);
+  });
 });
