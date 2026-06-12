@@ -16,15 +16,15 @@ A private, open-source alternative to **Windows Recall** and **Rewind.ai**. Ever
 
 <div align="center">
 
-<img width="90%" alt="RewindOS — search everything you've ever seen on your screen" src="docs/assets/search.png" />
+<img width="90%" alt="RewindOS — your day at a glance" src="docs/assets/home.png" />
 
 </div>
 
 <table>
 <tr>
 <td width="50%">
-<img alt="Home" src="docs/assets/home.png" />
-<p align="center"><sub><b>Home</b> — your day at a glance, with an AI recap</sub></p>
+<img alt="Search" src="docs/assets/search.png" />
+<p align="center"><sub><b>Search</b> — full-text + semantic across everything you've seen</sub></p>
 </td>
 <td width="50%">
 <img alt="Ask" src="docs/assets/ask.png" />
