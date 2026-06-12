@@ -176,6 +176,184 @@ async fn fetch_latest_release(env: &UpdaterEnv) -> Result<ReleaseInfo, String> {
     parse_latest_release(&json)
 }
 
+const APP_ID: &str = "io.github.jaypopat.rewindos";
+const BINARIES: [&str; 2] = ["rewindos", "rewindos-daemon"];
+/// hicolor size dir -> filename inside the tarball's icons/ (from install.sh).
+const ICONS: [(&str, &str); 4] = [
+    ("32x32", "32x32.png"),
+    ("128x128", "128x128.png"),
+    ("256x256", "128x128@2x.png"),
+    ("512x512", "icon.png"),
+];
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "stage", rename_all = "snake_case")]
+pub enum UpdateProgress {
+    Downloading { pct: u8 },
+    Verifying,
+    Installing,
+    RestartingDaemon,
+    Done,
+    Error { message: String },
+}
+
+fn run_cmd(cmd: &[String]) -> Result<(), String> {
+    let (prog, args) = cmd.split_first().ok_or("empty command")?;
+    let status = std::process::Command::new(prog)
+        .args(args)
+        .status()
+        .map_err(|e| format!("spawn {prog}: {e}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("{} failed ({status})", cmd.join(" ")))
+    }
+}
+
+/// fs::rename breaks across filesystems (staging is in /tmp, home may not be),
+/// so place files by copy + chmod.
+fn place(src: &Path, dst: &Path, mode: u32) -> Result<(), String> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::copy(src, dst).map_err(|e| format!("copy to {}: {e}", dst.display()))?;
+    std::fs::set_permissions(dst, std::fs::Permissions::from_mode(mode))
+        .map_err(|e| format!("chmod {}: {e}", dst.display()))
+}
+
+fn smoke_check(stage: &Path) -> Result<(), String> {
+    let daemon = stage.join("rewindos-daemon");
+    let ok = std::process::Command::new(&daemon)
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if ok {
+        Ok(())
+    } else {
+        Err("the new binary won't run on this system (likely too old a glibc/webkit). \
+             Build from source instead — see the README."
+            .into())
+    }
+}
+
+fn rollback(env: &UpdaterEnv) {
+    for name in BINARIES {
+        let old = env.bin_dir.join(format!("{name}.old"));
+        if old.exists() {
+            let _ = std::fs::rename(&old, env.bin_dir.join(name));
+        }
+    }
+    let _ = run_cmd(&env.daemon_restart_cmd);
+}
+
+/// Swap an extracted release (stage = the rewindos-linux-x86_64/ dir) into
+/// place. Mirrors install.sh place_files() + smoke_check(). Nothing on disk
+/// changes unless the smoke check passes; a failed daemon restart restores
+/// the previous binaries.
+pub fn apply_update(
+    stage: &Path,
+    env: &UpdaterEnv,
+    tag: &str,
+    progress: &dyn Fn(UpdateProgress),
+) -> Result<(), String> {
+    smoke_check(stage)?;
+    progress(UpdateProgress::Installing);
+
+    let version_dir = env
+        .version_file
+        .parent()
+        .unwrap_or(Path::new("/"))
+        .to_path_buf();
+    let dirs = [
+        env.bin_dir.clone(),
+        env.app_dir.clone(),
+        env.unit_dir.clone(),
+        env.autostart_dir.clone(),
+        env.share_dir.clone(),
+        version_dir,
+    ];
+    for dir in &dirs {
+        std::fs::create_dir_all(dir).map_err(|e| format!("mkdir {}: {e}", dir.display()))?;
+    }
+
+    // Rotate current binaries aside, then place the new ones.
+    for name in BINARIES {
+        let bin = env.bin_dir.join(name);
+        let old = env.bin_dir.join(format!("{name}.old"));
+        let _ = std::fs::remove_file(&old);
+        if bin.exists() {
+            std::fs::rename(&bin, &old).map_err(|e| format!("stash {name}: {e}"))?;
+        }
+    }
+    let placed: Result<(), String> = (|| {
+        for name in BINARIES {
+            place(&stage.join(name), &env.bin_dir.join(name), 0o755)?;
+        }
+        place(
+            &stage.join("rewindos-daemon.service"),
+            &env.unit_dir.join("rewindos-daemon.service"),
+            0o644,
+        )?;
+        place(
+            &stage.join("paddleocr_worker.py"),
+            &env.share_dir.join("paddleocr_worker.py"),
+            0o644,
+        )?;
+
+        let app_exec = format!("{} --minimized", env.bin_dir.join("rewindos").display());
+        let launcher = std::fs::read_to_string(stage.join("rewindos.desktop"))
+            .map_err(|e| format!("read rewindos.desktop: {e}"))?;
+        let launcher = rewrite_exec(&launcher, &app_exec);
+        std::fs::write(env.app_dir.join(format!("{APP_ID}.desktop")), &launcher)
+            .map_err(|e| format!("write launcher: {e}"))?;
+        std::fs::write(env.autostart_dir.join("rewindos.desktop"), &launcher)
+            .map_err(|e| format!("write autostart: {e}"))?;
+
+        let daemon_desktop = std::fs::read_to_string(stage.join("com.rewindos.Daemon.desktop"))
+            .map_err(|e| format!("read daemon desktop: {e}"))?;
+        let daemon_desktop = rewrite_exec(
+            &daemon_desktop,
+            &env.bin_dir.join("rewindos-daemon").display().to_string(),
+        );
+        std::fs::write(env.app_dir.join("com.rewindos.Daemon.desktop"), daemon_desktop)
+            .map_err(|e| format!("write daemon desktop: {e}"))?;
+
+        for (size, file) in ICONS {
+            let dst_dir = env.icon_base.join(size).join("apps");
+            std::fs::create_dir_all(&dst_dir)
+                .map_err(|e| format!("mkdir icons: {e}"))?;
+            place(
+                &stage.join("icons").join(file),
+                &dst_dir.join(format!("{APP_ID}.png")),
+                0o644,
+            )?;
+        }
+
+        std::fs::write(&env.version_file, format!("{tag}\n"))
+            .map_err(|e| format!("write INSTALLED_VERSION: {e}"))?;
+        Ok(())
+    })();
+    if let Err(e) = placed {
+        rollback(env);
+        return Err(e);
+    }
+
+    progress(UpdateProgress::RestartingDaemon);
+    let _ = run_cmd(&env.daemon_reload_cmd);
+    if let Err(e) = run_cmd(&env.daemon_restart_cmd) {
+        rollback(env);
+        return Err(format!(
+            "daemon restart failed, previous version restored: {e}"
+        ));
+    }
+
+    for name in BINARIES {
+        let _ = std::fs::remove_file(env.bin_dir.join(format!("{name}.old")));
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn check_for_update(app: tauri::AppHandle) -> Result<UpdateStatus, String> {
     let env = UpdaterEnv::default();
@@ -187,6 +365,7 @@ pub async fn check_for_update(app: tauri::AppHandle) -> Result<UpdateStatus, Str
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::{Path, PathBuf};
 
     const SAMPLE_RELEASE: &str = r###"{
         "tag_name": "v1.0.9",
@@ -281,5 +460,130 @@ mod tests {
         let s = build_update_status(&sample_release(), "1.0.9", true);
         assert!(!s.available);
         assert!(!s.installable);
+    }
+
+    use std::os::unix::fs::PermissionsExt;
+
+    /// Build a fake extracted-tarball stage dir. Binaries are shell scripts so
+    /// the smoke check can really exec them.
+    fn fake_stage(dir: &Path, daemon_exit_code: i32) -> PathBuf {
+        let stage = dir.join("rewindos-linux-x86_64");
+        std::fs::create_dir_all(stage.join("icons")).unwrap();
+        let write_exec = |name: &str, body: &str| {
+            let p = stage.join(name);
+            std::fs::write(&p, body).unwrap();
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        };
+        write_exec("rewindos", "#!/bin/sh\nexit 0\n");
+        write_exec(
+            "rewindos-daemon",
+            &format!("#!/bin/sh\nexit {daemon_exit_code}\n"),
+        );
+        std::fs::write(stage.join("rewindos-daemon.service"), "[Unit]\n").unwrap();
+        std::fs::write(
+            stage.join("rewindos.desktop"),
+            "[Desktop Entry]\nExec=rewindos\n",
+        )
+        .unwrap();
+        std::fs::write(
+            stage.join("com.rewindos.Daemon.desktop"),
+            "[Desktop Entry]\nExec=rewindos-daemon\n",
+        )
+        .unwrap();
+        std::fs::write(stage.join("paddleocr_worker.py"), "# worker\n").unwrap();
+        for icon in ["32x32.png", "128x128.png", "128x128@2x.png", "icon.png"] {
+            std::fs::write(stage.join("icons").join(icon), b"png").unwrap();
+        }
+        stage
+    }
+
+    /// UpdaterEnv rooted in a temp dir; restart command injectable.
+    fn test_env(root: &Path, restart_ok: bool) -> UpdaterEnv {
+        UpdaterEnv {
+            api_base: "http://unused".into(),
+            bin_dir: root.join("bin"),
+            app_dir: root.join("applications"),
+            icon_base: root.join("icons"),
+            unit_dir: root.join("systemd"),
+            autostart_dir: root.join("autostart"),
+            share_dir: root.join("share/rewindos"),
+            version_file: root.join("data/INSTALLED_VERSION"),
+            daemon_reload_cmd: vec!["true".into()],
+            daemon_restart_cmd: vec![if restart_ok { "true" } else { "false" }.into()],
+        }
+    }
+
+    fn install_old_binaries(env: &UpdaterEnv) {
+        std::fs::create_dir_all(&env.bin_dir).unwrap();
+        for name in ["rewindos", "rewindos-daemon"] {
+            let p = env.bin_dir.join(name);
+            std::fs::write(&p, "OLD").unwrap();
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+    }
+
+    #[test]
+    fn apply_update_happy_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let stage = fake_stage(tmp.path(), 0);
+        let env = test_env(tmp.path(), true);
+        install_old_binaries(&env);
+
+        apply_update(&stage, &env, "v1.0.9", &|_| {}).unwrap();
+
+        let new = std::fs::read_to_string(env.bin_dir.join("rewindos-daemon")).unwrap();
+        assert!(new.contains("#!/bin/sh"), "binary was replaced");
+        assert!(!env.bin_dir.join("rewindos.old").exists(), ".old cleaned up");
+        assert_eq!(
+            std::fs::read_to_string(&env.version_file).unwrap().trim(),
+            "v1.0.9"
+        );
+        assert!(env.unit_dir.join("rewindos-daemon.service").exists());
+        assert!(env.share_dir.join("paddleocr_worker.py").exists());
+        let launcher = std::fs::read_to_string(
+            env.app_dir.join("io.github.jaypopat.rewindos.desktop"),
+        )
+        .unwrap();
+        assert!(launcher.contains(&format!(
+            "Exec={} --minimized",
+            env.bin_dir.join("rewindos").display()
+        )));
+        assert!(env.autostart_dir.join("rewindos.desktop").exists());
+        assert!(env.icon_base.join("512x512/apps/io.github.jaypopat.rewindos.png").exists());
+    }
+
+    #[test]
+    fn apply_update_smoke_check_failure_touches_nothing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let stage = fake_stage(tmp.path(), 1); // new daemon won't run
+        let env = test_env(tmp.path(), true);
+        install_old_binaries(&env);
+
+        let err = apply_update(&stage, &env, "v1.0.9", &|_| {}).unwrap_err();
+        assert!(err.contains("won't run"), "got: {err}");
+        assert_eq!(
+            std::fs::read_to_string(env.bin_dir.join("rewindos")).unwrap(),
+            "OLD"
+        );
+        assert!(!env.version_file.exists());
+    }
+
+    #[test]
+    fn apply_update_restart_failure_rolls_back() {
+        let tmp = tempfile::tempdir().unwrap();
+        let stage = fake_stage(tmp.path(), 0);
+        let env = test_env(tmp.path(), false); // daemon restart fails
+        install_old_binaries(&env);
+
+        assert!(apply_update(&stage, &env, "v1.0.9", &|_| {}).is_err());
+        assert_eq!(
+            std::fs::read_to_string(env.bin_dir.join("rewindos")).unwrap(),
+            "OLD",
+            "old binaries restored"
+        );
+        assert_eq!(
+            std::fs::read_to_string(env.bin_dir.join("rewindos-daemon")).unwrap(),
+            "OLD"
+        );
     }
 }
