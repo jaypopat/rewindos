@@ -1,9 +1,8 @@
 import { useConfig } from "@/features/settings/hooks/useConfig";
 import { ListInput } from "@/features/settings/primitives/ListInput";
-import { Button } from "@/components/ui/button";
 
 export function PrivacyStep() {
-  const { config, update, handleSave, saving, saved } = useConfig();
+  const { config, update, saving, saved } = useConfig();
 
   return (
     <div className="flex flex-col gap-4">
@@ -30,9 +29,11 @@ export function PrivacyStep() {
             placeholder="app name"
           />
           <div className="flex items-center gap-3">
-            <Button variant="outline" size="xs" onClick={handleSave} disabled={saving}>
-              {saving ? "Saving…" : saved ? "Saved" : "Save exclusions"}
-            </Button>
+            {(saving || saved) && (
+              <span className="font-mono text-[11px] text-text-muted">
+                {saving ? "saving…" : "saved"}
+              </span>
+            )}
             <span className="text-xs text-text-muted">More options in Settings → Privacy.</span>
           </div>
         </div>

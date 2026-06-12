@@ -31,7 +31,7 @@ const TABS: { id: Tab; label: string }[] = [
 
 export function SettingsView() {
   const [tab, setTab] = useState<Tab>("general");
-  const { config, saving, saved, error, handleSave, update } = useConfig();
+  const { config, saving, saved, error, flush, update } = useConfig();
 
   const { active: tourActive, stepIndex: tourStep } = useTour();
   useEffect(() => {
@@ -84,21 +84,16 @@ export function SettingsView() {
             {error && (
               <span className="font-mono text-[10.5px] text-signal-error">{error}</span>
             )}
-            {saved && (
+            {saving && (
+              <span className="font-mono text-[10.5px] text-text-muted">saving…</span>
+            )}
+            {saved && !saving && (
               <span className="font-mono text-[10.5px] text-signal-active">saved</span>
             )}
-            <Button
-              variant="ghost"
-              onClick={handleSave}
-              disabled={saving}
-              className="inline-flex items-center h-9 px-[15px] rounded-lg text-[13px] font-semibold bg-accent text-[#1c1208] border border-accent-deep hover:bg-accent-hi transition-colors disabled:opacity-50"
-            >
-              {saving ? "Saving…" : "Save changes"}
-            </Button>
           </div>
         </div>
 
-        <div className="flex gap-12 mt-9">
+        <div className="flex gap-12 mt-9" onBlur={flush}>
           {/* Tab rail */}
           <div className="w-[180px] shrink-0 sticky top-6 self-start">
             {TABS.map((t) => (
