@@ -38,3 +38,8 @@ nix = { workspace = true, features = ["signal"] }
 ogg = { workspace = true }
 opus = { workspace = true }
 tiny_http = "0.12"
+sha2 = "0.10"
+flate2 = "1"
+tar = "0.4"
+semver = "1"
+tempfile = "3"

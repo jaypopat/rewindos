@@ -3,6 +3,7 @@ mod audio_server;
 mod chat_commands;
 mod chat_context;
 mod claude_code;
+mod updater;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
