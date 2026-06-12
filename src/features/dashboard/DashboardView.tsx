@@ -286,13 +286,13 @@ export function DashboardView({
                 format={(v) => (screenshotsLoading ? "—" : formatDuration(Math.round(v)))}
                 className="num whitespace-nowrap text-[64px] @4xl:text-[92px] leading-[0.85]"
               />
-              <div className="pb-2">
+              <div className="pb-2 flex flex-wrap items-baseline gap-x-2.5">
                 <div className="font-display text-[21px] text-text-secondary">
                   on screen today
                 </div>
                 {baselineAverage > 0 && activeTimeTrend !== 0 && (
                   <div
-                    className={`font-mono text-[11px] mt-[3px] ${activeTimeTrend > 0 ? "text-signal-active" : "text-accent"}`}
+                    className={`font-mono text-[11px] whitespace-nowrap ${activeTimeTrend > 0 ? "text-signal-active" : "text-accent"}`}
                   >
                     {activeTimeTrend > 0 ? "▲" : "▼"} {Math.abs(activeTimeTrend)}% {baselineLabel}
                   </div>

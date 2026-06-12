@@ -27,12 +27,12 @@ export function GeneralTab({ config, update }: TabProps) {
         />
       </Field>
       <Field label="Setup">
-        <Button variant="outline" size="xs" onClick={open}>
+        <Button variant="editorial" size="editorial" onClick={open}>
           Run setup again
         </Button>
       </Field>
       <Field label="Feature tour">
-        <Button variant="outline" size="xs" onClick={startTour}>
+        <Button variant="editorial" size="editorial" onClick={startTour}>
           Replay feature tour
         </Button>
       </Field>
