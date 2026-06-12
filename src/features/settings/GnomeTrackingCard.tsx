@@ -45,12 +45,12 @@ export function GnomeTrackingCard() {
 
   const dot =
     state.kind === "active"
-      ? "bg-green-500"
+      ? "bg-signal-active"
       : state.kind === "installed-inactive"
-        ? "bg-amber-500"
+        ? "bg-signal-paused"
         : state.kind === "loading"
           ? "bg-border"
-          : "bg-red-500";
+          : "bg-signal-error";
 
   return (
     <div className="mt-4 border border-border/60 rounded-md p-3 bg-surface/50">

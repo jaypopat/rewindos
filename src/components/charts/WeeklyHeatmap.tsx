@@ -60,8 +60,8 @@ export function WeeklyHeatmap({ data }: WeeklyHeatmapProps) {
                       style={{
                         backgroundColor:
                           intensity === 0
-                            ? "rgba(30, 41, 59, 0.3)"
-                            : `rgba(34, 211, 238, ${intensity * 0.7})`,
+                            ? "rgba(33, 31, 27, 0.6)"
+                            : `rgba(232, 130, 90, ${intensity * 0.75})`,
                       }}
                     />
                   </TooltipTrigger>

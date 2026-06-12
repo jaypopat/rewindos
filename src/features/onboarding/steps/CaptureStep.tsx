@@ -3,9 +3,9 @@ import { Button } from "@/components/ui/button";
 import type { CaptureVerdict, VerdictAction, VerdictLevel } from "../deriveCaptureVerdict";
 
 const LEVEL_DOT: Record<VerdictLevel, string> = {
-  green: "bg-emerald-500",
-  amber: "bg-amber-500",
-  red: "bg-red-500",
+  green: "bg-signal-active",
+  amber: "bg-signal-paused",
+  red: "bg-signal-error",
   neutral: "bg-text-muted",
 };
 
@@ -31,7 +31,7 @@ export function CaptureStep({ verdict, onAction, busy }: CaptureStepProps) {
 
       <div className="flex items-start gap-3 rounded-md border border-border/50 bg-background/40 p-4">
         {showSpinner ? (
-          <Spinner className="mt-0.5 size-4 text-amber-500" />
+          <Spinner className="mt-0.5 size-4 text-signal-paused" />
         ) : (
           <span className={`mt-1.5 size-2.5 shrink-0 rounded-full ${LEVEL_DOT[verdict.level]}`} aria-hidden />
         )}

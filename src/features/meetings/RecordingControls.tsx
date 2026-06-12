@@ -32,7 +32,7 @@ export function RecordingControls() {
           variant="ghost"
           onClick={() => stop.mutate()}
           disabled={stop.isPending}
-          className="inline-flex items-center gap-2 h-9 px-[15px] rounded-lg text-[13px] font-semibold text-signal-error border border-[rgba(207,122,99,0.35)] bg-[rgba(207,122,99,0.1)] hover:bg-[rgba(207,122,99,0.18)]"
+          className="inline-flex items-center gap-2 h-9 px-[15px] rounded-lg text-[13px] font-semibold text-signal-error border border-signal-error/35 bg-signal-error/10 hover:bg-signal-error/18"
         >
           <Square className="size-[13px] fill-current" strokeWidth={0} />
           {stop.isPending ? "Stopping…" : "Stop recording"}

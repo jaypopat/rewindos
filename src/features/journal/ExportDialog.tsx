@@ -41,7 +41,7 @@ export function ExportDialog({ onClose }: ExportDialogProps) {
         <div className="px-5 py-4 space-y-4">
           <div className="flex gap-3">
             <div className="flex-1">
-              <label htmlFor="export-start-date" className="text-[10px] text-text-muted font-mono uppercase tracking-wider">
+              <label htmlFor="export-start-date" className="kicker">
                 From
               </label>
               <Input
@@ -53,7 +53,7 @@ export function ExportDialog({ onClose }: ExportDialogProps) {
               />
             </div>
             <div className="flex-1">
-              <label htmlFor="export-end-date" className="text-[10px] text-text-muted font-mono uppercase tracking-wider">
+              <label htmlFor="export-end-date" className="kicker">
                 To
               </label>
               <Input

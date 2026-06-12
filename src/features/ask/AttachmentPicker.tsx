@@ -156,7 +156,7 @@ export function AttachmentPicker({ open, onClose, onAttach }: AttachmentPickerPr
         </div>
 
         <DialogFooter className="flex items-center justify-between pt-3 border-t border-border/30">
-          <span className="font-mono text-[10px] text-text-muted uppercase tracking-wider">
+          <span className="kicker">
             {selected.size} selected
           </span>
           <div className="flex gap-2">

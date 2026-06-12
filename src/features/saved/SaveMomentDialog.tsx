@@ -83,7 +83,7 @@ export function SaveMomentDialog({ onClose }: SaveMomentDialogProps) {
           className="px-5 py-4 space-y-4"
         >
           <div>
-            <label htmlFor="moment-name" className="text-[10px] text-text-muted font-mono uppercase tracking-wider">
+            <label htmlFor="moment-name" className="kicker">
               Name
             </label>
             <Input
@@ -97,7 +97,7 @@ export function SaveMomentDialog({ onClose }: SaveMomentDialogProps) {
           </div>
 
           <div>
-            <label htmlFor="moment-date" className="text-[10px] text-text-muted font-mono uppercase tracking-wider">
+            <label htmlFor="moment-date" className="kicker">
               Date
             </label>
             <Input
@@ -111,7 +111,7 @@ export function SaveMomentDialog({ onClose }: SaveMomentDialogProps) {
 
           <div className="flex gap-3">
             <div className="flex-1">
-              <label htmlFor="moment-start-time" className="text-[10px] text-text-muted font-mono uppercase tracking-wider">
+              <label htmlFor="moment-start-time" className="kicker">
                 Start time
               </label>
               <Input
@@ -123,7 +123,7 @@ export function SaveMomentDialog({ onClose }: SaveMomentDialogProps) {
               />
             </div>
             <div className="flex-1">
-              <label htmlFor="moment-end-time" className="text-[10px] text-text-muted font-mono uppercase tracking-wider">
+              <label htmlFor="moment-end-time" className="kicker">
                 End time
               </label>
               <Input
@@ -137,7 +137,7 @@ export function SaveMomentDialog({ onClose }: SaveMomentDialogProps) {
           </div>
 
           {saveMutation.isError && (
-            <p className="text-[10px] text-red-400">{(saveMutation.error as Error).message}</p>
+            <p className="text-[10px] text-signal-error">{(saveMutation.error as Error).message}</p>
           )}
 
           <Button

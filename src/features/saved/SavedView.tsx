@@ -263,7 +263,7 @@ export function SavedView({ onSelectScreenshot, onRewindToRange, selectedCollect
                       e.stopPropagation();
                       setConfirmDeleteId(col.id);
                     }}
-                    className="h-auto p-1.5 text-text-muted hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all"
+                    className="h-auto p-1.5 text-text-muted hover:text-signal-error opacity-0 group-hover:opacity-100 transition-all"
                   >
                     <Trash2 className="size-3.5" strokeWidth={1.5} />
                   </Button>

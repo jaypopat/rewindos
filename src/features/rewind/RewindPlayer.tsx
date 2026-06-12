@@ -33,7 +33,7 @@ export function RewindPlayer({
             variant="ghost"
             size="icon-sm"
             onClick={() => onSelectScreenshot(currentScreenshot.id, allIds)}
-            className="absolute top-2 right-2 p-1.5 rounded-md bg-black/50 text-white/80 hover:text-white hover:bg-black/70"
+            className="absolute top-2 right-2 p-1.5 rounded-md bg-surface-overlay/70 text-text-secondary hover:text-text-primary hover:bg-surface-overlay"
             title="View full detail (Enter)"
           >
             <Maximize2 className="size-4" strokeWidth={1.5} />

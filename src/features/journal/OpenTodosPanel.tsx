@@ -46,7 +46,7 @@ export function OpenTodosPanel({ onSelectDate }: OpenTodosPanelProps) {
 
   return (
     <div>
-      <h3 className="text-xs font-medium text-text-muted uppercase tracking-wider mb-2 flex items-center gap-1.5">
+      <h3 className="kicker mb-2 flex items-center gap-1.5">
         <CheckSquare className="size-3" strokeWidth={2} />
         Open Todos
       </h3>

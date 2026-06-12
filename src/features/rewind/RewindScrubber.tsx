@@ -79,7 +79,7 @@ export function RewindScrubber({
         {/* Range selection overlay */}
         {rangeSelFractions && (
           <div
-            className="absolute top-0 bottom-0 bg-red-500/20 border-x-2 border-red-500/50 pointer-events-none"
+            className="absolute top-0 bottom-0 bg-signal-error/20 border-x border-signal-error/50 pointer-events-none"
             style={{
               left: `${rangeSelFractions.left * 100}%`,
               width: `${(rangeSelFractions.right - rangeSelFractions.left) * 100}%`,

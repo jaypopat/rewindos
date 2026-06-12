@@ -22,7 +22,7 @@ export function CitationSources({ ids, onSelect }: CitationSourcesProps) {
   return (
     <div className="mt-3 border border-border/40 bg-surface-raised/10">
       <div className="px-2.5 py-1 border-b border-border/30 flex items-center justify-between">
-        <span className="font-mono text-[10px] text-text-muted uppercase tracking-[0.2em]">
+        <span className="kicker">
           sources
         </span>
         <span className="font-mono text-[10px] text-text-muted/70">{ids.length}</span>

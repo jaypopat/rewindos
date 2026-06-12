@@ -74,7 +74,7 @@ export function RewindControls({
         className={cn(
           "h-auto flex items-center gap-1.5 px-2 py-1 text-xs rounded-md",
           rangeMode
-            ? "bg-red-500/15 text-red-400"
+            ? "bg-signal-error/15 text-signal-error"
             : "text-text-muted hover:text-text-secondary hover:bg-surface-raised",
         )}
         title="Select range for bulk delete"
@@ -92,7 +92,7 @@ export function RewindControls({
           <Button
             variant="ghost"
             onClick={onDeleteClick}
-            className="h-auto flex items-center gap-1 px-2 py-1 text-xs rounded-md bg-red-500/15 text-red-400 hover:bg-red-500/25"
+            className="h-auto flex items-center gap-1 px-2 py-1 text-xs rounded-md bg-signal-error/15 text-signal-error hover:bg-signal-error/25"
           >
             <Trash2 className="size-3.5" strokeWidth={1.8} />
             Delete

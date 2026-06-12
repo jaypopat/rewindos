@@ -242,7 +242,7 @@ export function ExportTab({ config, update }: TabProps) {
           <div className="space-y-3 pl-0">
             <div className="flex gap-3">
               <div className="flex-1">
-                <label htmlFor="vault-backfill-from" className="text-[10px] text-text-muted font-mono uppercase tracking-wider">
+                <label htmlFor="vault-backfill-from" className="kicker">
                   From
                 </label>
                 <Input
@@ -254,7 +254,7 @@ export function ExportTab({ config, update }: TabProps) {
                 />
               </div>
               <div className="flex-1">
-                <label htmlFor="vault-backfill-to" className="text-[10px] text-text-muted font-mono uppercase tracking-wider">
+                <label htmlFor="vault-backfill-to" className="kicker">
                   To
                 </label>
                 <Input

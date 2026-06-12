@@ -58,7 +58,7 @@ export function AISummaryPanel({ selectedDate }: AISummaryPanelProps) {
   return (
     <div>
       <div className="flex items-center justify-between mb-2">
-        <h3 className="text-xs font-medium text-text-muted uppercase tracking-wider flex items-center gap-1.5">
+        <h3 className="kicker flex items-center gap-1.5">
           <Sparkles className="size-3" strokeWidth={2} />
           AI Summary
         </h3>

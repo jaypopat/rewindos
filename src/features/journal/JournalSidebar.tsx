@@ -51,9 +51,9 @@ export function JournalSidebar({
               className={cn(
                 "size-5 shrink-0",
                 streak.current_streak >= 3
-                  ? "text-orange-400"
+                  ? "text-accent-hi"
                   : streak.current_streak > 0
-                    ? "text-amber-400"
+                    ? "text-signal-paused"
                     : "text-text-muted",
               )}
               strokeWidth={1.8}
@@ -78,7 +78,7 @@ export function JournalSidebar({
         {/* Activity breakdown */}
         {activityData && activityData.app_usage.length > 0 && (
           <div>
-            <h3 className="text-xs font-medium text-text-muted uppercase tracking-wider mb-2">
+            <h3 className="kicker mb-2">
               Activity
             </h3>
             <div className="space-y-1.5">
@@ -107,7 +107,7 @@ export function JournalSidebar({
         {/* Memory jogger prompts */}
         {prompts.length > 0 && (
           <div>
-            <h3 className="text-xs font-medium text-text-muted uppercase tracking-wider mb-2 flex items-center gap-1.5">
+            <h3 className="kicker mb-2 flex items-center gap-1.5">
               <Lightbulb className="size-3" strokeWidth={2} />
               Prompts
             </h3>

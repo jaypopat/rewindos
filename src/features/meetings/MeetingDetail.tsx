@@ -89,7 +89,7 @@ export function MeetingDetail({
               )}
               strokeWidth={1.7}
             />
-            <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-text-muted">
+            <span className="kicker">
               Minutes
             </span>
           </Button>

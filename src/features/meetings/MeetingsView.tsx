@@ -23,7 +23,7 @@ export function MeetingsView({ onJumpToTime }: { onJumpToTime?: (unixSecs: numbe
     <div className="flex-1 flex flex-col min-h-0">
       <header className="flex flex-col gap-3.5 px-7 py-[18px] border-b border-line shrink-0">
         <div className="flex items-center justify-between gap-4">
-          <div className="font-mono text-[11px] uppercase tracking-[0.16em] text-text-muted">
+          <div className="kicker">
             Recorder
             <span className="mx-2 text-text-ghost">/</span>
             <span className="text-text-secondary">

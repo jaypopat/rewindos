@@ -20,7 +20,7 @@ export function PrivacyStep() {
 
       {config ? (
         <div className="flex flex-col gap-2">
-          <span className="font-mono text-[11px] uppercase tracking-wider text-text-muted">
+          <span className="kicker">
             Excluded apps
           </span>
           <ListInput

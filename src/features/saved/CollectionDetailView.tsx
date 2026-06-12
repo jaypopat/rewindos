@@ -113,7 +113,7 @@ export function CollectionDetailView({
           <Button
             variant="quiet"
             onClick={() => setConfirmDelete(true)}
-            className="h-auto p-1.5 text-text-muted hover:text-red-400"
+            className="h-auto p-1.5 text-text-muted hover:text-signal-error"
             title="Delete moment"
           >
             <Trash2 className="size-4" strokeWidth={1.5} />

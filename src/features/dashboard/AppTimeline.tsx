@@ -163,7 +163,7 @@ export function AppTimeline({ spans, todayStart, screenshots, onSelectScreenshot
           {/* Current time marker */}
           {now >= rangeStart && now <= rangeEnd && (
             <div
-              className="absolute top-0 h-full w-px bg-red-400/60"
+              className="absolute top-0 h-full w-px bg-signal-error/60"
               style={{ left: `${((now - rangeStart) / (rangeEnd - rangeStart)) * 100}%` }}
             />
           )}

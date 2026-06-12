@@ -57,7 +57,7 @@ export const AudioPlayer = forwardRef<AudioHandle, { path: string }>(({ path }, 
   }
   if (!src) {
     return (
-      <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-text-muted">
+      <div className="kicker">
         Loading audio…
       </div>
     );

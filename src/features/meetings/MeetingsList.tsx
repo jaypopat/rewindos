@@ -20,7 +20,7 @@ export function MeetingsList({
 
   if (isLoading)
     return (
-      <div className="px-5 py-4 font-mono text-[11px] uppercase tracking-[0.12em] text-text-muted">
+      <div className="px-5 py-4 kicker">
         Loading…
       </div>
     );

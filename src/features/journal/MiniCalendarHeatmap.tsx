@@ -85,12 +85,12 @@ export function MiniCalendarHeatmap({
             wc === 0
               ? ""
               : wc < 50
-                ? "bg-emerald-500/10"
+                ? "bg-accent/15"
                 : wc < 150
-                  ? "bg-emerald-500/20"
+                  ? "bg-accent/30"
                   : wc < 400
-                    ? "bg-emerald-500/30"
-                    : "bg-emerald-500/40";
+                    ? "bg-accent/50"
+                    : "bg-accent/75";
 
           return (
             <button
