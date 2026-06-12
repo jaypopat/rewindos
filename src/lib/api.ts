@@ -876,3 +876,34 @@ export async function setModel(chatId: number, model: string): Promise<void> {
   return invoke("set_model", { chatId, model });
 }
 
+// ---- In-app updater ----
+
+export interface UpdateStatus {
+  current: string;
+  latest: string;
+  release_notes: string;
+  available: boolean;
+  installable: boolean;
+}
+
+export type UpdateProgress =
+  | { stage: "downloading"; pct: number }
+  | { stage: "verifying" }
+  | { stage: "installing" }
+  | { stage: "restarting_daemon" }
+  | { stage: "done" }
+  | { stage: "error"; message: string };
+
+export function checkForUpdate(): Promise<UpdateStatus> {
+  return invoke("check_for_update");
+}
+
+export function installUpdate(): Promise<void> {
+  return invoke("install_update");
+}
+
+/** Fire-and-forget: the process is replaced, so this promise never resolves. */
+export function restartApp(): void {
+  void invoke("restart_app");
+}
+
