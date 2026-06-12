@@ -20,6 +20,7 @@ vi.mock("@tauri-apps/api/event", () => ({
 }));
 
 import { checkForUpdate, installUpdate, restartApp } from "@/lib/api";
+import { NOTIFIED_KEY } from "@/components/UpdateToast";
 import { UpdateSection } from "./UpdateSection";
 
 function wrapper({ children }: { children: React.ReactNode }) {
@@ -42,6 +43,7 @@ describe("UpdateSection", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     progressHandler = null;
+    localStorage.clear();
   });
 
   it("shows up-to-date state", async () => {
@@ -117,7 +119,7 @@ describe("UpdateSection", () => {
     expect(screen.getByRole("button", { name: /update now/i })).toBeInTheDocument();
   });
 
-  it("done event shows restart button", async () => {
+  it("done event shows restart button, suppresses toast tag, and flips cache", async () => {
     (checkForUpdate as ReturnType<typeof vi.fn>).mockResolvedValue(installableStatus);
     (installUpdate as ReturnType<typeof vi.fn>).mockReturnValue(new Promise(() => {}));
     (restartApp as ReturnType<typeof vi.fn>).mockReturnValue(undefined);
@@ -132,9 +134,14 @@ describe("UpdateSection", () => {
       progressHandler?.({ payload: { stage: "done" } });
     });
 
+    // Restart button is present even though available flipped false in the cache
     const restartBtn = screen.getByRole("button", { name: /restart rewindos to finish/i });
     expect(restartBtn).toBeInTheDocument();
 
+    // Toast suppression: localStorage has the notified tag
+    expect(localStorage.getItem(NOTIFIED_KEY)).toBe("v1.0.9");
+
+    // Clicking restart calls restartApp
     fireEvent.click(restartBtn);
     expect(restartApp).toHaveBeenCalledOnce();
   });
