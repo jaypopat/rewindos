@@ -12,6 +12,7 @@ import { AskEmptyState } from "./AskEmptyState";
 import { AskModelPicker } from "./AskModelPicker";
 import { AttachmentPicker } from "./AttachmentPicker";
 import { ChatSidebar } from "./ChatSidebar";
+import { resolveChatRoute } from "@/lib/claude-models";
 import {
   PromptInput,
   PromptInputTextarea,
@@ -32,7 +33,8 @@ interface AskViewProps {
 }
 
 export function AskView({ onSelectScreenshot }: AskViewProps) {
-  const { messages, isStreaming, error, sendMessage, cancelStream, startNewChat } = useAskChat();
+  const { messages, isStreaming, error, sendMessage, cancelStream, startNewChat, activeChat, pendingModel } =
+    useAskChat();
   const [input, setInput] = useState("");
   const [attachedIds, setAttachedIds] = useState<number[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -86,6 +88,17 @@ export function AskView({ onSelectScreenshot }: AskViewProps) {
 
   const usingClaude = !!(claudeStatus?.available && claudeStatus.mcp_registered);
   const chatReady = usingClaude || chatOnline;
+
+  // Whether THIS chat's send will actually hit Claude — mirror the send path's
+  // resolveChatRoute (AskContext) with the same inputs, so the privacy footer
+  // describes the model that answers, not just whatever's installed.
+  // (usingClaude alone wrongly says "Claude" even when a local model is picked.)
+  const routesToClaude =
+    resolveChatRoute({
+      selectedModel: activeChat?.model ?? pendingModel ?? null,
+      claudeReady: usingClaude,
+      ollamaDefaultModel: config?.chat.model ?? "",
+    }).provider === "claude";
 
   const submit = useCallback(
     async (textOverride?: string) => {
@@ -226,10 +239,8 @@ export function AskView({ onSelectScreenshot }: AskViewProps) {
                   !chatReady
                     ? "connect claude or start ollama to chat"
                     : isStreaming
-                      ? "claude is thinking…"
-                      : usingClaude
-                        ? "ask about your screen history — uses MCP tools"
-                        : "ask about your screen history"
+                      ? "thinking…"
+                      : "ask about your screen history"
                 }
                 disabled={isStreaming || !chatReady}
                 className="font-sans text-sm"
@@ -249,7 +260,7 @@ export function AskView({ onSelectScreenshot }: AskViewProps) {
                     <Paperclip className="size-4" strokeWidth={1.7} />
                   </Button>
                   <span className="font-mono text-[10px] text-text-faint">
-                    {usingClaude ? "⇧⏎ newline · ⏎ send" : "⏎ send"}
+                    ⇧⏎ newline · ⏎ send
                   </span>
                 </div>
                 <PromptInputSubmit
@@ -260,7 +271,7 @@ export function AskView({ onSelectScreenshot }: AskViewProps) {
               </PromptInputFooter>
             </PromptInput>
             <p className="font-mono text-[9.5px] text-text-faint mt-2.5 text-center">
-              {usingClaude
+              {routesToClaude
                 ? "Claude answers through MCP tools over your local index."
                 : "Answers are generated locally from your captures. Nothing is sent off-device."}
             </p>
