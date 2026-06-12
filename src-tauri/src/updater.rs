@@ -142,6 +142,31 @@ impl Default for UpdaterEnv {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InstallKind {
+    /// install.sh / in-app updater install in ~/.local/bin — self-update allowed.
+    Script,
+    /// Distro package (AUR, deb, rpm) under /usr — the package manager owns updates.
+    Packaged,
+    /// Built from source (incl. dev builds) — user rebuilds to update.
+    Source,
+}
+
+/// Classify how this binary was installed from its on-disk location.
+/// `exe = None` (current_exe() failed) falls back to Source: never offer a
+/// self-update we can't reason about.
+pub fn classify_install(exe: Option<&Path>, env: &UpdaterEnv) -> InstallKind {
+    let Some(exe) = exe else { return InstallKind::Source };
+    if exe.starts_with(&env.bin_dir) && env.version_file.exists() {
+        InstallKind::Script
+    } else if exe.starts_with("/usr") {
+        InstallKind::Packaged
+    } else {
+        InstallKind::Source
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct UpdateStatus {
     pub current: String,
@@ -149,23 +174,21 @@ pub struct UpdateStatus {
     pub release_notes: String,
     /// latest > current
     pub available: bool,
-    /// available AND this is a script install (INSTALLED_VERSION exists);
-    /// source builds get the notice but never a prebuilt binary.
-    pub installable: bool,
+    /// How this binary was installed; drives which update path the UI offers.
+    pub install_kind: InstallKind,
 }
 
 pub fn build_update_status(
     release: &ReleaseInfo,
     current: &str,
-    script_install: bool,
+    install_kind: InstallKind,
 ) -> UpdateStatus {
-    let available = is_newer(&release.tag, current);
     UpdateStatus {
         current: current.to_string(),
         latest: release.tag.clone(),
         release_notes: release.notes.clone(),
-        available,
-        installable: available && script_install,
+        available: is_newer(&release.tag, current),
+        install_kind,
     }
 }
 
@@ -388,7 +411,8 @@ pub async fn check_for_update(app: tauri::AppHandle) -> Result<UpdateStatus, Str
     let env = UpdaterEnv::default();
     let current = app.package_info().version.to_string();
     let release = fetch_latest_release(&env).await?;
-    Ok(build_update_status(&release, &current, env.version_file.exists()))
+    let kind = classify_install(std::env::current_exe().ok().as_deref(), &env);
+    Ok(build_update_status(&release, &current, kind))
 }
 
 async fn download_with_progress<F>(
@@ -498,8 +522,9 @@ pub async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
     }
     let _guard = ClearOnDrop;
     let env = UpdaterEnv::default();
-    if !env.version_file.exists() {
-        return Err("not a script install — update by rebuilding from source".into());
+    let kind = classify_install(std::env::current_exe().ok().as_deref(), &env);
+    if kind != InstallKind::Script {
+        return Err("self-update is only available for script installs".into());
     }
     let emitter = app.clone();
     let progress = move |p: UpdateProgress| {
@@ -601,26 +626,66 @@ mod tests {
     }
 
     #[test]
-    fn status_update_available_script_install() {
-        let s = build_update_status(&sample_release(), "1.0.8", true);
+    fn classify_script_install() {
+        let tmp = tempfile::tempdir().unwrap();
+        let env = test_env(tmp.path(), true);
+        std::fs::create_dir_all(env.version_file.parent().unwrap()).unwrap();
+        std::fs::write(&env.version_file, "v1.0.9\n").unwrap();
+        let exe = env.bin_dir.join("rewindos");
+        assert_eq!(classify_install(Some(&exe), &env), InstallKind::Script);
+    }
+
+    #[test]
+    fn classify_script_path_without_version_file_is_source() {
+        let tmp = tempfile::tempdir().unwrap();
+        let env = test_env(tmp.path(), true);
+        let exe = env.bin_dir.join("rewindos");
+        assert_eq!(classify_install(Some(&exe), &env), InstallKind::Source);
+    }
+
+    #[test]
+    fn classify_usr_is_packaged() {
+        let tmp = tempfile::tempdir().unwrap();
+        let env = test_env(tmp.path(), true);
+        assert_eq!(
+            classify_install(Some(Path::new("/usr/bin/rewindos")), &env),
+            InstallKind::Packaged
+        );
+        assert_eq!(
+            classify_install(Some(Path::new("/usr/lib/rewindos/rewindos")), &env),
+            InstallKind::Packaged
+        );
+    }
+
+    #[test]
+    fn classify_dev_or_unknown_is_source() {
+        let tmp = tempfile::tempdir().unwrap();
+        let env = test_env(tmp.path(), true);
+        assert_eq!(
+            classify_install(Some(Path::new("/home/u/dev/target/debug/rewindos")), &env),
+            InstallKind::Source
+        );
+        assert_eq!(classify_install(None, &env), InstallKind::Source);
+    }
+
+    #[test]
+    fn status_carries_install_kind_and_availability() {
+        let s = build_update_status(&sample_release(), "1.0.8", InstallKind::Script);
         assert!(s.available);
-        assert!(s.installable);
+        assert_eq!(s.install_kind, InstallKind::Script);
         assert_eq!(s.current, "1.0.8");
         assert_eq!(s.latest, "v1.0.9");
-    }
 
-    #[test]
-    fn status_source_build_is_not_installable() {
-        let s = build_update_status(&sample_release(), "1.0.8", false);
-        assert!(s.available);
-        assert!(!s.installable);
-    }
-
-    #[test]
-    fn status_up_to_date() {
-        let s = build_update_status(&sample_release(), "1.0.9", true);
+        let s = build_update_status(&sample_release(), "1.0.9", InstallKind::Packaged);
         assert!(!s.available);
-        assert!(!s.installable);
+        assert_eq!(s.install_kind, InstallKind::Packaged);
+    }
+
+    #[test]
+    fn install_kind_serializes_snake_case() {
+        assert_eq!(serde_json::to_string(&InstallKind::Script).unwrap(), "\"script\"");
+        assert_eq!(serde_json::to_string(&InstallKind::Packaged).unwrap(), "\"packaged\"");
+        assert_eq!(serde_json::to_string(&InstallKind::Source).unwrap(), "\"source\"");
     }
 
     use std::os::unix::fs::PermissionsExt;
