@@ -5,6 +5,7 @@ import { TextInput } from "../primitives/TextInput";
 import { Button } from "@/components/ui/button";
 import { useOnboarding } from "@/features/onboarding/OnboardingContext";
 import { useTour } from "@/features/tour/TourContext";
+import { UpdateSection } from "../UpdateSection";
 
 interface TabProps {
   config: AppConfig;
@@ -35,6 +36,7 @@ export function GeneralTab({ config, update }: TabProps) {
           Replay feature tour
         </Button>
       </Field>
+      <UpdateSection />
     </>
   );
 }
