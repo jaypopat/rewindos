@@ -50,6 +50,15 @@ x86_64 only for prebuilt binaries. X11-only sessions aren't supported.
 
 ## Install
 
+### Arch Linux
+
+```bash
+yay -S rewindos-bin     # or: paru -S rewindos-bin
+systemctl --user enable --now rewindos-daemon.service
+```
+
+### Other distros
+
 RewindOS is local-first and privacy-focused, so the recommended install is **download, read, then run**:
 
 ```bash
