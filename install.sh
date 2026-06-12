@@ -25,7 +25,11 @@ STAGING_DIR=""
 cleanup_staging() { [[ -n "$STAGING_DIR" ]] && rm -rf "$STAGING_DIR"; true; }
 trap cleanup_staging EXIT
 
-log()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
+# log goes to stderr: functions like download_and_extract return values via
+# stdout command substitution, and a stdout log line would be captured into
+# the result (this once corrupted INSTALLED_VERSION with a "==> Downloading"
+# line).
+log()  { printf '\033[1;34m==>\033[0m %s\n' "$*" >&2; }
 warn() { printf '\033[1;33mwarning:\033[0m %s\n' "$*" >&2; }
 err()  { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; }
 die()  { err "$*"; exit 1; }
