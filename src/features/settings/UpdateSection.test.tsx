@@ -28,7 +28,7 @@ function wrapper({ children }: { children: React.ReactNode }) {
   return <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
 }
 
-const installableStatus = {
+const scriptStatus = {
   current: "1.0.8",
   latest: "v1.0.9",
   release_notes: "",
@@ -56,7 +56,7 @@ describe("UpdateSection", () => {
     expect(screen.queryByRole("button", { name: /update now/i })).toBeNull();
   });
 
-  it("shows install button when installable", async () => {
+  it("shows install button for script installs", async () => {
     (checkForUpdate as ReturnType<typeof vi.fn>).mockResolvedValue({
       current: "1.0.8", latest: "v1.0.9", release_notes: "## Notes",
       available: true, install_kind: "script",
@@ -78,7 +78,7 @@ describe("UpdateSection", () => {
   });
 
   it("shows progress events while installing", async () => {
-    (checkForUpdate as ReturnType<typeof vi.fn>).mockResolvedValue(installableStatus);
+    (checkForUpdate as ReturnType<typeof vi.fn>).mockResolvedValue(scriptStatus);
     // installUpdate never resolves — simulates in-progress download
     (installUpdate as ReturnType<typeof vi.fn>).mockReturnValue(new Promise(() => {}));
 
@@ -97,7 +97,7 @@ describe("UpdateSection", () => {
   });
 
   it("error event ends install with a single error line and allows retry", async () => {
-    (checkForUpdate as ReturnType<typeof vi.fn>).mockResolvedValue(installableStatus);
+    (checkForUpdate as ReturnType<typeof vi.fn>).mockResolvedValue(scriptStatus);
     (installUpdate as ReturnType<typeof vi.fn>).mockReturnValue(new Promise(() => {}));
 
     render(<UpdateSection />, { wrapper });
@@ -130,7 +130,7 @@ describe("UpdateSection", () => {
   });
 
   it("done event shows restart button, suppresses toast tag, and flips cache", async () => {
-    (checkForUpdate as ReturnType<typeof vi.fn>).mockResolvedValue(installableStatus);
+    (checkForUpdate as ReturnType<typeof vi.fn>).mockResolvedValue(scriptStatus);
     (installUpdate as ReturnType<typeof vi.fn>).mockReturnValue(new Promise(() => {}));
     (restartApp as ReturnType<typeof vi.fn>).mockReturnValue(undefined);
 

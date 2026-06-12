@@ -15,7 +15,7 @@ function wrapper({ children }: { children: React.ReactNode }) {
 
 const AVAILABLE = {
   current: "1.0.8", latest: "v1.0.9", release_notes: "",
-  available: true, installable: true,
+  available: true, install_kind: "script",
 };
 
 describe("UpdateToast", () => {
@@ -51,7 +51,7 @@ describe("UpdateToast", () => {
   it("stays hidden when up to date (available: false)", async () => {
     (checkForUpdate as ReturnType<typeof vi.fn>).mockResolvedValue({
       current: "1.0.9", latest: "v1.0.9", release_notes: "",
-      available: false, installable: false,
+      available: false, install_kind: "script",
     });
     const { container } = render(<UpdateToast onOpenSettings={() => {}} />, { wrapper });
     await new Promise((r) => setTimeout(r, 50));
