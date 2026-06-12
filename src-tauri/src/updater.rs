@@ -91,6 +91,18 @@ pub fn is_newer(latest_tag: &str, current: &str) -> bool {
     matches!((latest, current), (Ok(l), Ok(c)) if l > c)
 }
 
+/// install_update is NOT re-entrant: concurrent runs would interleave the
+/// .old rotation and could destroy the only good copy of a binary.
+static INSTALL_IN_FLIGHT: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+struct ClearOnDrop;
+impl Drop for ClearOnDrop {
+    fn drop(&mut self) {
+        INSTALL_IN_FLIGHT.store(false, std::sync::atomic::Ordering::Release);
+    }
+}
+
 /// Every path and external command the updater touches, injectable for tests.
 /// Mirrors the variables at the top of install.sh.
 #[derive(Debug, Clone)]
@@ -473,6 +485,18 @@ where
 #[tauri::command]
 pub async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
     use tauri::Emitter;
+    if INSTALL_IN_FLIGHT
+        .compare_exchange(
+            false,
+            true,
+            std::sync::atomic::Ordering::AcqRel,
+            std::sync::atomic::Ordering::Acquire,
+        )
+        .is_err()
+    {
+        return Err("an update is already in progress".into());
+    }
+    let _guard = ClearOnDrop;
     let env = UpdaterEnv::default();
     if !env.version_file.exists() {
         return Err("not a script install — update by rebuilding from source".into());
@@ -488,6 +512,12 @@ pub async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
     result
 }
 
+/// Restart the application by exec-ing a new process.
+///
+/// `app.restart()` never returns — it replaces the current process image
+/// immediately. As a result, the frontend `invoke` promise for this command
+/// will never resolve. Callers must treat this as fire-and-forget and must
+/// not `await` it expecting a response.
 #[tauri::command]
 pub fn restart_app(app: tauri::AppHandle) {
     app.restart();
