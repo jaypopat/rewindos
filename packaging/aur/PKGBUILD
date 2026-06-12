@@ -1,0 +1,51 @@
+# Maintainer: Jay Popat <jpsubs@tutamail.com>
+# Template: CI substitutes @VERSION@ and @SHA256@ on release (see release.yml).
+pkgname=rewindos-bin
+pkgver=@VERSION@
+pkgrel=1
+pkgdesc="Privacy-first screen capture and search for Linux/Wayland"
+arch=('x86_64')
+url="https://github.com/jaypopat/rewindos"
+license=('MIT')
+depends=('webkit2gtk-4.1' 'gtk3' 'tesseract' 'tesseract-data-eng' 'pipewire' 'dbus')
+optdepends=('ollama: semantic search and local AI chat')
+provides=('rewindos')
+conflicts=('rewindos')
+install=rewindos.install
+source=("$url/releases/download/v$pkgver/rewindos-linux-x86_64.tar.gz")
+sha256sums=('@SHA256@')
+
+package() {
+  cd "$srcdir/rewindos-linux-x86_64"
+
+  install -Dm755 rewindos "$pkgdir/usr/bin/rewindos"
+  install -Dm755 rewindos-daemon "$pkgdir/usr/lib/rewindos/rewindos-daemon"
+  install -Dm644 paddleocr_worker.py "$pkgdir/usr/lib/rewindos/paddleocr_worker.py"
+
+  # systemd user unit: point ExecStart at the packaged daemon path
+  sed 's|%h/.local/bin/rewindos-daemon|/usr/lib/rewindos/rewindos-daemon|' \
+    rewindos-daemon.service > rewindos-daemon.service.pkg
+  install -Dm644 rewindos-daemon.service.pkg \
+    "$pkgdir/usr/lib/systemd/user/rewindos-daemon.service"
+
+  # desktop entries with absolute Exec paths
+  sed 's|^Exec=.*|Exec=/usr/bin/rewindos --minimized|' rewindos.desktop \
+    > rewindos.desktop.pkg
+  install -Dm644 rewindos.desktop.pkg \
+    "$pkgdir/usr/share/applications/io.github.jaypopat.rewindos.desktop"
+  sed 's|^Exec=.*|Exec=/usr/lib/rewindos/rewindos-daemon|' com.rewindos.Daemon.desktop \
+    > com.rewindos.Daemon.desktop.pkg
+  install -Dm644 com.rewindos.Daemon.desktop.pkg \
+    "$pkgdir/usr/share/applications/com.rewindos.Daemon.desktop"
+
+  # icons (same size->file mapping as install.sh)
+  local sizes=(32x32 128x128 256x256 512x512)
+  local files=(32x32.png 128x128.png 128x128@2x.png icon.png)
+  local i
+  for i in "${!sizes[@]}"; do
+    install -Dm644 "icons/${files[$i]}" \
+      "$pkgdir/usr/share/icons/hicolor/${sizes[$i]}/apps/io.github.jaypopat.rewindos.png"
+  done
+
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
