@@ -237,20 +237,33 @@ fn smoke_check(stage: &Path) -> Result<(), String> {
     }
 }
 
-fn rollback(env: &UpdaterEnv) {
+fn rollback(env: &UpdaterEnv) -> Result<(), String> {
+    let mut errors: Vec<String> = Vec::new();
     for name in BINARIES {
         let old = env.bin_dir.join(format!("{name}.old"));
         if old.exists() {
-            let _ = std::fs::rename(&old, env.bin_dir.join(name));
+            if let Err(e) = std::fs::rename(&old, env.bin_dir.join(name)) {
+                errors.push(format!("restore {name}: {e}"));
+            }
         }
     }
-    let _ = run_cmd(&env.daemon_restart_cmd);
+    // Attempt daemon restart regardless of rename failures.
+    if let Err(e) = run_cmd(&env.daemon_restart_cmd) {
+        errors.push(format!("restart daemon: {e}"));
+    }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors.join("; "))
+    }
 }
 
 /// Swap an extracted release (stage = the rewindos-linux-x86_64/ dir) into
 /// place. Mirrors install.sh place_files() + smoke_check(). Nothing on disk
-/// changes unless the smoke check passes; a failed daemon restart restores
-/// the previous binaries.
+/// changes unless the smoke check passes. On failure the two binaries are
+/// rotated back; the unit file, desktop files, icons, and worker are
+/// overwritten in place and NOT rolled back — they are version-tolerant
+/// assets. A failed daemon restart also rolls back the two binaries.
 pub fn apply_update(
     stage: &Path,
     env: &UpdaterEnv,
@@ -335,17 +348,21 @@ pub fn apply_update(
         Ok(())
     })();
     if let Err(e) = placed {
-        rollback(env);
-        return Err(e);
+        return Err(match rollback(env) {
+            Ok(()) => e,
+            Err(rb) => format!("{e}; rollback also failed ({rb}) — your install may be broken, re-run install.sh"),
+        });
     }
 
     progress(UpdateProgress::RestartingDaemon);
+    // Reload is best-effort: a stale unit cache is harmless here because the
+    // restart below re-reads the unit file.  Restart failure DOES roll back.
     let _ = run_cmd(&env.daemon_reload_cmd);
     if let Err(e) = run_cmd(&env.daemon_restart_cmd) {
-        rollback(env);
-        return Err(format!(
-            "daemon restart failed, previous version restored: {e}"
-        ));
+        return Err(match rollback(env) {
+            Ok(()) => format!("daemon restart failed, previous version restored: {e}"),
+            Err(rb) => format!("daemon restart failed ({e}); rollback also failed ({rb}) — your install may be broken, re-run install.sh"),
+        });
     }
 
     for name in BINARIES {
@@ -584,6 +601,44 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(env.bin_dir.join("rewindos-daemon")).unwrap(),
             "OLD"
+        );
+    }
+
+    #[test]
+    fn apply_update_placement_failure_rolls_back_binaries() {
+        let tmp = tempfile::tempdir().unwrap();
+        let stage = fake_stage(tmp.path(), 0);
+        let env = test_env(tmp.path(), true);
+        install_old_binaries(&env);
+
+        // Force placement failure: make icon_base a read-only directory so
+        // the mkdir inside apply_update (icon_base/<size>/apps) fails with EACCES.
+        std::fs::create_dir_all(&env.icon_base).unwrap();
+        std::fs::set_permissions(
+            &env.icon_base,
+            std::fs::Permissions::from_mode(0o555),
+        )
+        .unwrap();
+
+        let result = apply_update(&stage, &env, "v1.0.9", &|_| {});
+
+        // Restore write permission before any assertions so tempdir cleanup works.
+        std::fs::set_permissions(
+            &env.icon_base,
+            std::fs::Permissions::from_mode(0o755),
+        )
+        .unwrap();
+
+        assert!(result.is_err(), "expected Err from placement failure");
+        assert_eq!(
+            std::fs::read_to_string(env.bin_dir.join("rewindos")).unwrap(),
+            "OLD",
+            "rewindos binary should be restored after placement failure"
+        );
+        assert_eq!(
+            std::fs::read_to_string(env.bin_dir.join("rewindos-daemon")).unwrap(),
+            "OLD",
+            "rewindos-daemon binary should be restored after placement failure"
         );
     }
 }
