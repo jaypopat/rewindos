@@ -379,6 +379,120 @@ pub async fn check_for_update(app: tauri::AppHandle) -> Result<UpdateStatus, Str
     Ok(build_update_status(&release, &current, env.version_file.exists()))
 }
 
+async fn download_with_progress<F>(
+    client: &reqwest::Client,
+    url: &str,
+    dest: &Path,
+    progress: &F,
+) -> Result<(), String>
+where
+    F: Fn(UpdateProgress),
+{
+    use futures::StreamExt;
+    let resp = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| format!("download: {e}"))?
+        .error_for_status()
+        .map_err(|e| format!("download: {e}"))?;
+    let total = resp.content_length().unwrap_or(0);
+    let mut file = std::fs::File::create(dest).map_err(|e| format!("create tmp: {e}"))?;
+    let mut stream = resp.bytes_stream();
+    let mut written: u64 = 0;
+    let mut last_pct: u8 = 0;
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| format!("download stream: {e}"))?;
+        std::io::Write::write_all(&mut file, &chunk).map_err(|e| format!("write tmp: {e}"))?;
+        written += chunk.len() as u64;
+        if total > 0 {
+            let pct = ((written * 100) / total) as u8;
+            if pct != last_pct {
+                last_pct = pct;
+                progress(UpdateProgress::Downloading { pct });
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn run_install<F>(env: UpdaterEnv, progress: F) -> Result<(), String>
+where
+    F: Fn(UpdateProgress) + Send + Sync + 'static,
+{
+    // No overall timeout: the tarball download is long on slow links.
+    // connect_timeout still bounds a dead server.
+    let client = reqwest::Client::builder()
+        .user_agent("rewindos-updater")
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| format!("http client: {e}"))?;
+    let release = fetch_latest_release(&env).await?;
+
+    // tempdir is cleaned up on drop, on every exit path
+    let staging = tempfile::tempdir().map_err(|e| format!("staging dir: {e}"))?;
+    let tarball = staging.path().join(TARBALL_NAME);
+
+    progress(UpdateProgress::Downloading { pct: 0 });
+    download_with_progress(&client, &release.tarball_url, &tarball, &progress).await?;
+
+    progress(UpdateProgress::Verifying);
+    let sha = client
+        .get(&release.sha_url)
+        .send()
+        .await
+        .map_err(|e| format!("sha download: {e}"))?
+        .error_for_status()
+        .map_err(|e| format!("sha download: {e}"))?
+        .text()
+        .await
+        .map_err(|e| format!("sha body: {e}"))?;
+
+    // Everything from here is blocking fs/process work.
+    // Move only the PathBuf into the closure; the TempDir stays in this
+    // scope so it is not dropped until after spawn_blocking completes.
+    let stage_root = staging.path().to_path_buf();
+    let tag = release.tag.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+        verify_sha256(&tarball, &sha)?;
+        let gz = std::fs::File::open(&tarball).map_err(|e| format!("open tarball: {e}"))?;
+        tar::Archive::new(flate2::read::GzDecoder::new(gz))
+            .unpack(&stage_root)
+            .map_err(|e| format!("extract: {e}"))?;
+        let stage = stage_root.join("rewindos-linux-x86_64");
+        apply_update(&stage, &env, &tag, &progress)?;
+        progress(UpdateProgress::Done);
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("install task: {e}"))?;
+    drop(staging);
+    result
+}
+
+#[tauri::command]
+pub async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
+    use tauri::Emitter;
+    let env = UpdaterEnv::default();
+    if !env.version_file.exists() {
+        return Err("not a script install — update by rebuilding from source".into());
+    }
+    let emitter = app.clone();
+    let progress = move |p: UpdateProgress| {
+        let _ = emitter.emit("update-progress", &p);
+    };
+    let result = run_install(env, progress).await;
+    if let Err(ref e) = result {
+        let _ = app.emit("update-progress", &UpdateProgress::Error { message: e.clone() });
+    }
+    result
+}
+
+#[tauri::command]
+pub fn restart_app(app: tauri::AppHandle) {
+    app.restart();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

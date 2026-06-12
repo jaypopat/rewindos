@@ -2265,6 +2265,8 @@ pub fn run() {
             chat_commands::append_chat_message,
             chat_commands::export_chat_markdown,
             updater::check_for_update,
+            updater::install_update,
+            updater::restart_app,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
