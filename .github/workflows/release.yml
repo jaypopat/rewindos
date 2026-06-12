@@ -94,6 +94,11 @@ jobs:
 
       - name: Build Tauri app (binary only)
         if: steps.check.outputs.exists == 'false'
+        # REWINDOS_VERSION must be set here too: beforeBuildCommand rebuilds the
+        # daemon, and without it that rebuild overwrites the stamped binary from
+        # the previous step with one that reports the crate version (0.1.0).
+        env:
+          REWINDOS_VERSION: ${{ steps.version.outputs.version }}
         run: bun run tauri build --no-bundle
 
       - name: Assemble release tarball
