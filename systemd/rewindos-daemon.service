@@ -1,6 +1,6 @@
 [Unit]
 Description=RewindOS Capture Daemon
-Documentation=https://github.com/jay/rewindos
+Documentation=https://github.com/jaypopat/rewindos
 After=graphical-session.target pipewire.service dbus.service
 Requires=dbus.service
 PartOf=graphical-session.target

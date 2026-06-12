@@ -30,6 +30,10 @@ pub struct DaemonService {
     pub config: Arc<AppConfig>,
     pub metrics: Arc<PipelineMetrics>,
     pub gate: Arc<CaptureGate>,
+    /// True when screen capture is impossible on this session (e.g. X11) and the
+    /// daemon is running in degraded mode with no pipeline. `get_status` reports
+    /// a distinct `unsupported_session` state so the UI can guide the user.
+    pub capture_unsupported: bool,
     pub unfiltered_override: Arc<std::sync::atomic::AtomicBool>,
     pub start_time: Instant,
     pub ollama_client: Option<Arc<OllamaClient>>,
@@ -93,7 +97,7 @@ impl DaemonService {
 
     async fn get_status(&self) -> zbus::fdo::Result<String> {
         let uptime = self.start_time.elapsed().as_secs();
-        let is_capturing = self.gate.wants_capture();
+        let is_capturing = !self.capture_unsupported && self.gate.wants_capture();
         let frames_captured_today = self.metrics.frames_captured.load(Ordering::Relaxed);
         let frames_deduplicated_today = self.metrics.frames_deduplicated.load(Ordering::Relaxed);
         let frames_ocr_pending = self.metrics.frames_ocr_pending.load(Ordering::Relaxed);
@@ -111,7 +115,14 @@ impl DaemonService {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis() as u64)
             .unwrap_or(0);
-        let capture_state = Some(self.gate.capture_state(now_ms, capture_interval).as_str().to_string());
+        let capture_state = if self.capture_unsupported {
+            // Capture can't run on this session (e.g. X11). Report a distinct state
+            // so the UI shows a "switch to Wayland" message rather than a generic
+            // offline/crash verdict.
+            Some("unsupported_session".to_string())
+        } else {
+            Some(self.gate.capture_state(now_ms, capture_interval).as_str().to_string())
+        };
         let seconds_since_last_frame = self.gate.seconds_since_last_frame(now_ms);
         let last_frame = self.gate.last_frame_at();
         let last_capture_timestamp = if last_frame == 0 { None } else { Some(last_frame as i64) };

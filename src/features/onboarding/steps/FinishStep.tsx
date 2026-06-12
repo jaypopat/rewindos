@@ -9,6 +9,8 @@ const CLOSING: Record<VerdictCode, string> = {
     "You're set, but app tracking is off until you install the 'Window Calls Extended' extension.",
   "paused-privacy":
     "You're set, but capture is paused until app tracking can be enforced — install the extension or capture anyway.",
+  unsupported:
+    "RewindOS can't capture on an X11 session — log out and pick a Wayland session at the login screen, then come back.",
   offline:
     "Almost there — the capture daemon isn't running yet. The status banner will keep nagging until it is.",
   stalled:

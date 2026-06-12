@@ -7,8 +7,8 @@ use zbus::Connection;
 use crate::capture::{self, CaptureBackend, CaptureError};
 use crate::window_info::gnome_shell::GnomeShellWindowInfo;
 use crate::window_info::kwin::KwinWindowInfo;
-use crate::window_info::window_calls_ext::WindowCallsExtProvider;
 use crate::window_info::noop::NoopWindowInfo;
+use crate::window_info::window_calls_ext::WindowCallsExtProvider;
 use crate::window_info::wlr_foreign_toplevel::WlrForeignToplevelProvider;
 use crate::window_info::WindowInfoProvider;
 
@@ -282,17 +282,23 @@ pub fn log_environment_diagnostic(desktop: &DesktopEnvironment, session: &Sessio
 
     match desktop {
         DesktopEnvironment::Gnome => {
-            info!("GNOME notes: system tray requires gnome-shell-extension-appindicator; \
-                   window tracking requires the 'Window Calls Extended' GNOME extension");
+            info!(
+                "GNOME notes: system tray requires gnome-shell-extension-appindicator; \
+                   window tracking requires the 'Window Calls Extended' GNOME extension"
+            );
         }
         DesktopEnvironment::X11 => {
-            warn!("X11 session detected — screen capture is not supported on X11. \
-                   RewindOS requires a Wayland session.");
+            warn!(
+                "X11 session detected — screen capture is not supported on X11. \
+                   Log out and pick a Wayland session from the gear/settings menu \
+                   on the login screen, then sign back in. The daemon will keep \
+                   running and report this in the app."
+            );
         }
         DesktopEnvironment::Unknown => {
             warn!(
                 "could not detect desktop environment — please report this at \
-                 https://github.com/jay/rewindos/issues with the following env vars:"
+                 https://github.com/jaypopat/rewindos/issues with the following env vars:"
             );
             for var in &[
                 "XDG_CURRENT_DESKTOP",

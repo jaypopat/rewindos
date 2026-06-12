@@ -34,6 +34,14 @@ describe("deriveCaptureVerdict", () => {
     expect(v.level).toBe("neutral");
   });
 
+  it("X11 / unsupported session → red/unsupported, no actions", () => {
+    const v = deriveCaptureVerdict(
+      s({ capture_state: "unsupported_session", is_capturing: false }), false);
+    expect(v.code).toBe("unsupported");
+    expect(v.level).toBe("red");
+    expect(v.actions).toEqual([]);
+  });
+
   it("fresh capturing → green/working with framesToday label", () => {
     const v = deriveCaptureVerdict(s({ frames_captured_today: 42, seconds_since_last_frame: 4 }), false);
     expect(v.code).toBe("working");

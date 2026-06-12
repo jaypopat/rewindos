@@ -5,6 +5,7 @@ export type VerdictLevel = "green" | "amber" | "red" | "neutral";
 export type VerdictCode =
   | "offline" | "checking" | "paused-locked" | "paused-user"
   | "paused-privacy" | "unfiltered" | "gnome-degraded"
+  | "unsupported"
   | "working" | "waiting" | "stalled" | "unknown";
 
 export type VerdictAction =
@@ -49,6 +50,18 @@ export function deriveCaptureVerdict(
   const desktop = (status.desktop ?? "").toLowerCase();
   const provider = status.window_info_provider ?? "";
   const isGnomeDegraded = desktop.includes("gnome") && (provider === "" || provider === "noop");
+
+  // Capture is impossible on this session (X11). The daemon stays up and reports
+  // this distinct state so we show a clear path forward instead of a generic
+  // "offline" verdict that reads like a crash.
+  if (cs === "unsupported_session") {
+    return {
+      code: "unsupported", level: "red",
+      headline: "RewindOS needs a Wayland session.",
+      guidance: "Screen capture isn't supported on X11. Log out, then pick a Wayland session from the gear/settings menu on the login screen before signing back in.",
+      actions: [], framesToday: 0,
+    };
+  }
 
   if (cs === "paused_locked") {
     return {

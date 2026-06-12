@@ -667,22 +667,43 @@ async fn run_daemon() -> anyhow::Result<()> {
         Err(e) => warn!(error = %e, "no system bus; lock auto-pause disabled"),
     }
 
-    // Create capture backend
-    let capture_backend = detect::create_capture_backend(&desktop, &session, &dbus_conn).await?;
-    let capture_backend_name = capture_backend.name().to_string();
-
-    // Start the capture pipeline
-    let pipeline_handle = pipeline::start_pipeline(
-        &config,
-        db.clone(),
-        capture_backend,
-        window_info.clone(),
-        gate.clone(),
-        app_labels.clone(),
-    )
-    .await?;
-
-    info!("capture pipeline started");
+    // Create capture backend. On sessions where screen capture is impossible
+    // (notably X11), the daemon does NOT exit — it stays up in a degraded mode
+    // and reports the unsupported session over D-Bus, so the UI can show a clear
+    // "switch to Wayland" message instead of an unreachable daemon that just
+    // looks like a crash.
+    let (pipeline_handle, metrics, capture_backend_name, capture_unsupported) =
+        match detect::create_capture_backend(&desktop, &session, &dbus_conn).await {
+            Ok(capture_backend) => {
+                let name = capture_backend.name().to_string();
+                let handle = pipeline::start_pipeline(
+                    &config,
+                    db.clone(),
+                    capture_backend,
+                    window_info.clone(),
+                    gate.clone(),
+                    app_labels.clone(),
+                )
+                .await?;
+                info!("capture pipeline started");
+                let metrics = handle.metrics.clone();
+                (Some(handle), metrics, name, false)
+            }
+            Err(crate::capture::CaptureError::Unavailable(reason)) => {
+                warn!(
+                    %reason,
+                    "screen capture unavailable on this session; running in degraded \
+                     mode and reporting the unsupported session to the UI"
+                );
+                (
+                    None,
+                    Arc::new(pipeline::PipelineMetrics::new()),
+                    "none".to_string(),
+                    true,
+                )
+            }
+            Err(e) => return Err(e.into()),
+        };
 
     // Spawn background embedding backfill if Ollama is available
     if let Some(ref client) = ollama_client {
@@ -829,8 +850,9 @@ async fn run_daemon() -> anyhow::Result<()> {
     let dbus_service = service::DaemonService {
         db: db.clone(),
         config: config.clone(),
-        metrics: pipeline_handle.metrics.clone(),
+        metrics: metrics.clone(),
         gate: gate.clone(),
+        capture_unsupported,
         unfiltered_override: unfiltered_override.clone(),
         start_time: Instant::now(),
         ollama_client,
@@ -927,7 +949,9 @@ async fn run_daemon() -> anyhow::Result<()> {
     if let Err(e) = window_info.load_full().stop().await {
         warn!(error = %e, "failed to stop window info provider");
     }
-    pipeline_handle.shutdown().await;
+    if let Some(handle) = pipeline_handle {
+        handle.shutdown().await;
+    }
 
     info!("rewindos-daemon stopped");
     Ok(())
