@@ -160,6 +160,7 @@ pub fn build_update_status(
 async fn fetch_latest_release(env: &UpdaterEnv) -> Result<ReleaseInfo, String> {
     let client = reqwest::Client::builder()
         .user_agent("rewindos-updater") // GitHub API rejects UA-less requests
+        .timeout(std::time::Duration::from_secs(15))
         .build()
         .map_err(|e| format!("http client: {e}"))?;
     let json = client
