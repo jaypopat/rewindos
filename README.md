@@ -31,7 +31,6 @@ Timer (5s) → Screen Capture → Hash & Dedupe → OCR → SQLite FTS5
 - **Journaling** — rich text editor (Tiptap) with tags, templates, screenshot attachments, AI summaries, and export
 - **Bookmarks & collections** — save and organize screenshots into named collections
 - **Vault export** — daily memory notes (journal, recap, meetings, key moments, stats) written into your Obsidian or Logseq vault
-- **Focus mode** — Pomodoro timer with productivity tracking and distraction detection
 - **Privacy controls** — exclude specific apps or window title patterns
 - **Global hotkey** — `Ctrl+Shift+Space` to instantly open search
 - **System tray** — runs quietly in the background
@@ -104,8 +103,10 @@ sudo apt install \
   libdbus-1-dev pkg-config build-essential
 ```
 
+Tasks are run with [`just`](https://github.com/casey/just) (`cargo install just`):
+
 ```bash
-make install
+just install
 ```
 
 This builds the Rust workspace and frontend, installs the daemon as a systemd user service, and sets up the desktop app to autostart minimized to tray on login.
@@ -123,8 +124,8 @@ bun run tauri dev             # Run in dev mode
 After installation, the daemon starts automatically. The UI autostarts minimized to the system tray.
 
 - **Open search**: `Ctrl+Shift+Space`
-- **View logs**: `make logs`
-- **Restart daemon**: `make restart-daemon`
+- **View logs**: `journalctl --user -u rewindos-daemon -f`
+- **Restart daemon**: `systemctl --user restart rewindos-daemon`
 - **Launch UI manually**: `rewindos`
 - **Daemon CLI**: `rewindos-daemon pause | resume | status | backfill`
 
@@ -136,7 +137,7 @@ crates/rewindos-daemon/   Capture daemon (PipeWire, pipeline, D-Bus, window info
 src-tauri/                Tauri app (commands, D-Bus client, AI chat)
 src/                      React frontend
   components/             Reusable UI components (search, charts, shared)
-  features/               Feature views (ask, dashboard, history, journal, rewind, saved, focus, settings)
+  features/               Feature views (ask, dashboard, history, journal, rewind, saved, settings)
   hooks/                  Custom React hooks
   context/                React context providers
   lib/                    API wrappers, utilities, query keys
@@ -165,7 +166,7 @@ Config lives at `~/.rewindos/config.toml`. Key options:
 - **Retention period** and storage limits
 - **OCR language** and worker count
 - **Ollama endpoint** for AI features (semantic search, chat, summaries)
-- **Focus mode** — Pomodoro timer durations, distraction apps
+- **App categories** — custom app→category rules for the activity breakdown (Settings → General)
 
 ## License
 

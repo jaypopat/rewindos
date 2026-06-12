@@ -15,9 +15,9 @@ describe("Sidebar", () => {
     const onViewChange = vi.fn();
     renderSidebar(<Sidebar activeView="dashboard" onViewChange={onViewChange} />);
 
-    // 4 Overview + 5 Think + 1 System + collapse toggle
+    // 4 Overview + 4 Think + 1 System + collapse toggle
     const buttons = screen.getAllByRole("button");
-    expect(buttons.length).toBe(11);
+    expect(buttons.length).toBe(10);
     expect(screen.getByText("Overview")).toBeTruthy();
     expect(screen.getByText("Think")).toBeTruthy();
     expect(screen.getByText("System")).toBeTruthy();

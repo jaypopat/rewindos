@@ -45,7 +45,7 @@ export function DashboardView({
   const { data: appConfig } = useConfigQuery();
 
   const categoryRules = useMemo(() => {
-    const userRules = appConfig?.focus?.category_rules;
+    const userRules = appConfig?.categories?.rules;
     if (userRules && Object.keys(userRules).length > 0) {
       return buildCategoryRules(userRules);
     }
@@ -227,10 +227,8 @@ export function DashboardView({
       value: <CountNum value={capturesToday} className="num text-3xl" />,
       note:
         capturesTrend != null && capturesTrend !== 0 ? (
-          <span
-            className={`font-mono text-[10px] ${capturesTrend > 0 ? "text-signal-active" : "text-accent"}`}
-          >
-            {capturesTrend > 0 ? "▲" : "▼"} {Math.abs(capturesTrend)}% vs your average
+          <span className="font-mono text-[10px] text-text-muted">
+            {capturesTrend > 0 ? "▲" : "▼"} {Math.abs(capturesTrend)}% {baselineLabel}
           </span>
         ) : undefined,
     },
@@ -291,9 +289,7 @@ export function DashboardView({
                   on screen today
                 </div>
                 {baselineAverage > 0 && activeTimeTrend !== 0 && (
-                  <div
-                    className={`font-mono text-[11px] whitespace-nowrap ${activeTimeTrend > 0 ? "text-signal-active" : "text-accent"}`}
-                  >
+                  <div className="font-mono text-[11px] whitespace-nowrap text-text-muted">
                     {activeTimeTrend > 0 ? "▲" : "▼"} {Math.abs(activeTimeTrend)}% {baselineLabel}
                   </div>
                 )}

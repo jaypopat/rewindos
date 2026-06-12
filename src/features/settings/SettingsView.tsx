@@ -10,12 +10,11 @@ import { CaptureTab } from "./tabs/CaptureTab";
 import { PrivacyTab } from "./tabs/PrivacyTab";
 import { AITab } from "./tabs/AITab";
 import { MeetingTab } from "./tabs/MeetingTab";
-import { FocusTab } from "./tabs/FocusTab";
 import { StorageTab } from "./tabs/StorageTab";
 import { OCRTab } from "./tabs/OCRTab";
 import { ExportTab } from "./tabs/ExportTab";
 
-type Tab = "general" | "capture" | "privacy" | "ai" | "meeting" | "storage" | "ocr" | "focus" | "export";
+type Tab = "general" | "capture" | "privacy" | "ai" | "meeting" | "storage" | "ocr" | "export";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "general", label: "General" },
@@ -23,7 +22,6 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "privacy", label: "Privacy" },
   { id: "ai", label: "AI / Models" },
   { id: "meeting", label: "Meetings" },
-  { id: "focus", label: "Focus" },
   { id: "storage", label: "Storage" },
   { id: "ocr", label: "OCR" },
   { id: "export", label: "Export" },
@@ -63,7 +61,6 @@ export function SettingsView() {
     privacy: <PrivacyTab config={config} update={update} />,
     ai: <AITab config={config} update={update} />,
     meeting: <MeetingTab config={config} update={update} />,
-    focus: <FocusTab config={config} update={update} />,
     storage: <StorageTab config={config} update={update} />,
     ocr: <OCRTab config={config} update={update} />,
     export: <ExportTab config={config} update={update} />,

@@ -35,7 +35,7 @@ Core flow: capture → OCR → full-text search, with optional semantic search v
 - `chat.rs` — ChatClient (OpenAI-compatible: chat_stream/complete/health_check/list_models), intent detection, screenshot context
 - `hasher.rs` — Perceptual hashing, hamming distance, WebP save, thumbnails
 - `ocr.rs` — Tesseract CLI wrapper, TSV parsing
-- `config.rs` — Config loading (SemanticConfig, ChatConfig, FocusConfig, etc.)
+- `config.rs` — Config loading (SemanticConfig, ChatConfig, CategoriesConfig, etc.)
 - `vault/` — vault export: DayMemory gather, Obsidian/Logseq emitters, idempotent writer
 - `summary.rs` — shared day-recap generation (cached → LLM → digest)
 - `app_label.rs` — raw app-id → display-name resolution (.desktop lookup) + history backfill
@@ -61,8 +61,7 @@ Core flow: capture → OCR → full-text search, with optional semantic search v
 - **Ask** — AI chat with intent detection, streaming, screenshot references
 - **Journal** — Rich text editor (Tiptap), tags, templates, screenshot attachments, AI summaries, search, export
 - **Saved** — Bookmarks and collections browser
-- **Focus** — Pomodoro timer with productivity tracking
-- **Settings** — Full config UI (General, Capture, OCR, Privacy, Storage, AI, Focus)
+- **Settings** — Full config UI (General incl. app categories, Capture, OCR, Privacy, Storage, AI)
 - **Export** — daily memory companion note written into a Logseq/Obsidian vault (config in Settings → Export)
 
 ## Target Platform

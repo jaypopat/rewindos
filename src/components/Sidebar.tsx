@@ -10,7 +10,6 @@ import {
   Rewind,
   Search,
   Sparkles,
-  Clock,
   Settings,
   Bookmark,
   BookOpen,
@@ -29,7 +28,6 @@ export type View =
   | "journal"
   | "ask"
   | "meetings"
-  | "focus"
   | "settings";
 
 interface SidebarProps {
@@ -61,7 +59,6 @@ const NAV_GROUPS: { section: string; items: NavItem[] }[] = [
       { view: "journal", label: "Journal", shortcut: "g j", icon: <BookOpen /> },
       { view: "saved", label: "Saved", shortcut: "g v", icon: <Bookmark /> },
       { view: "meetings", label: "Meetings", shortcut: "g m", icon: <Mic /> },
-      { view: "focus", label: "Focus", shortcut: "g f", icon: <Clock /> },
     ],
   },
   {

@@ -15,7 +15,7 @@ pub struct AppConfig {
     pub ui: UiConfig,
     pub semantic: SemanticConfig,
     pub chat: ChatConfig,
-    pub focus: FocusConfig,
+    pub categories: CategoriesConfig,
     pub meeting: MeetingConfig,
     pub vault_export: VaultExportConfig,
 }
@@ -99,42 +99,13 @@ pub struct ChatConfig {
     pub temperature: f32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
-pub struct FocusConfig {
-    pub work_minutes: u32,
-    pub short_break_minutes: u32,
-    pub long_break_minutes: u32,
-    pub sessions_before_long_break: u32,
-    pub daily_goal_minutes: u32,
-    pub distraction_apps: Vec<String>,
-    pub auto_start_breaks: bool,
-    pub auto_start_work: bool,
+pub struct CategoriesConfig {
     /// User-defined category rules: category name → list of app name keywords.
     /// Merged with built-in defaults on the frontend. Add entries here to
     /// override or extend the default categories.
-    pub category_rules: HashMap<String, Vec<String>>,
-}
-
-impl Default for FocusConfig {
-    fn default() -> Self {
-        Self {
-            work_minutes: 25,
-            short_break_minutes: 5,
-            long_break_minutes: 15,
-            sessions_before_long_break: 4,
-            daily_goal_minutes: 480,
-            distraction_apps: vec![
-                "discord".to_string(),
-                "slack".to_string(),
-                "twitter".to_string(),
-                "reddit".to_string(),
-            ],
-            auto_start_breaks: true,
-            auto_start_work: false,
-            category_rules: HashMap::new(),
-        }
-    }
+    pub rules: HashMap<String, Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -3,7 +3,7 @@ import { TOUR_STOPS } from "./tour-stops";
 
 const VIEWS = [
   "dashboard", "history", "rewind", "search", "saved",
-  "journal", "ask", "meetings", "focus", "settings",
+  "journal", "ask", "meetings", "settings",
 ];
 
 describe("TOUR_STOPS", () => {

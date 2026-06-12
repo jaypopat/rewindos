@@ -43,16 +43,8 @@ export interface AppConfig {
     max_history_messages: number;
     temperature: number;
   };
-  focus: {
-    work_minutes: number;
-    short_break_minutes: number;
-    long_break_minutes: number;
-    sessions_before_long_break: number;
-    daily_goal_minutes: number;
-    distraction_apps: string[];
-    auto_start_breaks: boolean;
-    auto_start_work: boolean;
-    category_rules: Record<string, string[]>;
+  categories: {
+    rules: Record<string, string[]>;
   };
   meeting: {
     enabled: boolean;

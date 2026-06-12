@@ -19,7 +19,6 @@ import {
   MeetingsView,
   SavedView,
   JournalView,
-  FocusView,
   SettingsView,
   ScreenshotDetail,
   ViewSuspense,
@@ -42,7 +41,6 @@ const VIEW_LABELS: Record<View, string> = {
   journal: "Journal",
   saved: "Saved",
   meetings: "Meetings",
-  focus: "Focus",
   settings: "Settings",
 };
 
@@ -103,7 +101,6 @@ const VIEW_SHORTCUTS: { sequence: HotkeySequence; view: View }[] = [
   { sequence: ["G", "J"], view: "journal" },
   { sequence: ["G", "A"], view: "ask" },
   { sequence: ["G", "M"], view: "meetings" },
-  { sequence: ["G", "F"], view: "focus" },
   { sequence: ["G", ","], view: "settings" },
 ];
 
@@ -148,7 +145,7 @@ function App() {
   // can't host a detail — otherwise the click selects a frame nothing displays.
   const handleOpenFromPalette = useCallback(
     (id: number, siblingIds?: number[]) => {
-      if (view === "meetings" || view === "focus" || view === "settings") {
+      if (view === "meetings" || view === "settings") {
         dispatch({ type: "CHANGE_VIEW", view: "search" });
       }
       dispatch({ type: "SELECT_RESULT", id, siblingIds });
@@ -353,12 +350,6 @@ function App() {
         {view === "journal" && subView === "list" && (
           <ViewSuspense>
             <JournalView onSelectScreenshot={handleSelectResult} />
-          </ViewSuspense>
-        )}
-
-        {view === "focus" && (
-          <ViewSuspense>
-            <FocusView />
           </ViewSuspense>
         )}
 

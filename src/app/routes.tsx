@@ -41,12 +41,6 @@ export const JournalView = lazy(() =>
   })),
 );
 
-export const FocusView = lazy(() =>
-  import("@/features/focus/FocusView").then((m) => ({
-    default: m.FocusView,
-  })),
-);
-
 export const SettingsView = lazy(() =>
   import("@/features/settings/SettingsView").then((m) => ({
     default: m.SettingsView,

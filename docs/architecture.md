@@ -124,9 +124,8 @@ rewindos/
 │   │   ├── journal/            # Journaling (JournalView, Editor, Sidebar, Tags, Templates, Export)
 │   │   ├── rewind/             # Timelapse (RewindView, Player, Controls, Scrubber)
 │   │   ├── saved/              # Bookmarks & collections (SavedView, CollectionDetailView)
-│   │   ├── focus/              # Pomodoro timer (FocusView)
 │   │   └── settings/           # Config UI (SettingsView, tabs/, primitives/)
-│   ├── hooks/                  # Custom React hooks (debounce, focus score, keyboard, pomodoro)
+│   ├── hooks/                  # Custom React hooks (debounce, keyboard, config)
 │   ├── context/                # React context providers (AskContext)
 │   └── lib/                    # Utilities
 │       ├── api.ts              # Tauri invoke wrappers + TypeScript types
@@ -141,7 +140,7 @@ rewindos/
 │   ├── rewindos-daemon.service
 │   ├── rewindos.desktop
 │   └── com.rewindos.Daemon.desktop
-└── Makefile                    # Build, install, dev, logs, restart targets
+└── justfile                    # Build, install, dev, logs, restart recipes
 ```
 
 ## Component Details
@@ -229,8 +228,7 @@ Desktop app for searching, browsing, chatting, and analytics.
 - **Ask** — AI chat with intent detection, streaming responses, and screenshot references
 - **Journal** — Rich text editor (Tiptap) with tags, templates, screenshot attachments, AI summaries, search, export
 - **Saved** — Bookmarks and collections browser with collection detail views
-- **Focus** — Pomodoro timer with productivity tracking and distraction detection
-- **Settings** — Full configuration UI (General, Capture, OCR, Privacy, Storage, AI, Focus)
+- **Settings** — Full configuration UI (General incl. app categories, Capture, OCR, Privacy, Storage, AI)
 
 ## Search Architecture
 
@@ -333,15 +331,10 @@ max_context_tokens = 4096
 max_history_messages = 20
 temperature = 0.3
 
-[focus]
-work_minutes = 25
-short_break_minutes = 5
-long_break_minutes = 15
-sessions_before_long_break = 4
-daily_goal_minutes = 480
-distraction_apps = ["discord", "slack", "twitter", "reddit"]
-auto_start_breaks = true
-auto_start_work = false
+[categories]
+# Custom app→category rules, merged with built-in defaults.
+# rules = { Development = ["code", "zed"], Browsing = ["firefox", "zen"] }
+rules = {}
 ```
 
 ## Error Handling Strategy

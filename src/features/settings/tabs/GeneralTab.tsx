@@ -2,6 +2,7 @@ import type { AppConfig } from "@/lib/config";
 import { SectionTitle } from "../primitives/SectionTitle";
 import { Field } from "../primitives/Field";
 import { TextInput } from "../primitives/TextInput";
+import { CategoryRulesEditor } from "../primitives/CategoryRulesEditor";
 import { Button } from "@/components/ui/button";
 import { useOnboarding } from "@/features/onboarding/OnboardingContext";
 import { useTour } from "@/features/tour/TourContext";
@@ -36,6 +37,15 @@ export function GeneralTab({ config, update }: TabProps) {
           Replay feature tour
         </Button>
       </Field>
+      <SectionTitle>Activity Categories</SectionTitle>
+      <p className="text-xs text-text-muted -mt-2">
+        Add app keywords to categories. These extend the built-in defaults.
+      </p>
+      <CategoryRulesEditor
+        rules={config.categories.rules ?? {}}
+        onChange={(rules) => update("categories", "rules", rules)}
+      />
+
       <UpdateSection />
     </>
   );

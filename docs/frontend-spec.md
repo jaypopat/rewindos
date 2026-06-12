@@ -79,24 +79,15 @@ Bookmarks and collections browser.
 - **CollectionDetailView**: View and manage screenshots in a collection
 - BookmarkButton and AddToCollectionMenu on screenshot cards
 
-### Focus View
-Pomodoro timer with productivity tracking.
-
-- Configurable work/break durations
-- Distraction app detection
-- Daily goal progress
-- Session history
-
 ### Settings View
 Full configuration UI organized into tabs.
 
-- **GeneralTab**: Capture interval, sensitivity, retention
+- **GeneralTab**: Capture interval, sensitivity, retention, app category rules
 - **CaptureTab**: Capture backend, window detection
 - **OCRTab**: Language, worker count
 - **PrivacyTab**: Excluded apps, window title patterns
 - **StorageTab**: Disk limits, cleanup
 - **AITab**: Ollama endpoint, semantic search, chat model config
-- **FocusTab**: Pomodoro timer settings, distraction apps
 - Reusable form primitives: TextField, NumberInput, Toggle, ListInput, CategoryRulesEditor
 
 ## Key Components
