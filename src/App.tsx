@@ -29,6 +29,7 @@ import { FirstRunWizard } from "@/features/onboarding/FirstRunWizard";
 import { TourOverlay } from "@/features/tour/TourOverlay";
 import { useTour } from "@/features/tour/TourContext";
 import { RecallPalette } from "@/components/RecallPalette";
+import { UpdateToast } from "@/components/UpdateToast";
 import { Button } from "@/components/ui/button";
 import { Clock, Search } from "lucide-react";
 
@@ -379,6 +380,7 @@ function App() {
       />
       <FirstRunWizard />
       <TourOverlay onNavigate={handleViewChange} />
+      <UpdateToast onOpenSettings={() => handleViewChange("settings")} />
     </main>
   );
 }
