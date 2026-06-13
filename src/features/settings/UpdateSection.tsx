@@ -26,7 +26,7 @@ function progressLabel(p: UpdateProgress & { stage: RenderableStage }): string {
 }
 
 export function UpdateSection() {
-  const { data, isFetching, refetch, error } = useUpdateCheck();
+  const { data, isFetching, refetch, error, dataUpdatedAt } = useUpdateCheck();
   const queryClient = useQueryClient();
   const [installing, setInstalling] = useState(false);
   const [progress, setProgress] = useState<UpdateProgress | null>(null);
@@ -102,10 +102,21 @@ export function UpdateSection() {
           >
             {isFetching ? "Checking…" : "Check for updates"}
           </Button>
-          {error && !isFetching && (
+          {error && !isFetching ? (
             <p className="font-mono text-[11px] text-text-muted text-right" role="alert">
               Could not reach the releases API.
             </p>
+          ) : (
+            dataUpdatedAt > 0 &&
+            !isFetching && (
+              <p className="font-mono text-[11px] text-text-muted text-right">
+                Last checked{" "}
+                {new Date(dataUpdatedAt).toLocaleTimeString([], {
+                  hour: "numeric",
+                  minute: "2-digit",
+                })}
+              </p>
+            )
           )}
         </div>
       </Field>
