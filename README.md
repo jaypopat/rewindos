@@ -42,12 +42,17 @@ A private, open-source alternative to **Windows Recall** and **Rewind.ai**. Ever
 
 | | RewindOS | Windows Recall | Rewind.ai |
 |---|:---:|:---:|:---:|
-| Runs locally, no cloud | ✅ | ⚠️ partial | ❌ |
+| Linux / Wayland | ✅ | ❌ | ❌ |
 | Open source | ✅ | ❌ | ❌ |
-| Linux support | ✅ | ❌ | ❌ |
+| Local-only, no cloud | ✅ | ✅ <sup>1</sup> | ✅ |
 | No subscription | ✅ | ✅ | ❌ |
 | Bring-your-own AI (local or API) | ✅ | ❌ | ❌ |
+| Independent — not shut down / acqui-hired | ✅ | ✅ | ❌ <sup>2</sup> |
 
+<sub><sup>1</sup> on-device, but closed-source and Windows-only. &nbsp; <sup>2</sup> Rewind → Limitless → acquired by Meta; the Mac app's capture was disabled Dec 19, 2025, and EU/UK data deleted.</sub>
+
+> Rewind got the privacy model right — it stored everything locally too — but it was macOS-only, proprietary, and is now gone. RewindOS is the open-source, Linux-native version that no acquisition can switch off.
+>
 > Also open source: [omi](https://github.com/BasedHardware/omi) — but macOS-only and cloud-backed. RewindOS stays fully local and Linux-native.
 
 ## Features
