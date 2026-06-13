@@ -1,0 +1,4 @@
+node_modules/
+.wrangler/
+# Regenerated from wrangler.jsonc by `wrangler types` (also runs on `bun run typecheck` setup).
+worker-configuration.d.ts

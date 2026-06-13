@@ -11,6 +11,7 @@ pub mod ocr;
 pub mod paddle_ocr;
 pub mod schema;
 pub mod summary;
+pub mod usage;
 pub mod vault;
 pub mod whisper_model;
 

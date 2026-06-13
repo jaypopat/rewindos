@@ -67,6 +67,8 @@ A rich-text **journal** (Tiptap) with tags, templates, screenshot attachments, a
 **🔒 Privacy**
 Exclude specific apps or window-title patterns (password managers, private browsing). Global hotkey `Ctrl+Shift+Space` opens search instantly; the app runs quietly in the system tray.
 
+RewindOS reaches the network on its own for one thing: a daily check-in (the app's update check and the capture daemon's heartbeat) via a small [Cloudflare Worker](workers/update-proxy) (open source, in this repo). The worker hashes your IP with a daily, server-only salt to count **distinct active devices**, then discards it — no IP, no identifier, no payload is ever stored. All it keeps is an anonymous daily count, bucketed by app version and desktop environment (so the project can see release adoption and KDE-vs-GNOME mix); both are aggregate counts, never tied to you. The full dataset is [published live](https://rewindos-updates.incident-agent.workers.dev/stats). Opt out entirely with `usage_heartbeat = false` under `[privacy]` in `~/.rewindos/config.toml`. (The update check also falls back to GitHub directly if the worker is down.)
+
 <div align="center">
 <table>
 <tr>

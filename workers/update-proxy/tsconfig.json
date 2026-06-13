@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022"],
+    // Runtime types come from the wrangler-generated worker-configuration.d.ts
+    // (included below). types:[] stops TS from auto-pulling the repo's hoisted
+    // @types/* (react, d3, …) which would drag in a missing DOM lib.
+    "types": [],
+    "strict": true,
+    "noEmit": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true
+  },
+  "include": ["src/**/*.ts", "worker-configuration.d.ts"]
+}

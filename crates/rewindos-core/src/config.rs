@@ -49,6 +49,11 @@ pub struct PrivacyConfig {
     /// set here to make the risk-acceptance durable across restarts.
     #[serde(default)]
     pub capture_without_exclusion_enforcement: bool,
+
+    /// Anonymous daily check-in to the update service while capture runs, so the
+    /// project can count distinct active devices. No IP or identifier is stored
+    /// — see the public transparency page. Set false to send nothing.
+    pub usage_heartbeat: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -230,6 +235,7 @@ impl Default for PrivacyConfig {
                 "Screen Locker".to_string(),
             ],
             capture_without_exclusion_enforcement: false,
+            usage_heartbeat: true,
         }
     }
 }

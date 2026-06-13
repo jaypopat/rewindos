@@ -1,0 +1,19 @@
+{
+  "$schema": "https://www.unpkg.com/wrangler/config-schema.json",
+  "name": "rewindos-updates",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-06-01",
+  // Observability is deliberately OFF. This worker fronts a privacy product
+  // with a public "we store nothing but a daily count" transparency page;
+  // Workers Logs would retain per-request metadata (incl. IPs) on a sample of
+  // calls, undercutting that claim. The install-base signal lives entirely in
+  // the CheckCounter durable object (/stats), not in logs — so we lose nothing.
+  "observability": { "enabled": false },
+  "durable_objects": {
+    "bindings": [{ "name": "COUNTER", "class_name": "CheckCounter" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["CheckCounter"] }]
+  // No GitHub auth needed: the 5-min edge cache is per-colo, so each colo makes
+  // at most ~12 GitHub requests/hr on cache misses regardless of install count
+  // — a fixed ceiling well under GitHub's unauthenticated 60/hr/IP limit.
+}

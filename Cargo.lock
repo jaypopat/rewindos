@@ -4431,6 +4431,7 @@ dependencies = [
  "ogg",
  "opus",
  "pipewire",
+ "reqwest 0.12.28",
  "rewindos-core",
  "rmcp",
  "serde",
