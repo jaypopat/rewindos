@@ -172,7 +172,7 @@ jobs:
           pkgname: rewindos-bin
           pkgbuild: ./packaging/aur/PKGBUILD
           assets: ./packaging/aur/rewindos.install
-          commit_username: Jay Popat
-          commit_email: jpsubs@tutamail.com
+          commit_username: github-actions[bot]
+          commit_email: 41898282+github-actions[bot]@users.noreply.github.com
           ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
           commit_message: "Update to v${{ needs.release.outputs.version }}"

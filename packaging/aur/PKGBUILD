@@ -1,4 +1,4 @@
-# Maintainer: Jay Popat <jpsubs@tutamail.com>
+# Maintainer: Jay Popat <https://github.com/jaypopat>
 # Generated from packaging/aur/PKGBUILD in the main repo; CI fills the
 # version and checksum on each release (see release.yml).
 pkgname=rewindos-bin
