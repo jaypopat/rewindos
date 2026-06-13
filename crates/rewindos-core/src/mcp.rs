@@ -122,8 +122,23 @@ pub fn get_app_usage(
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct GetScreenshotDetailInput {
-    /// Screenshot row id.
-    pub screenshot_id: i64,
+    /// Screenshot row id (the `id` field from a search/timeline result).
+    #[serde(deserialize_with = "de_flex_i64")]
+    pub id: i64,
+}
+
+/// Accept an integer or a stringified integer — LLM callers often send `"97300"`.
+fn de_flex_i64<'de, D: serde::Deserializer<'de>>(d: D) -> Result<i64, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum NumOrStr {
+        Num(i64),
+        Str(String),
+    }
+    match NumOrStr::deserialize(d)? {
+        NumOrStr::Num(n) => Ok(n),
+        NumOrStr::Str(s) => s.trim().parse().map_err(serde::de::Error::custom),
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
@@ -140,10 +155,10 @@ pub fn get_screenshot_detail(
     db: &Database,
     input: GetScreenshotDetailInput,
 ) -> crate::error::Result<Option<ScreenshotDetail>> {
-    let Some(ss) = db.get_screenshot(input.screenshot_id)? else {
+    let Some(ss) = db.get_screenshot(input.id)? else {
         return Ok(None);
     };
-    let ocr = db.get_ocr_text(input.screenshot_id)?.unwrap_or_default();
+    let ocr = db.get_ocr_text(input.id)?.unwrap_or_default();
     Ok(Some(ScreenshotDetail {
         id: ss.id,
         timestamp: ss.timestamp,
@@ -386,7 +401,7 @@ mod tests {
             "the full OCR body that will be returned",
             1_700_000_000,
         );
-        let detail = get_screenshot_detail(&db, GetScreenshotDetailInput { screenshot_id: id })
+        let detail = get_screenshot_detail(&db, GetScreenshotDetailInput { id })
             .unwrap()
             .unwrap();
         assert_eq!(detail.id, id);
@@ -397,7 +412,7 @@ mod tests {
     fn screenshot_detail_returns_none_for_missing() {
         let db = Database::open_in_memory().unwrap();
         let detail =
-            get_screenshot_detail(&db, GetScreenshotDetailInput { screenshot_id: 9999 }).unwrap();
+            get_screenshot_detail(&db, GetScreenshotDetailInput { id: 9999 }).unwrap();
         assert!(detail.is_none());
     }
 
