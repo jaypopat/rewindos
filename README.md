@@ -66,6 +66,9 @@ Scroll your screen history chronologically with hourly grouping, or scrub throug
 **🤖 Ask AI**
 Ask questions about your screen history and get answers with **inline citations**, a Sources card, and click-through to the exact screenshots. Backed by **Claude Code** (opus / sonnet / haiku) or local **Ollama** via a per-chat model picker. Pin screenshots as context; copy, regenerate, and follow-up.
 
+**🔌 Works with Claude Code & any MCP client**
+The daemon ships an [MCP](https://modelcontextprotocol.io) server, so you can query your screen history straight from Claude Code (or any MCP-capable agent) — "what was that doc I had open yesterday?" — without leaving your terminal. Exposes tools for search, timeline, recent activity, app usage, per-screenshot detail, and meeting transcripts; all local, same database the app uses.
+
 **🗂️ Organize**
 A rich-text **journal** (Tiptap) with tags, templates, screenshot attachments, and AI summaries. **Bookmarks & collections** to save what matters. **Vault export** writes daily memory notes (journal, recap, meetings, key moments, stats) straight into your Obsidian or Logseq vault.
 
