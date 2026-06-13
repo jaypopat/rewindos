@@ -8,14 +8,12 @@ use reqwest::header::{HeaderMap, HeaderValue};
 pub const PROXY_BASE: &str = "https://rewindos-updates.incident-agent.workers.dev";
 
 /// Headers the proxy aggregates into anonymous per-(day, version, platform)
-/// counts: the app version and desktop environment. Harmless on the GitHub
-/// fallback, which ignores unknown headers. REWINDOS_VERSION is injected at
-/// release build time (see release.yml); dev builds fall back to the crate
-/// version.
+/// counts: the app version ([`crate::VERSION`], from tauri.conf.json via
+/// build.rs) and desktop environment. Harmless on the GitHub fallback, which
+/// ignores unknown headers.
 pub fn headers() -> HeaderMap {
     let mut headers = HeaderMap::new();
-    let version = option_env!("REWINDOS_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"));
-    if let Ok(v) = HeaderValue::from_str(version) {
+    if let Ok(v) = HeaderValue::from_str(crate::VERSION) {
         headers.insert("X-RewindOS-Version", v);
     }
     if let Some(p) = std::env::var("XDG_CURRENT_DESKTOP")

@@ -26,5 +26,8 @@ sqlite-vec = "0.1"
 webp = { workspace = true }
 schemars = "1"
 
+[build-dependencies]
+serde_json = { workspace = true }
+
 [dev-dependencies]
 tempfile = "3"

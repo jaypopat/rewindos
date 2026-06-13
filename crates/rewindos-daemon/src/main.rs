@@ -26,7 +26,7 @@ use tracing::{debug, info, warn};
 #[command(
     name = "rewindos-daemon",
     about = "RewindOS capture daemon",
-    version = option_env!("REWINDOS_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"))
+    version = rewindos_core::VERSION
 )]
 struct Cli {
     #[command(subcommand)]

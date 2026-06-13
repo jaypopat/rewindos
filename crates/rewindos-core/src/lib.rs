@@ -15,6 +15,13 @@ pub mod usage;
 pub mod vault;
 pub mod whisper_model;
 
+/// App version, injected from src-tauri/tauri.conf.json at build time (build.rs).
+/// Falls back to the crate version if the config wasn't readable.
+pub const VERSION: &str = match option_env!("REWINDOS_VERSION") {
+    Some(v) => v,
+    None => env!("CARGO_PKG_VERSION"),
+};
+
 pub use config::AppConfig;
 pub use db::Database;
 pub use error::{CoreError, Result};
