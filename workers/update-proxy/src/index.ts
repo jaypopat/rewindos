@@ -138,7 +138,7 @@ export default {
     }
 
     const { pathname } = new URL(request.url);
-    const counter = env.COUNTER.getByName("usage");
+    const counter = env.COUNTER.getByName("prod");
     const today = new Date().toISOString().slice(0, 10);
     const hit = () =>
       counter.record(
