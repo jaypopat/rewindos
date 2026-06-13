@@ -3,7 +3,7 @@
 # commit, push. The Release workflow (.github/workflows/release.yml) builds,
 # tags, publishes the GitHub release, and pushes the AUR package from there.
 #
-# Usage: ./release [patch|minor|major] [--dry-run]
+# Usage: ./scripts/release [patch|minor|major] [--dry-run]
 set -euo pipefail
 
 CONF="src-tauri/tauri.conf.json"
@@ -17,7 +17,7 @@ for arg in "$@"; do
   case "$arg" in
     patch|minor|major) bump="$arg" ;;
     --dry-run)         dry_run=1 ;;
-    *) die "unknown argument '$arg' (usage: ./release [patch|minor|major] [--dry-run])" ;;
+    *) die "unknown argument '$arg' (usage: ./scripts/release [patch|minor|major] [--dry-run])" ;;
   esac
 done
 

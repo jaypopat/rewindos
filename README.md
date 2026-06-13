@@ -106,7 +106,7 @@ systemctl --user enable --now rewindos-daemon.service
 RewindOS is local-first and privacy-focused, so the recommended install is **download, read, then run**:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jaypopat/rewindos/master/install.sh -o install.sh
+curl -fsSL https://raw.githubusercontent.com/jaypopat/rewindos/master/scripts/install.sh -o install.sh
 less install.sh          # read what it does
 bash install.sh
 ```
@@ -114,7 +114,7 @@ bash install.sh
 Prefer a one-liner? (Same script, run directly.)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jaypopat/rewindos/master/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/jaypopat/rewindos/master/scripts/install.sh | bash
 ```
 
 The installer detects your distro, installs the system dependencies (Tesseract, PipeWire, the webview, and the right desktop portal), downloads and **checksum-verifies** the latest release, and enables the capture daemon as a systemd user service.
