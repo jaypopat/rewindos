@@ -311,9 +311,7 @@ impl AppConfig {
         } else {
             let config = AppConfig::default();
             config.ensure_dirs()?;
-            let toml_str = toml::to_string_pretty(&config)
-                .map_err(|e| CoreError::Config(format!("failed to serialize config: {e}")))?;
-            write_config_file(&config_path, &toml_str)?;
+            config.save_to(&config_path)?;
             Ok(config)
         }
     }
@@ -357,6 +355,46 @@ impl AppConfig {
     /// Returns the resolved whisper model directory (expands `~`).
     pub fn whisper_model_dir(&self) -> Result<PathBuf> {
         resolve_tilde(&self.meeting.model_dir)
+    }
+
+    /// Serialize and write this config to `path` (0600 perms, secret-safe).
+    pub fn save_to(&self, path: &Path) -> Result<()> {
+        let toml_str = toml::to_string_pretty(self)
+            .map_err(|e| CoreError::Config(format!("failed to serialize config: {e}")))?;
+        write_config_file(path, &toml_str)
+    }
+
+    /// Persist this config to the default `~/.rewindos/config.toml`.
+    pub fn save(&self) -> Result<()> {
+        self.ensure_dirs()?;
+        let path = Self::default_base_dir()?.join("config.toml");
+        self.save_to(&path)
+    }
+
+    /// Apply installer-driven AI settings.
+    /// - `disable_chat` takes precedence: when true, chat is turned off and no
+    ///   model/provider fields are touched, regardless of `chat_model`.
+    /// - `chat_model: Some(name)` (only when not disabling) enables chat against
+    ///   local Ollama with that model.
+    /// - `enable_semantic` turns semantic search on.
+    /// Fields whose corresponding flag is absent are left untouched.
+    pub fn apply_ai_settings(
+        &mut self,
+        chat_model: Option<&str>,
+        disable_chat: bool,
+        enable_semantic: bool,
+    ) {
+        if disable_chat {
+            self.chat.enabled = false;
+        } else if let Some(model) = chat_model {
+            self.chat.enabled = true;
+            self.chat.provider = "ollama".to_string();
+            self.chat.base_url = "http://localhost:11434/v1".to_string();
+            self.chat.model = model.to_string();
+        }
+        if enable_semantic {
+            self.semantic.enabled = true;
+        }
     }
 
     /// Resolved path to the whisper GGUF model file
@@ -584,5 +622,49 @@ model = "llama3"
         let mode = fs::metadata(&path).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o600);
         assert_eq!(fs::read_to_string(&path).unwrap(), "new = 2\n");
+    }
+
+    #[test]
+    fn apply_ai_settings_enables_chat_and_semantic() {
+        let mut cfg = AppConfig::default();
+        cfg.chat.enabled = false;
+        cfg.apply_ai_settings(Some("qwen2.5:7b"), false, true);
+        assert!(cfg.chat.enabled);
+        assert_eq!(cfg.chat.provider, "ollama");
+        assert_eq!(cfg.chat.base_url, "http://localhost:11434/v1");
+        assert_eq!(cfg.chat.model, "qwen2.5:7b");
+        assert!(cfg.semantic.enabled);
+        assert_eq!(cfg.capture.interval_seconds, 5);
+    }
+
+    #[test]
+    fn apply_ai_settings_disable_chat_wins() {
+        let mut cfg = AppConfig::default();
+        cfg.apply_ai_settings(None, true, false);
+        assert!(!cfg.chat.enabled);
+        assert!(!cfg.semantic.enabled);
+    }
+
+    #[test]
+    fn save_to_then_load_from_round_trips() {
+        let f = NamedTempFile::new().unwrap();
+        let mut cfg = AppConfig::default();
+        cfg.apply_ai_settings(Some("llama3.2:3b"), false, true);
+        cfg.save_to(f.path()).unwrap();
+        let loaded = AppConfig::load_from(f.path()).unwrap();
+        assert_eq!(loaded.chat.model, "llama3.2:3b");
+        assert!(loaded.semantic.enabled);
+        assert_eq!(loaded.chat.provider, "ollama");
+        assert_eq!(loaded.chat.base_url, "http://localhost:11434/v1");
+    }
+
+    #[test]
+    fn apply_ai_settings_disable_overrides_model() {
+        let mut cfg = AppConfig::default();
+        let default_model = cfg.chat.model.clone();
+        cfg.apply_ai_settings(Some("qwen2.5:7b"), true, false);
+        assert!(!cfg.chat.enabled);
+        // disable wins: model/provider must be left at their defaults, not mutated
+        assert_eq!(cfg.chat.model, default_model);
     }
 }

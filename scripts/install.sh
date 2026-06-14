@@ -11,6 +11,8 @@ APP_ID="io.github.jaypopat.rewindos"
 # sync with SemanticConfig::default().model in crates/rewindos-core/src/config.rs.
 OLLAMA_HOST="${OLLAMA_HOST:-http://localhost:11434}"
 EMBED_MODEL="nomic-embed-text"
+# Optional chat model for non-interactive installs (--chat-model=<name>).
+CHAT_MODEL="${CHAT_MODEL:-}"
 
 BIN_DIR="$HOME/.local/bin"
 APP_DIR="$HOME/.local/share/applications"
@@ -34,7 +36,7 @@ warn() { printf '\033[1;33mwarning:\033[0m %s\n' "$*" >&2; }
 err()  { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; }
 die()  { err "$*"; exit 1; }
 
-# ---- pure helpers (unit-tested in tests/install.test.sh) ----
+# ---- pure helpers (unit-tested in scripts/install.test.sh) ----
 
 # pkg_mgr_for <ID> <ID_LIKE> -> apt|dnf|pacman|unknown
 pkg_mgr_for() {
@@ -105,6 +107,100 @@ set_config_engine() {
     sed -i -E "/^\[ocr\]/a engine = \"$engine\"" "$cfg"
   else
     printf '\n[ocr]\nengine = "%s"\n' "$engine" >> "$cfg"
+  fi
+}
+
+# build_chat_options <installed_models_newline_separated> -> ordered menu options
+# on stdout, one "TYPE:VALUE" per line: installed:<m>, pull:<m>, custom:, skip:.
+# Each installed name is expected pre-trimmed (e.g. from `ollama list | awk '{print $1}'`).
+# Curated models already installed are not repeated as pull options.
+build_chat_options() {
+  local installed="$1" m
+  while IFS= read -r m; do
+    [[ -n "$m" ]] && printf 'installed:%s\n' "$m"
+  done <<< "$installed"
+  local curated=("llama3.2:3b" "qwen2.5:7b" "qwen2.5:14b")
+  for m in "${curated[@]}"; do
+    [[ $'\n'"$installed"$'\n' == *$'\n'"$m"$'\n'* ]] || printf 'pull:%s\n' "$m"
+  done
+  printf 'custom:\nskip:\n'
+}
+
+# chat_size_hint <model> -> human size/hardware hint for curated models (display).
+chat_size_hint() {
+  case "$1" in
+    llama3.2:3b) echo "~2.0 GB  low RAM / no GPU" ;;
+    qwen2.5:7b)  echo "~4.7 GB  8GB+ RAM   [default]" ;;
+    qwen2.5:14b) echo "~9.0 GB  16GB+ / GPU" ;;
+    *) echo "" ;;
+  esac
+}
+
+# choose_chat_model -> echoes the chosen model name ("" = skip) on stdout.
+# Interactive via /dev/tty (prompts/pull progress go to /dev/tty, never stdout).
+# Non-interactive: uses $CHAT_MODEL if set, else skips. Always returns 0.
+choose_chat_model() {
+  # Guard: must be able to open /dev/tty for both read and write; stat flags
+  # alone are not sufficient (the device may exist but have no controlling tty).
+  if ! { true > /dev/tty; } 2>/dev/null || ! { true < /dev/tty; } 2>/dev/null; then
+    echo "${CHAT_MODEL:-}"
+    return 0
+  fi
+  local installed opts=() o n=1 default_n=1 otype val
+  installed="$(ollama list 2>/dev/null | awk 'NR>1{print $1}' || true)"
+  mapfile -t opts < <(build_chat_options "$installed")
+
+  {
+    printf '\nChoose a chat model for the Ask view:\n\n'
+    for o in "${opts[@]}"; do
+      otype="${o%%:*}"; val="${o#*:}"
+      [[ "$val" == "qwen2.5:7b" ]] && default_n="$n"
+      case "$otype" in
+        installed) printf '  %d) %-14s (installed)\n' "$n" "$val" ;;
+        pull)      printf '  %d) %-14s %s\n' "$n" "$val" "$(chat_size_hint "$val")" ;;
+        custom)    printf '  %d) custom model name\n' "$n" ;;
+        skip)      printf '  %d) skip (set up later in Settings)\n' "$n" ;;
+      esac
+      n=$((n+1))
+    done
+    printf '\nChoice [%d]: ' "$default_n"
+  } > /dev/tty
+
+  local choice=""; read -r choice < /dev/tty || choice=""
+  [[ -z "$choice" ]] && choice="$default_n"
+  if ! [[ "$choice" =~ ^[0-9]+$ ]] || (( choice < 1 || choice > ${#opts[@]} )); then
+    echo ""; return 0
+  fi
+  o="${opts[choice-1]}"; otype="${o%%:*}"; val="${o#*:}"
+  case "$otype" in
+    installed|pull) echo "$val" ;;
+    custom)
+      local name=""; printf 'Model name: ' > /dev/tty; read -r name < /dev/tty || name=""
+      echo "$name" ;;
+    *) echo "" ;;  # skip / unknown
+  esac
+  return 0
+}
+
+# do_chat_model -> pick a chat model, pull it, persist config. All failures soft.
+do_chat_model() {
+  local model; model="$(choose_chat_model)"
+  if [[ -z "$model" ]]; then
+    "$BIN_DIR/rewindos-daemon" configure-ai --disable-chat >/dev/null 2>&1 || true
+    log "No chat model selected — the Ask view stays off."
+    log "Set one later in Settings → AI, or rerun: install.sh --with-semantic --chat-model=<name>"
+    return 0
+  fi
+  log "Pulling chat model $model (this can be several GB)..."
+  if ! ollama pull "$model"; then
+    warn "Chat model pull failed — Ask stays off. Retry later: ollama pull $model"
+    "$BIN_DIR/rewindos-daemon" configure-ai --disable-chat >/dev/null 2>&1 || true
+    return 0
+  fi
+  if "$BIN_DIR/rewindos-daemon" configure-ai --chat-model="$model" >/dev/null 2>&1; then
+    log "Ask view enabled with $model."
+  else
+    warn "Pulled $model but could not write chat config — set it in Settings → AI."
   fi
 }
 
@@ -330,7 +426,13 @@ do_semantic() {
     return 0
   fi
 
-  # Daemon auto-detects Ollama on startup and switches on hybrid search.
+  # Persist semantic=on so the Settings UI reflects it (daemon probes regardless).
+  "$BIN_DIR/rewindos-daemon" configure-ai --enable-semantic >/dev/null 2>&1 || true
+
+  # Offer a chat model so the Ask view works too.
+  do_chat_model
+
+  # Daemon re-reads config + auto-detects Ollama on restart.
   systemctl --user restart rewindos-daemon.service 2>/dev/null || true
   log "Semantic search enabled — the daemon will embed your history in the background."
 }
@@ -422,6 +524,7 @@ RewindOS installer
   install.sh                 install (or update binaries if already installed)
   install.sh --with-paddleocr install and enable higher-accuracy PaddleOCR
   install.sh --with-semantic install and enable semantic search (Ollama + model)
+  install.sh --chat-model=<name> with --with-semantic: select this chat model non-interactively
   install.sh --update        update to the latest release
   install.sh --uninstall     remove RewindOS (prompts before deleting your data)
   install.sh --help          this help
@@ -437,6 +540,7 @@ main() {
       --with-paddleocr) with_paddle=1 ;;
       --with-semantic) with_semantic=1 ;;
       --help|-h)       mode="help" ;;
+      --chat-model=*)  CHAT_MODEL="${arg#*=}" ;;
       *) die "Unknown option: $arg (try --help)" ;;
     esac
   done

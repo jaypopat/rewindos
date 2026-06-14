@@ -33,7 +33,7 @@ struct Cli {
     command: Option<Command>,
 }
 
-#[derive(Subcommand)]
+#[derive(Subcommand, Debug)]
 enum Command {
     /// Start the daemon (default when no subcommand given)
     Run,
@@ -72,6 +72,18 @@ enum Command {
     },
     /// Run as an MCP server over stdio (invoked by Claude Code).
     Mcp,
+    /// Write AI settings into config.toml (used by the installer).
+    ConfigureAi {
+        /// Chat model to enable for the Ask view (local Ollama). Omit to leave chat untouched.
+        #[arg(long)]
+        chat_model: Option<String>,
+        /// Disable chat (Ask view) — used when the user skips choosing a model.
+        #[arg(long)]
+        disable_chat: bool,
+        /// Enable semantic search.
+        #[arg(long)]
+        enable_semantic: bool,
+    },
 }
 
 #[tokio::main]
@@ -92,6 +104,11 @@ async fn main() -> anyhow::Result<()> {
             dry_run,
         } => run_recompress(quality, max_width, thumb_width, dry_run).await,
         Command::Mcp => run_mcp_server().await,
+        Command::ConfigureAi {
+            chat_model,
+            disable_chat,
+            enable_semantic,
+        } => run_configure_ai(chat_model, disable_chat, enable_semantic),
     }
 }
 
@@ -108,6 +125,25 @@ async fn run_mcp_server() -> anyhow::Result<()> {
 
     let config = AppConfig::load()?;
     mcp_server::run(config).await
+}
+
+fn run_configure_ai(
+    chat_model: Option<String>,
+    disable_chat: bool,
+    enable_semantic: bool,
+) -> anyhow::Result<()> {
+    let mut config = AppConfig::load()?;
+    config.apply_ai_settings(chat_model.as_deref(), disable_chat, enable_semantic);
+    config.save()?;
+    if disable_chat {
+        println!("Chat (Ask view) disabled.");
+    } else if let Some(m) = &chat_model {
+        println!("Chat model set to {m}.");
+    }
+    if enable_semantic {
+        println!("Semantic search enabled.");
+    }
+    Ok(())
 }
 
 async fn dbus_client_call(method: &str) -> anyhow::Result<()> {
@@ -505,6 +541,53 @@ fn format_bytes(bytes: i64) -> String {
         format!("{sign}{:.1} MB", abs as f64 / (1024.0 * 1024.0))
     } else {
         format!("{sign}{:.2} GB", abs as f64 / (1024.0 * 1024.0 * 1024.0))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn configure_ai_args_parse() {
+        let cli = Cli::try_parse_from([
+            "rewindos-daemon",
+            "configure-ai",
+            "--chat-model",
+            "qwen2.5:7b",
+            "--enable-semantic",
+        ])
+        .unwrap();
+        match cli.command {
+            Some(Command::ConfigureAi {
+                chat_model,
+                disable_chat,
+                enable_semantic,
+            }) => {
+                assert_eq!(chat_model.as_deref(), Some("qwen2.5:7b"));
+                assert!(!disable_chat);
+                assert!(enable_semantic);
+            }
+            other => panic!("expected ConfigureAi, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn configure_ai_disable_chat_parses() {
+        let cli = Cli::try_parse_from(["rewindos-daemon", "configure-ai", "--disable-chat"]).unwrap();
+        match cli.command {
+            Some(Command::ConfigureAi {
+                chat_model,
+                disable_chat,
+                enable_semantic,
+            }) => {
+                assert_eq!(chat_model, None);
+                assert!(disable_chat);
+                assert!(!enable_semantic);
+            }
+            other => panic!("expected ConfigureAi, got {other:?}"),
+        }
     }
 }
 
