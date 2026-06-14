@@ -211,6 +211,12 @@ export const RANGE_PRESETS = [
   },
 ] as const;
 
+/** Local date key (YYYY-MM-DD) for today — matches the calendar/dashboard format. */
+export function todayDateKey(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 export function getRangeForDate(dateStr: string): { start: number; end: number } {
   const d = new Date(dateStr + "T00:00:00");
   const start = Math.floor(d.getTime() / 1000);

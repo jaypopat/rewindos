@@ -9,12 +9,14 @@ import { useHistoryData } from "./hooks/useHistoryData";
 import { useRangeSelection } from "./hooks/useRangeSelection";
 import { AppsMode } from "./AppsMode";
 import { TimelineMode } from "./TimelineMode";
-import { RANGE_PRESETS, getRangeForDate } from "./history-utils";
+import { RANGE_PRESETS, getRangeForDate, todayDateKey } from "./history-utils";
 import type { HistoryMode, HistoryViewProps } from "./history-utils";
 
 export function HistoryView({ onSelectScreenshot, onRewindToRange, initialDate }: HistoryViewProps) {
-  const [rangeIdx, setRangeIdx] = useState<number | null>(initialDate ? null : 0);
-  const [customDate, setCustomDate] = useState<string | null>(initialDate ?? null);
+  // Today resolves to the "Today" preset; any other day uses the custom date.
+  const initialIsToday = initialDate != null && initialDate === todayDateKey();
+  const [rangeIdx, setRangeIdx] = useState<number | null>(initialIsToday ? 0 : initialDate ? null : 0);
+  const [customDate, setCustomDate] = useState<string | null>(initialIsToday ? null : (initialDate ?? null));
   const [mode, setMode] = useState<HistoryMode>(initialDate ? "timeline" : "apps");
 
   const { start, end } = useMemo(() => {
