@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Play, Search } from "lucide-react";
+import { ArrowRight, Play, Search } from "lucide-react";
 import {
   browseScreenshots,
   getActivity,
@@ -35,12 +35,15 @@ export interface DashboardViewProps {
   onSelectScreenshot: (id: number, siblingIds?: number[]) => void;
   onRewindToRange?: (start: number, end: number) => void;
   onGoToSearch?: () => void;
+  /** Open History on a specific day (YYYY-MM-DD). */
+  onGoToHistory?: (date: string) => void;
 }
 
 export function DashboardView({
   onSelectScreenshot,
   onRewindToRange,
   onGoToSearch,
+  onGoToHistory,
 }: DashboardViewProps) {
   const { data: appConfig } = useConfigQuery();
 
@@ -53,11 +56,12 @@ export function DashboardView({
   }, [appConfig]);
 
   // Today's time range
-  const { todayStart, todayEnd } = useMemo(() => {
+  const { todayStart, todayEnd, todayKey } = useMemo(() => {
     const d = new Date();
     d.setHours(0, 0, 0, 0);
     const start = Math.floor(d.getTime() / 1000);
-    return { todayStart: start, todayEnd: start + 86400 };
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    return { todayStart: start, todayEnd: start + 86400, todayKey: key };
   }, []);
 
   // Last 28 days before today — covers 4 prior same-weekdays for the baseline
@@ -416,9 +420,19 @@ export function DashboardView({
           <div className="mt-14">
             <Rise i={12} className="flex items-baseline gap-3.5 mb-6">
               <h2 className="font-display text-[23px] tracking-tight">The day in frames</h2>
-              <div className="ml-auto font-mono text-[11px] text-text-muted">
+              <span className="font-mono text-[11px] text-text-muted">
                 sampled across today · click to open
-              </div>
+              </span>
+              {onGoToHistory && (
+                <button
+                  type="button"
+                  onClick={() => onGoToHistory(todayKey)}
+                  className="ml-auto group/link inline-flex items-center gap-1.5 font-mono text-[11px] text-text-muted hover:text-text-primary transition-colors"
+                >
+                  See all {screenshots.length} in History
+                  <ArrowRight className="size-3 transition-transform group-hover/link:translate-x-0.5" strokeWidth={1.7} />
+                </button>
+              )}
             </Rise>
             <div className="grid grid-cols-2 @lg:grid-cols-3 @4xl:grid-cols-6 gap-3.5">
               {dayFrames.map((c, idx) => (

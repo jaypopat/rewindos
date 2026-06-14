@@ -10,6 +10,8 @@ export type HistoryMode = "apps" | "timeline";
 export interface HistoryViewProps {
   onSelectScreenshot?: (id: number, siblingIds?: number[]) => void;
   onRewindToRange?: (start: number, end: number) => void;
+  /** When set (YYYY-MM-DD), open straight into that day's timeline. */
+  initialDate?: string | null;
 }
 
 export interface AppTaskGroup {

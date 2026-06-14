@@ -53,13 +53,14 @@ interface NavState {
   screenshotIds: number[];
   rewindTimeRange: { start: number; end: number } | null;
   selectedCollectionId: number | null;
+  historyDate: string | null;
 }
 
 type NavAction =
   | { type: "SELECT_RESULT"; id: number; siblingIds?: number[] }
   | { type: "NAVIGATE_SCREENSHOT"; id: number }
   | { type: "GO_BACK" }
-  | { type: "CHANGE_VIEW"; view: View }
+  | { type: "CHANGE_VIEW"; view: View; date?: string }
   | { type: "REWIND_TO_RANGE"; start: number; end: number }
   | { type: "CLEAR_REWIND_RANGE" }
   | { type: "SELECT_COLLECTION"; id: number | null };
@@ -73,7 +74,7 @@ function navReducer(state: NavState, action: NavAction): NavState {
     case "GO_BACK":
       return { ...state, subView: "list", selectedScreenshotId: null, screenshotIds: [] };
     case "CHANGE_VIEW":
-      return { ...state, view: action.view, subView: "list", selectedScreenshotId: null, rewindTimeRange: null, selectedCollectionId: null };
+      return { ...state, view: action.view, subView: "list", selectedScreenshotId: null, rewindTimeRange: null, selectedCollectionId: null, historyDate: action.date ?? null };
     case "REWIND_TO_RANGE":
       return { ...state, rewindTimeRange: { start: action.start, end: action.end }, view: "rewind", subView: "list", selectedScreenshotId: null, selectedCollectionId: null };
     case "CLEAR_REWIND_RANGE":
@@ -90,6 +91,7 @@ const initialNavState: NavState = {
   screenshotIds: [],
   rewindTimeRange: null,
   selectedCollectionId: null,
+  historyDate: null,
 };
 
 const VIEW_SHORTCUTS: { sequence: HotkeySequence; view: View }[] = [
@@ -169,6 +171,10 @@ function App() {
         if (!tourActiveRef.current) searchInputRef.current?.focus();
       }, 100);
     }
+  }, []);
+
+  const handleGoToHistoryDate = useCallback((date: string) => {
+    dispatch({ type: "CHANGE_VIEW", view: "history", date });
   }, []);
 
   const handleRewindToRange = useCallback((start: number, end: number) => {
@@ -315,12 +321,13 @@ function App() {
             onSelectScreenshot={handleSelectResult}
             onRewindToRange={handleRewindToRange}
             onGoToSearch={() => handleViewChange("search")}
+            onGoToHistory={handleGoToHistoryDate}
           />
         )}
 
         {view === "history" && subView === "list" && (
           <ViewSuspense>
-            <HistoryView onSelectScreenshot={handleSelectResult} onRewindToRange={handleRewindToRange} />
+            <HistoryView onSelectScreenshot={handleSelectResult} onRewindToRange={handleRewindToRange} initialDate={nav.historyDate} />
           </ViewSuspense>
         )}
 

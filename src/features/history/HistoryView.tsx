@@ -12,10 +12,10 @@ import { TimelineMode } from "./TimelineMode";
 import { RANGE_PRESETS, getRangeForDate } from "./history-utils";
 import type { HistoryMode, HistoryViewProps } from "./history-utils";
 
-export function HistoryView({ onSelectScreenshot, onRewindToRange }: HistoryViewProps) {
-  const [rangeIdx, setRangeIdx] = useState<number | null>(0);
-  const [customDate, setCustomDate] = useState<string | null>(null);
-  const [mode, setMode] = useState<HistoryMode>("apps");
+export function HistoryView({ onSelectScreenshot, onRewindToRange, initialDate }: HistoryViewProps) {
+  const [rangeIdx, setRangeIdx] = useState<number | null>(initialDate ? null : 0);
+  const [customDate, setCustomDate] = useState<string | null>(initialDate ?? null);
+  const [mode, setMode] = useState<HistoryMode>(initialDate ? "timeline" : "apps");
 
   const { start, end } = useMemo(() => {
     if (customDate) return getRangeForDate(customDate);
