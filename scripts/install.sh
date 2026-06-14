@@ -34,7 +34,7 @@ warn() { printf '\033[1;33mwarning:\033[0m %s\n' "$*" >&2; }
 err()  { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; }
 die()  { err "$*"; exit 1; }
 
-# ---- pure helpers (unit-tested in tests/install.test.sh) ----
+# ---- pure helpers (unit-tested in scripts/install.test.sh) ----
 
 # pkg_mgr_for <ID> <ID_LIKE> -> apt|dnf|pacman|unknown
 pkg_mgr_for() {
@@ -106,6 +106,22 @@ set_config_engine() {
   else
     printf '\n[ocr]\nengine = "%s"\n' "$engine" >> "$cfg"
   fi
+}
+
+# build_chat_options <installed_models_newline_separated> -> ordered menu options
+# on stdout, one "TYPE:VALUE" per line: installed:<m>, pull:<m>, custom:, skip:.
+# Each installed name is expected pre-trimmed (e.g. from `ollama list | awk '{print $1}'`).
+# Curated models already installed are not repeated as pull options.
+build_chat_options() {
+  local installed="$1" m
+  while IFS= read -r m; do
+    [[ -n "$m" ]] && printf 'installed:%s\n' "$m"
+  done <<< "$installed"
+  local curated=("llama3.2:3b" "qwen2.5:7b" "qwen2.5:14b")
+  for m in "${curated[@]}"; do
+    [[ $'\n'"$installed"$'\n' == *$'\n'"$m"$'\n'* ]] || printf 'pull:%s\n' "$m"
+  done
+  printf 'custom:\nskip:\n'
 }
 
 # ---- side-effecting helpers ----
