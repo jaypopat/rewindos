@@ -2,13 +2,13 @@ const APP_COLORS = [
   "#e8825a", // terracotta
   "#c9925e", // ochre
   "#9aa873", // sage
-  "#6f97b4", // slate blue
+  "#5e9fcf", // slate blue
   "#b58bc0", // mauve
   "#cf9090", // rose
   "#d3b25e", // honey
   "#7fa6a0", // teal-sage
   "#b87f5c", // sienna
-  "#8e9bb8", // periwinkle
+  "#8b8fd4", // periwinkle
   "#a3a06a", // olive
   "#c47e9e", // dusty pink
 ] as const;

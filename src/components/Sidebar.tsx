@@ -83,7 +83,7 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps) {
     <nav
       className={cn(
         "shrink-0 flex flex-col bg-surface-raised border-r border-line pt-[26px] pb-[18px] transition-[width] duration-300",
-        collapsed ? "w-14 px-2" : "w-[244px] px-5",
+        collapsed ? "w-14 px-2" : "w-[212px] px-4",
       )}
     >
       {/* Brand + collapse toggle */}
@@ -177,7 +177,7 @@ function NavButton({ item, active, collapsed, onSelect }: NavButtonProps) {
         <span
           className={cn(
             "animate-navmark absolute top-1/2 -translate-y-1/2 w-0.5 h-4 bg-accent",
-            collapsed ? "-left-2" : "-left-5",
+            collapsed ? "-left-2" : "-left-4",
           )}
         />
       )}
