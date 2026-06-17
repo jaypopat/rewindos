@@ -3,6 +3,11 @@ import { Rise } from "@/components/motion";
 import { getAppColor } from "@/lib/app-colors";
 import type { AppSpan } from "./dashboard-utils";
 
+// Gaps shorter than this between consecutive spans are capture artifacts
+// (the next screenshot just landed in a different app); bridge across them so
+// the ribbon reads as continuous. Longer gaps are real idle and stay as gaps.
+const IDLE_GAP = 180; // seconds
+
 function fmtClock(secs: number): string {
   const d = new Date(secs * 1000);
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
@@ -56,7 +61,15 @@ export function DayRibbon({
           className="absolute inset-0 rounded-lg overflow-hidden border border-line-2"
           style={{ background: "#100c07" }}
         >
-          {spans.map((s, i) => (
+          {spans.map((s, i) => {
+            // Bars sit at their real timestamps but are only as wide as the
+            // span's captured duration, so sparse capture leaves dark slots
+            // between them. Bridge each bar up to the next one's start when the
+            // gap is short (a capture artifact); leave longer idle gaps real.
+            const next = spans[i + 1];
+            const renderEnd =
+              next && next.startTime - s.endTime <= IDLE_GAP ? next.startTime : s.endTime;
+            return (
             <Rise
               key={`${s.startTime}-${i}`}
               kind="seg"
@@ -69,7 +82,7 @@ export function DayRibbon({
                 top: 0,
                 bottom: 0,
                 left: `${((s.startTime - d0) / range) * 100}%`,
-                width: `${Math.max(0.15, ((s.endTime - s.startTime) / range) * 100)}%`,
+                width: `${Math.max(0.15, ((renderEnd - s.startTime) / range) * 100)}%`,
                 background: getAppColor(s.appName),
               }}
             >
@@ -81,7 +94,8 @@ export function DayRibbon({
                 }}
               />
             </Rise>
-          ))}
+            );
+          })}
         </div>
         {/* Playhead — follows the cursor, fades out in place on leave */}
         <div
