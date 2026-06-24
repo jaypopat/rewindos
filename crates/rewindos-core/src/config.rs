@@ -102,6 +102,10 @@ pub struct ChatConfig {
     pub max_context_tokens: usize,
     pub max_history_messages: usize,
     pub temperature: f32,
+    /// Opt-in: route tool-capable models through the native server-side
+    /// agentic loop instead of pre-built single-shot context.
+    #[serde(default)]
+    pub agentic_tools: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -189,6 +193,7 @@ impl Default for ChatConfig {
             max_context_tokens: 6144,
             max_history_messages: 20,
             temperature: 0.5,
+            agentic_tools: false,
         }
     }
 }
@@ -574,6 +579,12 @@ tesseract_lang = "deu"
         // defaults for fields not specified
         assert_eq!(config.storage.screenshot_quality, 80);
         assert_eq!(config.ui.theme, "system");
+    }
+
+    #[test]
+    fn agentic_tools_defaults_off() {
+        let cfg = AppConfig::default();
+        assert!(!cfg.chat.agentic_tools);
     }
 
     #[test]
