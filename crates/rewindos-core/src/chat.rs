@@ -149,6 +149,44 @@ fn parse_model_ids(v: &serde_json::Value) -> Vec<String> {
     ids
 }
 
+// -- Tool calling types --
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ToolCall {
+    pub id: String,
+    pub name: String,
+    pub arguments: serde_json::Value,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ToolTurn {
+    Text(String),
+    Calls(Vec<ToolCall>),
+}
+
+pub(crate) fn parse_tool_turn(body: &serde_json::Value) -> ToolTurn {
+    let msg = &body["choices"][0]["message"];
+    if let Some(calls) = msg["tool_calls"].as_array() {
+        if !calls.is_empty() {
+            let parsed = calls
+                .iter()
+                .filter_map(|c| {
+                    let f = &c["function"];
+                    let args_str = f["arguments"].as_str().unwrap_or("{}");
+                    Some(ToolCall {
+                        id: c["id"].as_str().unwrap_or_default().to_string(),
+                        name: f["name"].as_str()?.to_string(),
+                        arguments: serde_json::from_str(args_str)
+                            .unwrap_or(serde_json::json!({})),
+                    })
+                })
+                .collect::<Vec<_>>();
+            return ToolTurn::Calls(parsed);
+        }
+    }
+    ToolTurn::Text(msg["content"].as_str().unwrap_or_default().to_string())
+}
+
 // -- Chat client (OpenAI-compatible) --
 
 pub struct ChatClient {
@@ -312,6 +350,44 @@ impl ChatClient {
             .as_str()
             .unwrap_or("")
             .to_string())
+    }
+
+    /// Non-streaming single-round-trip with OpenAI function calling.
+    /// Returns either the assistant's text reply or the tool calls it requested.
+    pub async fn complete_with_tools(
+        &self,
+        messages: &[serde_json::Value],
+        tools: &[serde_json::Value],
+    ) -> Result<ToolTurn> {
+        let body = serde_json::json!({
+            "model": self.model,
+            "messages": messages,
+            "tools": tools,
+            "stream": false,
+            "temperature": self.temperature,
+        });
+        let url = format!("{}/chat/completions", self.base_url);
+        let response = self
+            .with_auth(
+                self.client
+                    .post(&url)
+                    .timeout(std::time::Duration::from_secs(120))
+                    .json(&body),
+            )
+            .send()
+            .await
+            .map_err(|e| CoreError::Chat(format!("complete_with_tools request failed: {e}")))?;
+
+        if !response.status().is_success() {
+            return Err(Self::error_from_response(response).await);
+        }
+
+        let json: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|e| CoreError::Chat(format!("complete_with_tools decode failed: {e}")))?;
+
+        Ok(parse_tool_turn(&json))
     }
 
     /// Use the LLM to analyze a user query and extract structured search parameters.
@@ -945,6 +1021,42 @@ impl ContextAssembler {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_tool_turn_extracts_tool_calls() {
+        let body = serde_json::json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": null,
+                    "tool_calls": [{
+                        "id": "call_1",
+                        "type": "function",
+                        "function": { "name": "search_screenshots", "arguments": "{\"query\":\"rust\"}" }
+                    }]
+                }
+            }]
+        });
+        match parse_tool_turn(&body) {
+            ToolTurn::Calls(calls) => {
+                assert_eq!(calls.len(), 1);
+                assert_eq!(calls[0].name, "search_screenshots");
+                assert_eq!(calls[0].arguments["query"], "rust");
+            }
+            ToolTurn::Text(_) => panic!("expected tool calls"),
+        }
+    }
+
+    #[test]
+    fn parse_tool_turn_extracts_plain_text() {
+        let body = serde_json::json!({
+            "choices": [{ "message": { "role": "assistant", "content": "You used VS Code." } }]
+        });
+        match parse_tool_turn(&body) {
+            ToolTurn::Text(t) => assert_eq!(t, "You used VS Code."),
+            ToolTurn::Calls(_) => panic!("expected text"),
+        }
+    }
 
     #[test]
     fn auth_header_present_iff_api_key_set() {
