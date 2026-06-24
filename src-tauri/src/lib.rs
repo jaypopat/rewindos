@@ -1151,6 +1151,7 @@ async fn ask_agentic(
     ];
 
     const MAX_ITERS: usize = 8;
+    let mut answered = false;
     for i in 0..MAX_ITERS {
         // On the final allowed iteration, drop tools to force a text answer.
         let active_tools: &[serde_json::Value] = if i + 1 == MAX_ITERS { &[] } else { &tools };
@@ -1166,6 +1167,7 @@ async fn ask_agentic(
                     warn!("persist_event(text) failed (chat {chat_id}): {e}");
                 }
                 let _ = on_event.send(ev);
+                answered = true;
                 break;
             }
             ToolTurn::Calls(calls) => {
@@ -1202,6 +1204,16 @@ async fn ask_agentic(
                 }
             }
         }
+    }
+
+    if !answered {
+        let ev = ask_stream::AskStreamEvent::Text {
+            text: "I wasn't able to compose an answer within the tool-call budget.".to_string(),
+        };
+        if let Err(e) = persist_event(&state, chat_id, &ev, &mut None) {
+            warn!("persist_event(text) failed (chat {chat_id}): {e}");
+        }
+        let _ = on_event.send(ev);
     }
 
     let _ = on_event.send(ask_stream::AskStreamEvent::Done {
