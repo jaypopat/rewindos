@@ -3,6 +3,7 @@ mod audio_server;
 mod chat_commands;
 mod chat_context;
 mod claude_code;
+mod prompts;
 mod updater;
 
 use std::collections::HashMap;
@@ -710,13 +711,10 @@ async fn produce_daily_summary(
 ) -> (Option<String>, String) {
     let claude_status = claude_code::detect();
     if claude_status.available && claude_status.mcp_registered {
-        let agentic_prompt = format!(
-            "Summarize what the user did on {date_key} (epoch second range {start_time}..{end_time}). \
-             Use your tools to retrieve that day's screen activity, then write the recap."
-        );
+        let agentic_prompt = crate::prompts::agentic_digest_user_message(date_key, start_time, end_time);
         match claude_code::ask_claude_oneshot_with_tools(
             &agentic_prompt,
-            DAILY_DIGEST_SYSTEM_PROMPT,
+            crate::prompts::DAILY_DIGEST_SYSTEM_PROMPT,
             None,
             std::time::Duration::from_secs(600),
         )
@@ -995,32 +993,6 @@ async fn build_chat_context(
     chat_context::build(&state.db, state.embedding_client.as_ref(), &config, &query).await
 }
 
-const SYSTEM_PROMPT_FOR_CLAUDE: &str = r#"You are RewindOS, a local AI assistant with access to the user's screen capture history via MCP tools (search_screenshots, get_timeline, get_app_usage, get_screenshot_detail, get_recent_activity, search_transcripts).
-
-For questions about meetings, calls, or conversations, use search_transcripts — recorded meeting transcripts where "You" is the user and "Remote" is the other party. Call it without a query to list what was discussed in a time window.
-
-Answer directly. No preamble. No outline scaffolding. No "insight" blocks. No headers unless the answer naturally has >3 sections.
-
-When referencing a screenshot you retrieved via a tool, include its id inline as [REF:ID]. Be specific about timestamps, app names, window titles.
-
-If the context has no relevant data, say "I don't have enough screen history for that time period." Do not fabricate."#;
-
-/// System prompt for the agentic daily-digest. Self-contained (does not reuse
-/// `SYSTEM_PROMPT_FOR_CLAUDE`) so it can omit the `[REF:ID]` instruction: the
-/// recap is shown as a static card and written verbatim into the exported
-/// Obsidian/Logseq vault note (both share the same cache), where `[REF:ID]`
-/// markers render as meaningless literal text.
-const DAILY_DIGEST_SYSTEM_PROMPT: &str = "You are RewindOS, generating a daily activity recap from the user's screen \
-capture history. Use your MCP tools (search_screenshots, get_timeline, get_app_usage, get_screenshot_detail, \
-get_recent_activity, search_transcripts) to retrieve the day's activity before writing. For meetings, calls, or \
-conversations use search_transcripts (recorded transcripts where \"You\" is the user and \"Remote\" is the other party).\n\n\
-Output only the recap itself — no preamble, no commentary about the data, no sign-off, no horizontal-rule (---) \
-separators. Write it as markdown: open directly with a 1-2 sentence narrative lead, then a bulleted list of the concrete \
-tasks and threads grouped by project or topic, bolding the key task in each bullet. Name specific work (files, topics, people, \
-sites) — not just app names. Keep it tight; omit anything you cannot tie to a real activity. Write plain prose and \
-bullets — do NOT include [REF:ID] markers or screenshot ids; this recap is shown as a static note and exported to a \
-vault file.\n\n\
-If there is no relevant data, say \"I don't have enough screen history for that day.\" Do not fabricate.";
 
 #[tauri::command]
 async fn ask_claude(
@@ -1064,7 +1036,7 @@ async fn ask_claude(
 
     let mut child = claude_code::ask_claude_stream_spawn(
         &prompt,
-        SYSTEM_PROMPT_FOR_CLAUDE,
+        crate::prompts::SYSTEM_PROMPT_FOR_CLAUDE.as_str(),
         Some(&session_arg),
         resume,
         chat_model.as_deref(),
@@ -1672,13 +1644,10 @@ async fn generate_journal_summary(
             )
         })
         .collect();
-    let prompt = format!(
-        "You are an AI assistant summarizing a user's journal entries. \
-        Write a brief, insightful summary (3-5 sentences) covering themes, mood trends, \
-        and notable events. Be specific and reference content from the entries.\n\n\
-        Journal entries for {} ({}):\n\n{}\n\n\
-        Write a concise summary highlighting patterns, mood trends, and key events.",
-        period_key, period_type, entries_text.join("\n\n"),
+    let prompt = crate::prompts::journal_summary_prompt(
+        &period_key,
+        &period_type,
+        &entries_text.join("\n\n"),
     );
 
     let chat_cfg = {
