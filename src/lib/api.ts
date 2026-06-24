@@ -756,6 +756,7 @@ export interface ChatContext {
   context: string;
   references: ScreenshotRef[];
   intent_category: string;
+  system_prompt: string;
 }
 
 export async function buildChatContext(query: string): Promise<ChatContext> {

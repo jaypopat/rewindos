@@ -13,6 +13,9 @@ pub struct ChatContext {
     pub context: String,
     pub references: Vec<ScreenshotReference>,
     pub intent_category: String,
+    /// Full system prompt for the Ollama/pre-built path. Built here so the
+    /// frontend never hardcodes the RewindOS identity.
+    pub system_prompt: String,
 }
 
 pub async fn build(
@@ -222,10 +225,17 @@ pub async fn build(
     }
     .to_string();
 
+    let now = chrono::Utc::now().to_rfc3339();
+    let system_prompt = format!(
+        "{}\n\nCurrent time: {now}\n\n{context}",
+        rewindos_core::prompts::CORE_SYSTEM_PROMPT,
+    );
+
     Ok(ChatContext {
         context,
         references,
         intent_category,
+        system_prompt,
     })
 }
 

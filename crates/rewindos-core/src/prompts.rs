@@ -25,7 +25,10 @@ pub const CORE_SYSTEM_PROMPT: &str = r#"You are RewindOS, a local AI assistant w
 ## Format
 - Keep answers under 300 words. Be conversational but precise.
 - No filler phrases like "Based on the provided context" or "Let me analyze".
-- NEVER just rephrase or repeat the user's question back."#;
+- NEVER just rephrase or repeat the user's question back.
+
+## Meeting Transcripts
+Context may include meeting transcripts ("You" = the user, "Remote" = the other party). Use them when the question concerns conversations or meetings."#;
 
 /// Shared instruction header for the daily-summary prompts.
 pub const DAILY_PROMPT_INTRO: &str = "You are an AI assistant analyzing a user's desktop activity for the day. \

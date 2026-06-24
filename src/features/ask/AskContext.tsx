@@ -185,9 +185,8 @@ export function AskProvider({ children }: { children: ReactNode }) {
                 }) satisfies ProviderMessage,
             );
 
-          const systemContent = `You are RewindOS. Answer directly. Cite screenshots with [REF:ID]. Context may include meeting transcripts ("You" = the user, "Remote" = the other party) — use them when the question concerns conversations or meetings.\n\nCurrent time: ${new Date().toISOString()}\n\n${ctx.context}`;
           const providerMessages: ProviderMessage[] = [
-            { role: "system", content: systemContent },
+            { role: "system", content: ctx.system_prompt },
             ...prevMessages,
             { role: "user", content: expandedText },
           ];
