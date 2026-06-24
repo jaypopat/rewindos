@@ -12,7 +12,7 @@ use std::sync::LazyLock;
 /// prompt contains each rule exactly once.
 const CLAUDE_MCP_ADDENDUM: &str = r#"You have access to the user's screen capture history via MCP tools (search_screenshots, get_timeline, get_app_usage, get_screenshot_detail, get_recent_activity, search_transcripts).
 
-For questions about meetings, calls, or conversations, use search_transcripts — recorded meeting transcripts where "You" is the user and "Remote" is the other party. Call it without a query to list what was discussed in a time window.
+For questions about meetings, calls, or conversations, use `search_transcripts` — call it without a query to list what was discussed in a time window.
 
 No outline scaffolding. No "insight" blocks. No headers unless the answer naturally has >3 sections."#;
 
