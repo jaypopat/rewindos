@@ -1,3 +1,4 @@
+mod agentic_loop;
 mod ask_stream;
 mod audio_server;
 mod chat_commands;
@@ -1108,6 +1109,104 @@ async fn ask_claude(
         };
         let _ = on_event.send(ask_stream::AskStreamEvent::Error { message });
     }
+    Ok(())
+}
+
+/// Native agentic tool-calling loop. Runs the call → execute-tools → repeat
+/// cycle against an OpenAI-compatible endpoint and emits the SAME
+/// `AskStreamEvent`s the Claude path does, so the frontend's `handleEvent`
+/// works unchanged.
+///
+/// Persistence split mirrors the Ollama/pre-built path: the FRONTEND persists
+/// the user turn before calling this command; here we persist ONLY the
+/// assistant-side events (Text/ToolUse/ToolResult) via `persist_event`. The
+/// user message is NOT written here to avoid a double-write.
+#[tauri::command]
+async fn ask_agentic(
+    state: State<'_, AppState>,
+    chat_id: i64,
+    prompt: String,
+    on_event: tauri::ipc::Channel<ask_stream::AskStreamEvent>,
+) -> Result<(), String> {
+    use rewindos_core::agentic::{execute_tool, tool_schemas};
+    use rewindos_core::chat::{ChatClient, ToolTurn};
+
+    let (config, capture_interval) = {
+        let cfg = state.config.lock().map_err(|e| format!("config lock: {e}"))?;
+        (cfg.chat.clone(), cfg.capture.interval_seconds)
+    };
+    let client = ChatClient::new(&config);
+    let tools = tool_schemas();
+    let now = chrono::Utc::now().timestamp();
+
+    // Seed conversation: system + the user's question. The user turn itself is
+    // persisted by the frontend (mirrors the pre-built provider path), so we do
+    // NOT write it here.
+    let mut messages: Vec<serde_json::Value> = vec![
+        serde_json::json!({
+            "role": "system",
+            "content": rewindos_core::prompts::CORE_SYSTEM_PROMPT,
+        }),
+        serde_json::json!({ "role": "user", "content": prompt }),
+    ];
+
+    const MAX_ITERS: usize = 8;
+    for i in 0..MAX_ITERS {
+        // On the final allowed iteration, drop tools to force a text answer.
+        let active_tools: &[serde_json::Value] = if i + 1 == MAX_ITERS { &[] } else { &tools };
+        let turn = client
+            .complete_with_tools(&messages, active_tools)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        match turn {
+            ToolTurn::Text(text) => {
+                let ev = ask_stream::AskStreamEvent::Text { text };
+                if let Err(e) = persist_event(&state, chat_id, &ev, &mut None) {
+                    warn!("persist_event(text) failed (chat {chat_id}): {e}");
+                }
+                let _ = on_event.send(ev);
+                break;
+            }
+            ToolTurn::Calls(calls) => {
+                messages.push(agentic_loop::build_assistant_tool_calls_message(&calls));
+                for call in calls {
+                    let use_ev = ask_stream::AskStreamEvent::ToolUse {
+                        id: call.id.clone(),
+                        name: call.name.clone(),
+                        input: call.arguments.clone(),
+                    };
+                    if let Err(e) = persist_event(&state, chat_id, &use_ev, &mut None) {
+                        warn!("persist_event(tool_use) failed (chat {chat_id}): {e}");
+                    }
+                    let _ = on_event.send(use_ev);
+
+                    let result = {
+                        let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
+                        execute_tool(&db, &call.name, &call.arguments, now, capture_interval)
+                    };
+                    let (content, is_error) = match result {
+                        Ok(s) => (s, false),
+                        Err(e) => (format!("error: {e}"), true),
+                    };
+                    let res_ev = ask_stream::AskStreamEvent::ToolResult {
+                        tool_use_id: call.id.clone(),
+                        content: content.clone(),
+                        is_error,
+                    };
+                    if let Err(e) = persist_event(&state, chat_id, &res_ev, &mut None) {
+                        warn!("persist_event(tool_result) failed (chat {chat_id}): {e}");
+                    }
+                    let _ = on_event.send(res_ev);
+                    messages.push(agentic_loop::build_tool_result_message(&call.id, &content));
+                }
+            }
+        }
+    }
+
+    let _ = on_event.send(ask_stream::AskStreamEvent::Done {
+        total_cost_usd: None,
+    });
     Ok(())
 }
 
@@ -2266,6 +2365,7 @@ pub fn run() {
             claude_register_mcp,
             build_chat_context,
             ask_claude,
+            ask_agentic,
             ask_claude_cancel,
             delete_screenshots_in_range,
             get_config,
