@@ -164,6 +164,15 @@ export function AITab({ config, update }: TabProps) {
           onChange={(v) => update("chat", "max_history_messages", v)}
         />
       </Field>
+      <Field
+        label="Agentic tool use (experimental)"
+        hint="Let tool-capable local models search your history on demand instead of using a single pre-built context. Slower; needs a model that supports function calling."
+      >
+        <Toggle
+          checked={config.chat.agentic_tools}
+          onChange={(v) => update("chat", "agentic_tools", v)}
+        />
+      </Field>
 
       <SectionTitle>Semantic Search (Embeddings)</SectionTitle>
       <Field label="Enabled">
