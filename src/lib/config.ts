@@ -42,6 +42,7 @@ export interface AppConfig {
     max_context_tokens: number;
     max_history_messages: number;
     temperature: number;
+    agentic_tools: boolean;
   };
   categories: {
     rules: Record<string, string[]>;

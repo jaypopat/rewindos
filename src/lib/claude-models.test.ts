@@ -29,7 +29,7 @@ describe("resolveChatRoute", () => {
       claudeReady: true,
       ollamaDefaultModel,
     });
-    expect(route).toEqual({ provider: "ollama", model: "qwen2.5:3b" });
+    expect(route).toEqual({ provider: "ollama", model: "qwen2.5:3b", mode: "prebuilt" });
   });
 
   it("routes an explicitly selected Claude model to Claude", () => {
@@ -38,7 +38,7 @@ describe("resolveChatRoute", () => {
       claudeReady: true,
       ollamaDefaultModel,
     });
-    expect(route).toEqual({ provider: "claude", model: "opus" });
+    expect(route).toEqual({ provider: "claude", model: "opus", mode: "prebuilt" });
   });
 
   it("defaults to Claude (sonnet) when nothing is selected and Claude is ready", () => {
@@ -47,7 +47,7 @@ describe("resolveChatRoute", () => {
       claudeReady: true,
       ollamaDefaultModel,
     });
-    expect(route).toEqual({ provider: "claude", model: "sonnet" });
+    expect(route).toEqual({ provider: "claude", model: "sonnet", mode: "prebuilt" });
   });
 
   it("defaults to the Ollama config model when nothing is selected and Claude is not ready", () => {
@@ -56,7 +56,7 @@ describe("resolveChatRoute", () => {
       claudeReady: false,
       ollamaDefaultModel,
     });
-    expect(route).toEqual({ provider: "ollama", model: ollamaDefaultModel });
+    expect(route).toEqual({ provider: "ollama", model: ollamaDefaultModel, mode: "prebuilt" });
   });
 
   it("still honors an explicit Claude pick when Claude is not ready (caller surfaces the error)", () => {
@@ -65,6 +65,32 @@ describe("resolveChatRoute", () => {
       claudeReady: false,
       ollamaDefaultModel,
     });
-    expect(route).toEqual({ provider: "claude", model: "sonnet" });
+    expect(route).toEqual({ provider: "claude", model: "sonnet", mode: "prebuilt" });
+  });
+});
+
+describe("resolveChatRoute mode", () => {
+  it("ollama + agentic flag on → agentic mode", () => {
+    const r = resolveChatRoute({
+      selectedModel: "llama3.1", claudeReady: false,
+      ollamaDefaultModel: "llama3.1", agenticTools: true,
+    });
+    expect(r).toMatchObject({ provider: "ollama", mode: "agentic" });
+  });
+
+  it("ollama + agentic flag off → prebuilt mode", () => {
+    const r = resolveChatRoute({
+      selectedModel: "llama3.1", claudeReady: false,
+      ollamaDefaultModel: "llama3.1", agenticTools: false,
+    });
+    expect(r).toMatchObject({ provider: "ollama", mode: "prebuilt" });
+  });
+
+  it("claude provider is unaffected by agentic flag", () => {
+    const r = resolveChatRoute({
+      selectedModel: "sonnet", claudeReady: true,
+      ollamaDefaultModel: "llama3.1", agenticTools: true,
+    });
+    expect(r.provider).toBe("claude");
   });
 });

@@ -10,6 +10,7 @@ import {
 } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  askAgenticStream,
   askClaudeCancel,
   askClaudeStream,
   askClaudeStreamWithAttachments,
@@ -122,6 +123,7 @@ export function AskProvider({ children }: { children: ReactNode }) {
           selectedModel: activeChat?.model ?? pendingModel ?? null,
           claudeReady,
           ollamaDefaultModel: appConfig?.chat.model ?? "",
+          agenticTools: appConfig?.chat.agentic_tools ?? false,
         });
         const effectiveModel = route.model;
         useClaude = route.provider === "claude";
@@ -159,6 +161,12 @@ export function AskProvider({ children }: { children: ReactNode }) {
               handleEvent(ev, chatId!, qc, setError),
             );
           }
+        } else if (route.mode === "agentic") {
+          await persistTextMessage(chatId, "user", storedText);
+          qc.invalidateQueries({ queryKey: queryKeys.chatMessages(chatId) });
+          await askAgenticStream(chatId, expandedText, (ev) =>
+            handleEvent(ev, chatId!, qc, setError),
+          );
         } else {
           const [ctx, config] = await Promise.all([
             buildChatContext(text),

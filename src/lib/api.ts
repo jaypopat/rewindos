@@ -802,6 +802,16 @@ export async function askClaudeCancel(chatId: number): Promise<void> {
   return invoke("ask_claude_cancel", { chatId });
 }
 
+export async function askAgenticStream(
+  chatId: number,
+  prompt: string,
+  onEvent: (ev: AskStreamEvent) => void,
+): Promise<void> {
+  const channel = new Channel<AskStreamEvent>();
+  channel.onmessage = onEvent;
+  return invoke("ask_agentic", { chatId, prompt, onEvent: channel });
+}
+
 // -- Chat persistence --
 
 export type ChatBackend = "claude" | "ollama";

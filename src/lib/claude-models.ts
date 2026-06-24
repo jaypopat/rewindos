@@ -26,11 +26,15 @@ export interface ChatRouteInput {
   claudeReady: boolean;
   /** Configured local Ollama model, used only when nothing is explicitly selected. */
   ollamaDefaultModel: string;
+  /** chat.agentic_tools — opt-in native tool loop for ollama models. */
+  agenticTools?: boolean;
 }
 
 export interface ChatRoute {
   provider: ChatProvider;
   model: string;
+  /** Only meaningful for provider === "ollama". */
+  mode: "agentic" | "prebuilt";
 }
 
 /**
@@ -41,16 +45,20 @@ export interface ChatRoute {
  *
  * Note: when the selected model is a Claude alias but `claudeReady` is false, this
  * still returns `provider: "claude"` — the caller is expected to surface a clear
- * "Claude not available" error rather than silently misroute to Ollama.
+ * "Claude not available" error rather than silently misroute to Ollama (which would 404 the model).
  */
 export function resolveChatRoute(input: ChatRouteInput): ChatRoute {
-  if (input.selectedModel) {
-    return {
-      provider: isClaudeModel(input.selectedModel) ? "claude" : "ollama",
-      model: input.selectedModel,
-    };
-  }
-  return input.claudeReady
-    ? { provider: "claude", model: DEFAULT_CLAUDE_MODEL }
-    : { provider: "ollama", model: input.ollamaDefaultModel };
+  const agentic = input.agenticTools ?? false;
+
+  const base = input.selectedModel
+    ? {
+        provider: isClaudeModel(input.selectedModel) ? ("claude" as const) : ("ollama" as const),
+        model: input.selectedModel,
+      }
+    : input.claudeReady
+      ? { provider: "claude" as const, model: DEFAULT_CLAUDE_MODEL }
+      : { provider: "ollama" as const, model: input.ollamaDefaultModel };
+
+  const mode = base.provider === "ollama" && agentic ? "agentic" : "prebuilt";
+  return { ...base, mode };
 }
