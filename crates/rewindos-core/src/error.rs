@@ -25,6 +25,9 @@ pub enum CoreError {
 
     #[error("chat error: {0}")]
     Chat(String),
+
+    #[error("{0}")]
+    Other(String),
 }
 
 pub type Result<T> = std::result::Result<T, CoreError>;
