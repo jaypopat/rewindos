@@ -9,6 +9,7 @@ pub mod hasher;
 pub mod mcp;
 pub mod ocr;
 pub mod paddle_ocr;
+pub mod prompts;
 pub mod schema;
 pub mod summary;
 pub mod usage;
