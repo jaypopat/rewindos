@@ -71,9 +71,7 @@ fn build_summary_prompt(segments: &[TranscriptSegment]) -> Vec<ChatMessage> {
     vec![
         ChatMessage {
             role: ChatRole::System,
-            content: "You are a meeting assistant. Write a concise summary of the \
-                      meeting, then a bulleted list of any action items."
-                .to_string(),
+            content: rewindos_core::prompts::MEETING_SUMMARY_SYSTEM_PROMPT.to_string(),
         },
         ChatMessage {
             role: ChatRole::User,

@@ -7,29 +7,6 @@ use crate::config::ChatConfig;
 use crate::error::Result;
 use crate::vault::gather::DayMemory;
 
-/// Shared instruction header for the daily-summary prompts. Wording matches the
-/// prompt historically assembled in `get_daily_summary` in `src-tauri/src/lib.rs`.
-const DAILY_PROMPT_INTRO: &str = "You are an AI assistant analyzing a user's desktop activity for the day. \
-    Based on the data below, write a brief productivity summary (3-5 sentences). \
-    Be specific about what the user was working on based on the window titles and screen content. \
-    Mention concrete tasks, not just app names. Be encouraging but honest.";
-
-/// Shared closing instruction for the daily-summary prompts.
-const DAILY_PROMPT_OUTRO: &str = "Write a concise daily summary. Focus on what was accomplished, not just what apps were used. \
-    If you can identify specific tasks (coding, writing, browsing topics), mention them.";
-
-/// Opening instruction for the OCR-backed daily recap (the in-app History
-/// digest fallback when no agentic tool path is available). Asks for a richer,
-/// structured markdown recap than the terse [`DAILY_PROMPT_INTRO`].
-const RICH_DAILY_PROMPT_INTRO: &str = "You are analyzing a user's desktop activity for one day, \
-    reconstructed from OCR text of periodic screenshots. Write a daily recap in markdown.";
-
-/// Closing instruction for the OCR-backed daily recap. Defines the markdown shape.
-const RICH_DAILY_PROMPT_OUTRO: &str = "Open with a 1-2 sentence narrative lead summarizing the day, \
-    then a bulleted list of the concrete tasks and threads you can identify, grouped by project or topic. \
-    Bold the key task in each bullet. Name specific work (files, topics, people, sites) drawn from the \
-    on-screen content — not just app names. Be specific and honest; omit apps you cannot tie to a real activity.";
-
 /// Max apps named in the OCR-recap "App usage" line.
 const MAX_APPS_LISTED: usize = 15;
 /// Max chars of OCR kept per session snippet in the OCR recap.
@@ -210,8 +187,10 @@ pub fn build_daily_prompt(app_breakdown: &[AppEntry], sessions: &[SessionRow]) -
     }
 
     format!(
-        "{RICH_DAILY_PROMPT_INTRO}\n\nApp usage: {app_summary_text}\n\nActivity log:\n{}\n\n{RICH_DAILY_PROMPT_OUTRO}",
+        "{}\n\nApp usage: {app_summary_text}\n\nActivity log:\n{}\n\n{}",
+        crate::prompts::RICH_DAILY_PROMPT_INTRO,
         context_lines.join("\n"),
+        crate::prompts::RICH_DAILY_PROMPT_OUTRO,
     )
 }
 
@@ -260,8 +239,10 @@ pub fn build_daily_prompt_from_memory(mem: &DayMemory) -> String {
     }
 
     format!(
-        "{DAILY_PROMPT_INTRO}\n\nActivity data:\n{}\n\n{DAILY_PROMPT_OUTRO}",
+        "{}\n\nActivity data:\n{}\n\n{}",
+        crate::prompts::DAILY_PROMPT_INTRO,
         data_lines.join("\n"),
+        crate::prompts::DAILY_PROMPT_OUTRO,
     )
 }
 

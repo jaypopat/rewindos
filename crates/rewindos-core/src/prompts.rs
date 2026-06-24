@@ -27,6 +27,31 @@ pub const CORE_SYSTEM_PROMPT: &str = r#"You are RewindOS, a local AI assistant w
 - No filler phrases like "Based on the provided context" or "Let me analyze".
 - NEVER just rephrase or repeat the user's question back."#;
 
+/// Shared instruction header for the daily-summary prompts.
+pub const DAILY_PROMPT_INTRO: &str = "You are an AI assistant analyzing a user's desktop activity for the day. \
+    Based on the data below, write a brief productivity summary (3-5 sentences). \
+    Be specific about what the user was working on based on the window titles and screen content. \
+    Mention concrete tasks, not just app names. Be encouraging but honest.";
+
+/// Shared closing instruction for the daily-summary prompts.
+pub const DAILY_PROMPT_OUTRO: &str = "Write a concise daily summary. Focus on what was accomplished, not just what apps were used. \
+    If you can identify specific tasks (coding, writing, browsing topics), mention them.";
+
+/// Opening instruction for the OCR-backed daily recap.
+pub const RICH_DAILY_PROMPT_INTRO: &str = "You are analyzing a user's desktop activity for one day, \
+    reconstructed from OCR text of periodic screenshots. Write a daily recap in markdown.";
+
+/// Closing instruction for the OCR-backed daily recap.
+pub const RICH_DAILY_PROMPT_OUTRO: &str = "Open with a 1-2 sentence narrative lead summarizing the day, \
+    then a bulleted list of the concrete tasks and threads you can identify, grouped by project or topic. \
+    Bold the key task in each bullet. Name specific work (files, topics, people, sites) drawn from the \
+    on-screen content — not just app names. Be specific and honest; omit apps you cannot tie to a real activity.";
+
+/// System prompt for meeting-transcript summarization (daemon postprocess).
+pub const MEETING_SUMMARY_SYSTEM_PROMPT: &str =
+    "You are a meeting assistant. Write a concise summary of the \
+     meeting, then a bulleted list of any action items.";
+
 /// Prompt that asks the model to classify a query into a `QueryIntent` JSON.
 pub const QUERY_ANALYSIS_PROMPT: &str = r#"You are a query analyzer for a screen capture search system. The system captures screenshots periodically and runs OCR on them. Given a user's question, extract structured search parameters so we can find relevant screenshots.
 
@@ -64,5 +89,16 @@ mod tests {
     fn query_analysis_prompt_requests_json_fields() {
         assert!(QUERY_ANALYSIS_PROMPT.contains("category"));
         assert!(QUERY_ANALYSIS_PROMPT.contains("search_terms"));
+    }
+
+    #[test]
+    fn meeting_prompt_mentions_action_items() {
+        assert!(MEETING_SUMMARY_SYSTEM_PROMPT.contains("action items"));
+    }
+
+    #[test]
+    fn daily_prompts_present() {
+        assert!(!DAILY_PROMPT_INTRO.is_empty());
+        assert!(!RICH_DAILY_PROMPT_INTRO.is_empty());
     }
 }
