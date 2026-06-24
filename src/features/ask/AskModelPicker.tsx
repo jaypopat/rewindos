@@ -16,7 +16,7 @@ import { Button } from "@/components/ui/button";
 import { getConfig, chatListModels, claudeDetect } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import { CLAUDE_MODELS, resolveChatRoute } from "@/lib/claude-models";
-import { useAskChat } from "@/context/AskContext";
+import { useAskChat } from "@/features/ask/AskContext";
 import { cn } from "@/lib/utils";
 
 export function AskModelPicker() {

@@ -14,7 +14,7 @@ import {
 } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
-import { useAskChat } from "@/context/AskContext";
+import { useAskChat } from "@/features/ask/AskContext";
 import { useRename } from "@/hooks/useRename";
 
 type Bucket = { label: string; chats: Chat[] };

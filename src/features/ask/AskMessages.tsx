@@ -30,7 +30,7 @@ import { parseTextWithRefs, collectRefs } from "@/lib/citations";
 import { CitationChip } from "./CitationChip";
 import { CitationSources } from "./CitationSources";
 import { MessageActions } from "./MessageActions";
-import { useAskChat } from "@/context/AskContext";
+import { useAskChat } from "@/features/ask/AskContext";
 
 interface AskMessagesProps {
   rows: ChatMessageRow[];

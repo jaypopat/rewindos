@@ -1,7 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { AskProvider } from "./context/AskContext";
+import { AskProvider } from "./features/ask/AskContext";
 import { OnboardingProvider } from "@/features/onboarding/OnboardingContext";
 import { TourProvider } from "@/features/tour/TourContext";
 import App from "./App";

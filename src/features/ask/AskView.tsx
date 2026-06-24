@@ -5,7 +5,7 @@ import { Loader2, Paperclip, PanelLeftClose, PanelLeftOpen, Plus } from "lucide-
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { queryKeys } from "@/lib/query-keys";
 import { chatHealthCheck, claudeDetect, getConfig, getScreenshotsByIds, listChats } from "@/lib/api";
-import { useAskChat } from "@/context/AskContext";
+import { useAskChat } from "@/features/ask/AskContext";
 import { Button } from "@/components/ui/button";
 import { AskMessages } from "./AskMessages";
 import { AskEmptyState } from "./AskEmptyState";
