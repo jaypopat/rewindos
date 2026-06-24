@@ -18,6 +18,28 @@ const DAILY_PROMPT_INTRO: &str = "You are an AI assistant analyzing a user's des
 const DAILY_PROMPT_OUTRO: &str = "Write a concise daily summary. Focus on what was accomplished, not just what apps were used. \
     If you can identify specific tasks (coding, writing, browsing topics), mention them.";
 
+/// Opening instruction for the OCR-backed daily recap (the in-app History
+/// digest fallback when no agentic tool path is available). Asks for a richer,
+/// structured markdown recap than the terse [`DAILY_PROMPT_INTRO`].
+const RICH_DAILY_PROMPT_INTRO: &str = "You are analyzing a user's desktop activity for one day, \
+    reconstructed from OCR text of periodic screenshots. Write a daily recap in markdown.";
+
+/// Closing instruction for the OCR-backed daily recap. Defines the markdown shape.
+const RICH_DAILY_PROMPT_OUTRO: &str = "Open with a 1-2 sentence narrative lead summarizing the day, \
+    then a bulleted list of the concrete tasks and threads you can identify, grouped by project or topic. \
+    Bold the key task in each bullet. Name specific work (files, topics, people, sites) drawn from the \
+    on-screen content — not just app names. Be specific and honest; omit apps you cannot tie to a real activity.";
+
+/// Max apps named in the OCR-recap "App usage" line.
+const MAX_APPS_LISTED: usize = 15;
+/// Max chars of OCR kept per session snippet in the OCR recap.
+const SNIPPET_CHARS: usize = 300;
+/// Max chars of joined OCR kept per app group in the OCR recap.
+const GROUP_OCR_CHARS: usize = 1500;
+/// Overall ceiling on the activity-log section so the prompt stays bounded
+/// regardless of how long the day was.
+const TOTAL_CONTEXT_CHARS: usize = 14000;
+
 /// Structured inputs for the deterministic, no-LLM fallback digest.
 #[derive(Debug, Clone)]
 pub struct DigestInput {
@@ -97,7 +119,7 @@ pub fn build_daily_prompt(app_breakdown: &[AppEntry], sessions: &[SessionRow]) -
     // --- app summary line ---
     let app_summary_text = app_breakdown
         .iter()
-        .take(8)
+        .take(MAX_APPS_LISTED)
         .map(|a| {
             format!(
                 "{}: {:.0}min ({} sessions)",
@@ -107,11 +129,42 @@ pub fn build_daily_prompt(app_breakdown: &[AppEntry], sessions: &[SessionRow]) -
         .collect::<Vec<_>>()
         .join(", ");
 
-    // --- activity context lines (grouped by app, identical logic to Tauri) ---
+    // --- activity context lines, grouped by consecutive app ---
+    // Format one app group: up to 3 window titles plus its OCR snippets joined
+    // and capped. None for an empty group.
+    let format_group = |app: &str, titles: &[String], snippets: &[String]| -> Option<String> {
+        if titles.is_empty() && snippets.is_empty() {
+            return None;
+        }
+        let titles: Vec<&str> = titles.iter().take(3).map(|s| s.as_str()).collect();
+        let content: String = snippets.join(" ").chars().take(GROUP_OCR_CHARS).collect();
+        Some(format!(
+            "- {app}: windows [{}], content: \"{}\"",
+            titles.join(", "),
+            content,
+        ))
+    };
+
     let mut context_lines: Vec<String> = Vec::new();
+    let mut total_chars = 0usize;
     let mut current_group_app: Option<String> = None;
     let mut group_titles: Vec<String> = Vec::new();
     let mut group_ocr_snippets: Vec<String> = Vec::new();
+
+    // Push a finished group's line, respecting the overall context budget.
+    let flush = |app: &str,
+                 titles: &[String],
+                 snippets: &[String],
+                 lines: &mut Vec<String>,
+                 total: &mut usize| {
+        if *total >= TOTAL_CONTEXT_CHARS {
+            return;
+        }
+        if let Some(line) = format_group(app, titles, snippets) {
+            *total += line.len();
+            lines.push(line);
+        }
+    };
 
     for row in sessions {
         let name = row
@@ -121,17 +174,13 @@ pub fn build_daily_prompt(app_breakdown: &[AppEntry], sessions: &[SessionRow]) -
 
         if current_group_app.as_deref() != Some(&name) {
             if let Some(prev_app) = &current_group_app {
-                let titles: Vec<&str> = group_titles.iter().take(3).map(|s| s.as_str()).collect();
-                let snippet = group_ocr_snippets
-                    .join(" ")
-                    .chars()
-                    .take(200)
-                    .collect::<String>();
-                context_lines.push(format!(
-                    "- {prev_app}: windows [{}], content: \"{}\"",
-                    titles.join(", "),
-                    snippet,
-                ));
+                flush(
+                    prev_app,
+                    &group_titles,
+                    &group_ocr_snippets,
+                    &mut context_lines,
+                    &mut total_chars,
+                );
             }
             current_group_app = Some(name);
             group_titles.clear();
@@ -143,28 +192,25 @@ pub fn build_daily_prompt(app_breakdown: &[AppEntry], sessions: &[SessionRow]) -
                 group_titles.push(title.clone());
             }
         }
-        let snippet: String = row.ocr_text.chars().take(100).collect();
-        if !snippet.trim().is_empty() {
+        let snippet: String = row.ocr_text.chars().take(SNIPPET_CHARS).collect();
+        // Dedup consecutive near-identical captures: consecutive screenshots
+        // share near-identical OCR, so skip a snippet equal to the previous one.
+        if !snippet.trim().is_empty() && group_ocr_snippets.last() != Some(&snippet) {
             group_ocr_snippets.push(snippet);
         }
     }
     if let Some(prev_app) = &current_group_app {
-        let titles: Vec<&str> = group_titles.iter().take(3).map(|s| s.as_str()).collect();
-        let snippet = group_ocr_snippets
-            .join(" ")
-            .chars()
-            .take(200)
-            .collect::<String>();
-        context_lines.push(format!(
-            "- {prev_app}: windows [{}], content: \"{}\"",
-            titles.join(", "),
-            snippet,
-        ));
+        flush(
+            prev_app,
+            &group_titles,
+            &group_ocr_snippets,
+            &mut context_lines,
+            &mut total_chars,
+        );
     }
 
-    // --- prompt (wording identical to src-tauri) ---
     format!(
-        "{DAILY_PROMPT_INTRO}\n\nApp usage: {app_summary_text}\n\nActivity log:\n{}\n\n{DAILY_PROMPT_OUTRO}",
+        "{RICH_DAILY_PROMPT_INTRO}\n\nApp usage: {app_summary_text}\n\nActivity log:\n{}\n\n{RICH_DAILY_PROMPT_OUTRO}",
         context_lines.join("\n"),
     )
 }
@@ -250,7 +296,7 @@ fn clean_summary_text(raw: &str) -> Option<String> {
 /// `Ok(None)` = the model responded but produced nothing usable.
 pub async fn try_generate_summary(prompt: &str, chat: &ChatConfig) -> Result<Option<String>> {
     let client = crate::chat::ChatClient::new(chat);
-    let text = client.complete(prompt, 512, 0.7).await?;
+    let text = client.complete(prompt, 1024, 0.7).await?;
     Ok(clean_summary_text(&text))
 }
 
@@ -405,7 +451,93 @@ mod tests {
         assert!(prompt.contains("VS Code: 120min (3 sessions)"));
         assert!(prompt.contains("Slack: 30min (5 sessions)"));
         assert!(prompt.contains("main.rs"));
-        assert!(prompt.contains("productivity summary"));
+        assert!(prompt.contains("markdown"));
+    }
+
+    #[test]
+    fn build_daily_prompt_uses_rich_markdown_instructions() {
+        let apps = vec![AppEntry {
+            app_name: "VS Code".into(),
+            minutes: 60.0,
+            session_count: 1,
+        }];
+        let sessions = vec![SessionRow {
+            app_name: Some("VS Code".into()),
+            window_title: Some("main.rs".into()),
+            ocr_text: "fn main".into(),
+        }];
+        let prompt = build_daily_prompt(&apps, &sessions);
+        assert!(prompt.contains("markdown"), "rich path asks for markdown: {prompt}");
+        assert!(
+            prompt.to_lowercase().contains("bullet"),
+            "asks for bulleted tasks: {prompt}"
+        );
+        assert!(
+            !prompt.contains("3-5 sentences"),
+            "no longer the terse 3-5 sentence instruction"
+        );
+    }
+
+    #[test]
+    fn build_daily_prompt_dedups_consecutive_identical_ocr() {
+        let apps = vec![AppEntry {
+            app_name: "VS Code".into(),
+            minutes: 60.0,
+            session_count: 1,
+        }];
+        let dup = "the exact same screen content captured repeatedly";
+        let sessions: Vec<SessionRow> = (0..20)
+            .map(|_| SessionRow {
+                app_name: Some("VS Code".into()),
+                window_title: Some("main.rs".into()),
+                ocr_text: dup.into(),
+            })
+            .collect();
+        let prompt = build_daily_prompt(&apps, &sessions);
+        assert_eq!(
+            prompt.matches(dup).count(),
+            1,
+            "identical consecutive OCR should be deduped to one: {prompt}"
+        );
+    }
+
+    #[test]
+    fn build_daily_prompt_includes_more_than_eight_apps() {
+        let apps: Vec<AppEntry> = (0..12)
+            .map(|i| AppEntry {
+                app_name: format!("App{i}"),
+                minutes: (100 - i) as f64,
+                session_count: 1,
+            })
+            .collect();
+        let prompt = build_daily_prompt(&apps, &[]);
+        assert!(prompt.contains("App8"), "9th app should be listed: {prompt}");
+        assert!(prompt.contains("App11"), "12th app should be listed: {prompt}");
+    }
+
+    #[test]
+    fn build_daily_prompt_caps_total_context() {
+        let apps: Vec<AppEntry> = (0..30)
+            .map(|i| AppEntry {
+                app_name: format!("App{i}"),
+                minutes: 10.0,
+                session_count: 1,
+            })
+            .collect();
+        let big = "x".repeat(5000);
+        let sessions: Vec<SessionRow> = (0..30)
+            .map(|i| SessionRow {
+                app_name: Some(format!("App{i}")),
+                window_title: Some("w".into()),
+                ocr_text: big.clone(),
+            })
+            .collect();
+        let prompt = build_daily_prompt(&apps, &sessions);
+        assert!(
+            prompt.len() < 20000,
+            "context should be capped, got {} chars",
+            prompt.len()
+        );
     }
 
     #[test]

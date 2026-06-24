@@ -183,10 +183,14 @@ pub async fn ask_claude_stream_spawn(
         .map_err(|e| format!("spawn claude: {e}"))
 }
 
-/// One-shot Claude invocation for pure text generation (summaries, captions).
-/// No MCP tools, no streaming, no resumable session — just prompt in, text out.
-pub async fn ask_claude_oneshot(
+/// One-shot Claude invocation *with* the rewindos MCP tools enabled — same
+/// agentic retrieval the Ask feature uses, collected to a single string.
+/// Used for the daily digest so it matches Ask quality: Claude drives
+/// `search_screenshots`/`get_timeline`/`get_screenshot_detail` itself instead
+/// of being handed a pre-truncated OCR dump. No streaming, no resumable session.
+pub async fn ask_claude_oneshot_with_tools(
     prompt: &str,
+    system_prompt: &str,
     model: Option<&str>,
     timeout: std::time::Duration,
 ) -> Result<String, String> {
@@ -196,11 +200,18 @@ pub async fn ask_claude_oneshot(
         .arg(prompt)
         .arg("--output-format")
         .arg("text")
-        // Summaries need no tools — disable MCP to keep it a single LLM call.
-        .arg("--disallowedTools")
-        .arg("*");
+        .arg("--append-system-prompt")
+        .arg(system_prompt)
+        // Pre-approve our own MCP server's tools; `-p` mode has no TTY for
+        // interactive approval. Scoped to rewindos — other servers still gate.
+        .arg("--allowedTools")
+        .arg("mcp__rewindos__*");
     if let Some(m) = model {
         cmd.arg("--model").arg(m);
+    }
+
+    if let Some(cwd) = pinned_claude_cwd() {
+        cmd.current_dir(cwd);
     }
 
     let child = cmd

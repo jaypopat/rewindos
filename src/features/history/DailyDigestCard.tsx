@@ -1,4 +1,5 @@
 import { useState } from "react";
+import Markdown from "markdown-to-jsx";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getDailySummary } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
@@ -26,6 +27,22 @@ function timeAgo(isoStr: string): string {
   return `${days}d ago`;
 }
 
+// Compact markdown styling for the agentic digest recap (narrative + bullets).
+const digestMarkdownOptions = {
+  forceBlock: true,
+  overrides: {
+    p: { props: { className: "mb-2 last:mb-0" } },
+    ul: { props: { className: "list-disc pl-4 space-y-1 mb-2 last:mb-0" } },
+    ol: { props: { className: "list-decimal pl-4 space-y-1 mb-2 last:mb-0" } },
+    li: { props: { className: "leading-relaxed" } },
+    strong: { props: { className: "font-medium text-text-primary" } },
+    h1: { props: { className: "text-sm font-semibold text-text-primary mb-1.5" } },
+    h2: { props: { className: "text-sm font-semibold text-text-primary mb-1.5" } },
+    h3: { props: { className: "text-sm font-semibold text-text-primary mb-1.5" } },
+    a: { props: { className: "text-accent underline" } },
+  },
+} as const;
+
 export function DailyDigestCard({
   dateKey,
   startTime,
@@ -42,6 +59,8 @@ export function DailyDigestCard({
     queryFn: () => getDailySummary(startTime, endTime),
     staleTime: 5 * 60_000,
     enabled: isExpanded,
+    // The recap generates in the background; poll until it lands.
+    refetchInterval: (query) => (query.state.data?.generating ? 4000 : false),
   });
 
   const handleRegenerate = async () => {
@@ -100,8 +119,15 @@ export function DailyDigestCard({
             <>
               {/* AI Summary */}
               {data.summary ? (
-                <p className="text-sm text-text-secondary leading-relaxed">
-                  {data.summary}
+                <div className="text-sm text-text-secondary leading-relaxed">
+                  <Markdown options={digestMarkdownOptions}>
+                    {data.summary}
+                  </Markdown>
+                </div>
+              ) : data.generating ? (
+                <p className="flex items-center gap-2 text-sm text-text-muted italic">
+                  <Sparkles className="h-3.5 w-3.5 animate-pulse" />
+                  Writing your recap…
                 </p>
               ) : (
                 <p className="text-sm text-text-muted italic">

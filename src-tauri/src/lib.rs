@@ -47,6 +47,10 @@ struct AppState {
     claude_pids: Arc<tokio::sync::Mutex<HashMap<String, u32>>>,
     chat_cancel_flags: Arc<tokio::sync::Mutex<HashMap<String, Arc<std::sync::atomic::AtomicBool>>>>,
     audio_server: Option<audio_server::AudioServer>,
+    /// Daily-summary dates currently generating in the background, each holding
+    /// the precomputed (app_breakdown, screenshot_count) so polls can render
+    /// without recomputing or surfacing a stale cache mid-regeneration.
+    daily_summary_in_flight: Arc<tokio::sync::Mutex<HashMap<String, (Vec<AppTimeEntry>, i64)>>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -677,6 +681,9 @@ struct DailySummary {
     cached: bool,
     generated_at: Option<String>,
     screenshot_count: i64,
+    /// True when the recap is being generated in the background — the client
+    /// polls until `summary` is populated. `app_breakdown` is already usable.
+    generating: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -687,8 +694,47 @@ struct AppTimeEntry {
 }
 
 
+/// Produce the daily recap text: agentic (Claude driving the rewindos MCP
+/// tools, same engine as Ask) when Claude Code + MCP is available, else the
+/// un-starved chat-provider fallback. Returns `(text, model_used)`.
+///
+/// Runs in a background task, so the 600s timeout is only a hung-process safety
+/// net — not a UX budget. The agentic call's latency is variable (external API
+/// + rate limits), which is exactly why generation is off the request path.
+async fn produce_daily_summary(
+    date_key: &str,
+    start_time: i64,
+    end_time: i64,
+    fallback_prompt: &str,
+    chat_cfg: &rewindos_core::config::ChatConfig,
+) -> (Option<String>, String) {
+    let claude_status = claude_code::detect();
+    if claude_status.available && claude_status.mcp_registered {
+        let agentic_prompt = format!(
+            "Summarize what the user did on {date_key} (epoch second range {start_time}..{end_time}). \
+             Use your tools to retrieve that day's screen activity, then write the recap."
+        );
+        match claude_code::ask_claude_oneshot_with_tools(
+            &agentic_prompt,
+            DAILY_DIGEST_SYSTEM_PROMPT,
+            None,
+            std::time::Duration::from_secs(600),
+        )
+        .await
+        {
+            Ok(text) => return (Some(text), "claude-code".to_string()),
+            Err(e) => warn!("agentic digest failed, falling back to chat provider: {e}"),
+        }
+    }
+    (
+        rewindos_core::summary::generate_summary(fallback_prompt, chat_cfg).await,
+        chat_cfg.model.clone(),
+    )
+}
+
 #[tauri::command]
 async fn get_daily_summary(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     start_time: i64,
     end_time: i64,
@@ -703,6 +749,29 @@ async fn get_daily_summary(
         let local = dt.with_timezone(&chrono::Local);
         local.format("%Y-%m-%d").to_string()
     };
+
+    // If a recap for this date is already generating, report it (with the
+    // stashed breakdown) — before the cache read, so a poll during a forced
+    // regenerate doesn't surface the stale cached recap and stop polling.
+    if let Some((breakdown, shots)) = state
+        .daily_summary_in_flight
+        .lock()
+        .await
+        .get(&date_key)
+        .cloned()
+    {
+        let total = breakdown.iter().map(|a| a.session_count).sum();
+        return Ok(DailySummary {
+            summary: None,
+            app_breakdown: breakdown,
+            total_sessions: total,
+            time_range: format!("{start_time}-{end_time}"),
+            cached: false,
+            generated_at: None,
+            screenshot_count: shots,
+            generating: true,
+        });
+    }
 
     // Check cache first
     if !force {
@@ -746,6 +815,7 @@ async fn get_daily_summary(
                     cached: true,
                     generated_at: Some(cached.generated_at),
                     screenshot_count: cached.screenshot_count,
+                    generating: false,
                 });
             }
         }
@@ -772,6 +842,7 @@ async fn get_daily_summary(
             cached: false,
             generated_at: None,
             screenshot_count: 0,
+            generating: false,
         });
     }
 
@@ -840,7 +911,10 @@ async fn get_daily_summary(
         .collect();
     let prompt = rewindos_core::summary::build_daily_prompt(&prompt_app_entries, &prompt_session_rows);
 
-    // 4. Generate summary — prefer Claude when available, fall back to chat provider
+    // 4. Generate in the background and return immediately — never block the
+    //    view on the variable-latency agentic call. Stash the breakdown under
+    //    the in-flight guard so polls render without recompute; the spawned
+    //    task writes the cache on success and clears the guard.
     let chat_cfg = {
         let cfg = state
             .config
@@ -849,59 +923,49 @@ async fn get_daily_summary(
         cfg.chat.clone()
     };
 
-    let claude_status = claude_code::detect();
-    let try_claude = claude_status.available && claude_status.mcp_registered;
-
-    let (summary_text, model_used): (Option<String>, String) = if try_claude {
-        match claude_code::ask_claude_oneshot(
-            &prompt,
-            None,
-            std::time::Duration::from_secs(180),
-        )
+    state
+        .daily_summary_in_flight
+        .lock()
         .await
-        {
-            Ok(text) => (Some(text), "claude-code".to_string()),
-            Err(e) => {
-                warn!("claude one-shot failed, falling back to chat provider: {e}");
-                (
-                    rewindos_core::summary::generate_summary(&prompt, &chat_cfg).await,
-                    chat_cfg.model.clone(),
-                )
+        .insert(date_key.clone(), (app_breakdown.clone(), screenshot_count));
+
+    let app_breakdown_json = serde_json::to_string(&app_breakdown).unwrap_or_default();
+    let task_app = app.clone();
+    let task_date = date_key.clone();
+    tauri::async_runtime::spawn(async move {
+        let (summary_text, model_used) =
+            produce_daily_summary(&task_date, start_time, end_time, &prompt, &chat_cfg).await;
+
+        let state = task_app.state::<AppState>();
+        // Only cache if a backend produced a summary — don't persist failures.
+        if let Some(text) = summary_text {
+            let generated_at = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
+            if let Ok(db) = state.db.lock() {
+                let _ = db.set_daily_summary_cache(&CachedDailySummary {
+                    date_key: task_date.clone(),
+                    summary_text: Some(text),
+                    app_breakdown: app_breakdown_json,
+                    total_sessions: total_sessions as i64,
+                    time_range: format!("{start_time}-{end_time}"),
+                    model_name: Some(model_used),
+                    generated_at,
+                    screenshot_count,
+                });
             }
         }
-    } else {
-        (
-            rewindos_core::summary::generate_summary(&prompt, &chat_cfg).await,
-            chat_cfg.model.clone(),
-        )
-    };
-
-    let generated_at = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
-
-    // 5. Only cache if a backend produced a summary — don't persist failures
-    if summary_text.is_some() {
-        let app_breakdown_json = serde_json::to_string(&app_breakdown).unwrap_or_default();
-        let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
-        let _ = db.set_daily_summary_cache(&CachedDailySummary {
-            date_key: date_key.clone(),
-            summary_text: summary_text.clone(),
-            app_breakdown: app_breakdown_json,
-            total_sessions: total_sessions as i64,
-            time_range: format!("{start_time}-{end_time}"),
-            model_name: Some(model_used),
-            generated_at: generated_at.clone(),
-            screenshot_count,
-        });
-    }
+        state.daily_summary_in_flight.lock().await.remove(&task_date);
+        let _ = task_app.emit("daily-summary-ready", &task_date);
+    });
 
     Ok(DailySummary {
-        summary: summary_text,
+        summary: None,
         app_breakdown,
         total_sessions,
         time_range: format!("{start_time}-{end_time}"),
         cached: false,
-        generated_at: Some(generated_at),
+        generated_at: None,
         screenshot_count,
+        generating: true,
     })
 }
 
@@ -940,6 +1004,23 @@ Answer directly. No preamble. No outline scaffolding. No "insight" blocks. No he
 When referencing a screenshot you retrieved via a tool, include its id inline as [REF:ID]. Be specific about timestamps, app names, window titles.
 
 If the context has no relevant data, say "I don't have enough screen history for that time period." Do not fabricate."#;
+
+/// System prompt for the agentic daily-digest. Self-contained (does not reuse
+/// `SYSTEM_PROMPT_FOR_CLAUDE`) so it can omit the `[REF:ID]` instruction: the
+/// recap is shown as a static card and written verbatim into the exported
+/// Obsidian/Logseq vault note (both share the same cache), where `[REF:ID]`
+/// markers render as meaningless literal text.
+const DAILY_DIGEST_SYSTEM_PROMPT: &str = "You are RewindOS, generating a daily activity recap from the user's screen \
+capture history. Use your MCP tools (search_screenshots, get_timeline, get_app_usage, get_screenshot_detail, \
+get_recent_activity, search_transcripts) to retrieve the day's activity before writing. For meetings, calls, or \
+conversations use search_transcripts (recorded transcripts where \"You\" is the user and \"Remote\" is the other party).\n\n\
+Output only the recap itself — no preamble, no commentary about the data, no sign-off, no horizontal-rule (---) \
+separators. Write it as markdown: open directly with a 1-2 sentence narrative lead, then a bulleted list of the concrete \
+tasks and threads grouped by project or topic, bolding the key task in each bullet. Name specific work (files, topics, people, \
+sites) — not just app names. Keep it tight; omit anything you cannot tie to a real activity. Write plain prose and \
+bullets — do NOT include [REF:ID] markers or screenshot ids; this recap is shown as a static note and exported to a \
+vault file.\n\n\
+If there is no relevant data, say \"I don't have enough screen history for that day.\" Do not fabricate.";
 
 #[tauri::command]
 async fn ask_claude(
@@ -1924,6 +2005,7 @@ pub fn run() {
                 claude_pids: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
                 chat_cancel_flags: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
                 audio_server,
+                daily_summary_in_flight: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             });
 
             // Register Ctrl+Shift+Space global shortcut

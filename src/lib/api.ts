@@ -212,6 +212,8 @@ export interface DailySummary {
   cached: boolean;
   generated_at: string | null;
   screenshot_count: number;
+  /** True while the recap generates in the background; poll until summary fills in. */
+  generating: boolean;
 }
 
 export async function getDailySummary(
