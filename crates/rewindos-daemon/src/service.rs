@@ -544,7 +544,7 @@ pub async fn run_export(
     // Real capture cadence (clamped ≥ 1) so on-screen/app stats aren't skewed
     // for users who changed capture.interval_seconds.
     let capture_interval_secs = (config.capture.interval_seconds as i64).max(1);
-    let (mut mem, cached, screenshot_count) = tokio::task::spawn_blocking(move || {
+    let (mut mem, cached, screenshot_count, sessions) = tokio::task::spawn_blocking(move || {
         let db = lock_db(&db_clone);
         let mem = DayMemory::for_date(
             &db,
@@ -565,7 +565,13 @@ pub async fn run_export(
         let screenshot_count = db
             .get_screenshot_count_in_range(day_start, day_end)
             .unwrap_or(0);
-        anyhow::Ok((mem, cached, screenshot_count))
+        // OCR sessions power the rich recap — the same data the in-app History
+        // summary uses, so the vault note is generated from on-screen content
+        // rather than bare app-usage stats.
+        let sessions = db
+            .get_ocr_sessions(day_start, day_end, 500)
+            .unwrap_or_default();
+        anyhow::Ok((mem, cached, screenshot_count, sessions))
     })
     .await??;
 
@@ -584,41 +590,46 @@ pub async fn run_export(
             app_minutes: mem.stats.app_minutes.clone(),
             meeting_count: mem.meetings.len(),
         };
-        let prompt = summary::build_daily_prompt_from_memory(&mem);
-        let was_cached = cached.is_some();
-        let (recap, is_ai) = summary::resolve_recap(cached, &config.chat, &prompt, &digest).await;
-        if is_ai && !was_cached {
-            // Freshly generated — cache it so the app and re-renders reuse it.
-            // Never cache the digest tier: a cached digest would read as a
-            // non-upgradeable AI summary. Field shapes mirror the Tauri app's
-            // `set_daily_summary_cache` writer (its reader trusts this cache for
-            // past days): `app_breakdown` is a JSON array of AppTimeEntry
-            // {app_name, minutes, session_count}, `time_range` is "{start}-{end}"
-            // unix seconds.
-            let app_breakdown = serde_json::to_string(
-                &mem.stats
-                    .app_minutes
-                    .iter()
-                    .map(|(app_name, minutes)| {
-                        serde_json::json!({
-                            "app_name": app_name,
-                            "minutes": *minutes as f64,
-                            "session_count": 0,
-                        })
-                    })
-                    .collect::<Vec<_>>(),
-            )
-            .unwrap_or_else(|_| "[]".to_string());
-            let entry = CachedDailySummary {
-                date_key: date.to_string(),
-                summary_text: Some(recap.clone()),
-                app_breakdown,
-                total_sessions: 0,
-                time_range: format!("{day_start}-{day_end}"),
-                model_name: Some(config.chat.model.clone()),
-                generated_at: chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string(),
-                screenshot_count,
-            };
+
+        // Build the recap from the same OCR-derived inputs as the in-app
+        // History summary so the vault note matches it (shared cache, shared
+        // `build_rich_daily`). With no OCR for the day there is nothing concrete
+        // to recap, so reuse any cached recap or fall back to the digest rather
+        // than asking the model to invent one from bare stats.
+        let (recap, fresh_cache_entry) = if sessions.is_empty() {
+            match cached {
+                Some(c) => (c, None),
+                None => (summary::build_digest(&digest), None),
+            }
+        } else {
+            let rich = summary::build_rich_daily(&sessions, capture_interval_secs as f64);
+            let was_cached = cached.is_some();
+            let (recap, is_ai) =
+                summary::resolve_recap(cached, &config.chat, &rich.prompt, &digest).await;
+            // Cache only a freshly generated AI recap. Never cache the digest
+            // tier: a cached digest would read as a non-upgradeable AI summary.
+            // Field shapes mirror the Tauri app's `set_daily_summary_cache`
+            // writer (its reader trusts this cache for past days): `app_breakdown`
+            // is a JSON array of {app_name, minutes, session_count}, `time_range`
+            // is "{start}-{end}" unix seconds.
+            let fresh = (is_ai && !was_cached).then(|| {
+                let app_breakdown = serde_json::to_string(&rich.app_breakdown)
+                    .unwrap_or_else(|_| "[]".to_string());
+                CachedDailySummary {
+                    date_key: date.to_string(),
+                    summary_text: Some(recap.clone()),
+                    app_breakdown,
+                    total_sessions: rich.total_sessions as i64,
+                    time_range: format!("{day_start}-{day_end}"),
+                    model_name: Some(config.chat.model.clone()),
+                    generated_at: chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string(),
+                    screenshot_count,
+                }
+            });
+            (recap, fresh)
+        };
+
+        if let Some(entry) = fresh_cache_entry {
             let db_clone = db.clone();
             tokio::task::spawn_blocking(move || {
                 let db = lock_db(&db_clone);

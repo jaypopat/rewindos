@@ -5,7 +5,6 @@ use std::sync::OnceLock;
 
 use crate::config::ChatConfig;
 use crate::error::Result;
-use crate::vault::gather::DayMemory;
 
 /// Max apps named in the OCR-recap "App usage" line.
 const MAX_APPS_LISTED: usize = 15;
@@ -65,12 +64,101 @@ pub fn build_digest(input: &DigestInput) -> String {
 }
 
 /// A single app entry used when building the daily prompt.
-#[derive(Debug, Clone)]
+///
+/// Field shape (`app_name`, `minutes`, `session_count`) is serialized verbatim
+/// into the `daily_summaries.app_breakdown` cache JSON, so both the in-app and
+/// the daemon-export writers persist identical rows.
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct AppEntry {
     pub app_name: String,
     /// Minutes of screen time (may be fractional, stored as f64 to match Tauri).
     pub minutes: f64,
     pub session_count: usize,
+}
+
+/// One OCR session row as returned by `Database::get_ocr_sessions`:
+/// `(app_name, window_title, timestamp, ocr_text)`.
+pub type OcrSession = (Option<String>, Option<String>, i64, String);
+
+/// The OCR-derived inputs shared by the in-app History summary and the daemon
+/// vault export: the app-time breakdown plus the rich prompt built from it.
+#[derive(Debug, Clone)]
+pub struct RichDailyInputs {
+    /// App-time breakdown, sorted by minutes desc. Serializes directly into the
+    /// `daily_summaries` cache.
+    pub app_breakdown: Vec<AppEntry>,
+    /// Sum of `session_count` across the breakdown.
+    pub total_sessions: usize,
+    /// The rich, OCR-backed daily prompt ready for the chat backend.
+    pub prompt: String,
+}
+
+/// Compute the day's app-time breakdown and the rich OCR prompt from raw OCR
+/// sessions. Single source of truth for the daily recap, called by both the
+/// Tauri in-app summary and the daemon vault export so the two never diverge.
+///
+/// Screen time per app is estimated by walking sessions in time order: a gap to
+/// the previous capture under 60s counts as real elapsed time, otherwise one
+/// capture interval is assumed (mirrors the historical in-app heuristic).
+pub fn build_rich_daily(sessions: &[OcrSession], capture_interval_secs: f64) -> RichDailyInputs {
+    use std::collections::HashMap;
+
+    let mut app_times: HashMap<String, (f64, usize)> = HashMap::new();
+    let mut current_app: Option<String> = None;
+    let mut last_ts = 0i64;
+
+    for (app_name, _window_title, ts, _ocr) in sessions {
+        let name = app_name.clone().unwrap_or_else(|| "Unknown".to_string());
+        let is_same = current_app.as_deref() == Some(&name);
+        let gap = ts - last_ts;
+
+        let secs = if is_same && gap < 60 && gap > 0 {
+            gap as f64
+        } else {
+            capture_interval_secs
+        };
+
+        let entry = app_times.entry(name.clone()).or_insert((0.0, 0));
+        entry.0 += secs;
+        if !is_same {
+            entry.1 += 1;
+        }
+
+        current_app = Some(name);
+        last_ts = *ts;
+    }
+
+    let mut app_breakdown: Vec<AppEntry> = app_times
+        .into_iter()
+        .map(|(app_name, (secs, count))| AppEntry {
+            app_name,
+            minutes: (secs / 60.0 * 10.0).round() / 10.0,
+            session_count: count,
+        })
+        .collect();
+    app_breakdown.sort_by(|a, b| {
+        b.minutes
+            .partial_cmp(&a.minutes)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    let total_sessions = app_breakdown.iter().map(|a| a.session_count).sum();
+
+    let session_rows: Vec<SessionRow> = sessions
+        .iter()
+        .map(|(app_name, window_title, _ts, ocr_text)| SessionRow {
+            app_name: app_name.clone(),
+            window_title: window_title.clone(),
+            ocr_text: ocr_text.clone(),
+        })
+        .collect();
+    let prompt = build_daily_prompt(&app_breakdown, &session_rows);
+
+    RichDailyInputs {
+        app_breakdown,
+        total_sessions,
+        prompt,
+    }
 }
 
 /// A single OCR session row as required for prompt context grouping.
@@ -191,58 +279,6 @@ pub fn build_daily_prompt(app_breakdown: &[AppEntry], sessions: &[SessionRow]) -
         crate::prompts::RICH_DAILY_PROMPT_INTRO,
         context_lines.join("\n"),
         crate::prompts::RICH_DAILY_PROMPT_OUTRO,
-    )
-}
-
-/// Build the day-recap LLM prompt from an already-gathered [`DayMemory`].
-///
-/// Used by the daemon's vault export, where the data section comes from the
-/// memory's stats (on-screen time, peak hour, top apps), meetings, and open
-/// todos. `DayMemory` does not carry OCR sessions, so unlike
-/// [`build_daily_prompt`] there is no per-session activity log — the
-/// instruction wording is shared verbatim.
-pub fn build_daily_prompt_from_memory(mem: &DayMemory) -> String {
-    let stats = &mem.stats;
-    let mut data_lines: Vec<String> = Vec::new();
-
-    let h = stats.on_screen_secs / 3600;
-    let m = (stats.on_screen_secs % 3600) / 60;
-    data_lines.push(format!("- On-screen time: {h}h{m:02}m"));
-
-    if let Some(peak) = stats.peak_hour {
-        data_lines.push(format!("- Busiest hour: {peak:02}:00"));
-    }
-
-    if !stats.app_minutes.is_empty() {
-        let apps = stats
-            .app_minutes
-            .iter()
-            .take(8)
-            .map(|(name, mins)| format!("{name}: {mins}min"))
-            .collect::<Vec<_>>()
-            .join(", ");
-        data_lines.push(format!("- App usage: {apps}"));
-    }
-
-    if !mem.meetings.is_empty() {
-        let meetings = mem
-            .meetings
-            .iter()
-            .map(|mt| format!("{} ({}min)", mt.title, mt.duration_secs / 60))
-            .collect::<Vec<_>>()
-            .join(", ");
-        data_lines.push(format!("- Meetings: {meetings}"));
-    }
-
-    if !stats.todos.is_empty() {
-        data_lines.push(format!("- Open todos: {}", stats.todos.len()));
-    }
-
-    format!(
-        "{}\n\nActivity data:\n{}\n\n{}",
-        crate::prompts::DAILY_PROMPT_INTRO,
-        data_lines.join("\n"),
-        crate::prompts::DAILY_PROMPT_OUTRO,
     )
 }
 
@@ -522,35 +558,48 @@ mod tests {
     }
 
     #[test]
-    fn build_daily_prompt_from_memory_contains_stats_and_meetings() {
-        use crate::vault::gather::{MeetingMemory, StatsMemory};
+    fn build_rich_daily_breaks_down_apps_and_builds_rich_prompt() {
+        // Three captures: two consecutive VS Code (gap 30s counts as real time),
+        // then one Slack (new group → counts the interval).
+        let sessions: Vec<OcrSession> = vec![
+            (Some("VS Code".into()), Some("main.rs".into()), 1000, "fn main() {}".into()),
+            (Some("VS Code".into()), Some("main.rs".into()), 1030, "fn main() {}".into()),
+            (Some("Slack".into()), Some("#general".into()), 2000, "hello team".into()),
+        ];
+        let rich = build_rich_daily(&sessions, 5.0);
 
-        let mem = DayMemory {
-            date_key: "2026-06-10".into(),
-            journal_text: None,
-            recap: None,
-            meetings: vec![MeetingMemory {
-                title: "Standup".into(),
-                started_at: 0,
-                duration_secs: 15 * 60,
-                minutes: None,
-                transcript: vec![],
-            }],
-            moments: vec![],
-            stats: StatsMemory {
-                on_screen_secs: 4 * 3600 + 12 * 60,
-                peak_hour: Some(14),
-                app_minutes: vec![("VS Code".into(), 120), ("Slack".into(), 30)],
-                todos: vec!["ship the export".into()],
-            },
-        };
-        let prompt = build_daily_prompt_from_memory(&mem);
-        assert!(prompt.contains("productivity summary"), "shares the instruction wording");
-        assert!(prompt.contains("On-screen time: 4h12m"));
-        assert!(prompt.contains("Busiest hour: 14:00"));
-        assert!(prompt.contains("VS Code: 120min"));
-        assert!(prompt.contains("Standup (15min)"));
-        assert!(prompt.contains("Open todos: 1"));
-        assert!(prompt.contains("concise daily summary"), "shares the closing instruction");
+        // VS Code: first capture = 5s interval, second = 30s real gap → 35s.
+        let vscode = rich
+            .app_breakdown
+            .iter()
+            .find(|a| a.app_name == "VS Code")
+            .expect("VS Code present");
+        assert_eq!(vscode.session_count, 1, "one consecutive group");
+        assert!((vscode.minutes - (35.0_f64 / 60.0 * 10.0).round() / 10.0).abs() < 1e-9);
+
+        // Rich prompt carries OCR content + window titles, not just app names.
+        assert!(rich.prompt.contains("markdown"));
+        assert!(rich.prompt.contains("main.rs"));
+        assert!(rich.prompt.contains("hello team"));
+        assert_eq!(rich.total_sessions, 2, "VS Code group + Slack group");
+    }
+
+    #[test]
+    fn build_rich_daily_breakdown_serializes_to_cache_shape() {
+        let sessions: Vec<OcrSession> =
+            vec![(Some("Zed".into()), None, 0, "some code on screen".into())];
+        let rich = build_rich_daily(&sessions, 6.0);
+        let json = serde_json::to_string(&rich.app_breakdown).unwrap();
+        // Must match the daily_summaries.app_breakdown JSON contract.
+        assert!(json.contains("\"app_name\":\"Zed\""));
+        assert!(json.contains("\"minutes\":"));
+        assert!(json.contains("\"session_count\":"));
+    }
+
+    #[test]
+    fn build_rich_daily_handles_empty_sessions() {
+        let rich = build_rich_daily(&[], 5.0);
+        assert!(rich.app_breakdown.is_empty());
+        assert_eq!(rich.total_sessions, 0);
     }
 }

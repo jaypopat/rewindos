@@ -845,7 +845,6 @@ async fn get_daily_summary(
         });
     }
 
-    // 2. Build app breakdown from raw session data
     let capture_interval_secs = {
         let cfg = state
             .config
@@ -854,61 +853,21 @@ async fn get_daily_summary(
         cfg.capture.interval_seconds as f64
     };
 
-    let mut app_times: HashMap<String, (f64, usize)> = HashMap::new();
-    let mut current_app: Option<String> = None;
-    let mut last_ts = 0i64;
-
-    for (app_name, _window_title, ts, _ocr) in &sessions {
-        let name = app_name.clone().unwrap_or_else(|| "Unknown".to_string());
-        let is_same = current_app.as_deref() == Some(&name);
-        let gap = ts - last_ts;
-
-        let secs = if is_same && gap < 60 && gap > 0 {
-            gap as f64
-        } else {
-            capture_interval_secs
-        };
-
-        let entry = app_times.entry(name.clone()).or_insert((0.0, 0));
-        entry.0 += secs;
-        if !is_same {
-            entry.1 += 1;
-        }
-
-        current_app = Some(name);
-        last_ts = *ts;
-    }
-
-    let mut app_breakdown: Vec<AppTimeEntry> = app_times
-        .into_iter()
-        .map(|(app_name, (secs, count))| AppTimeEntry {
-            app_name,
-            minutes: (secs / 60.0 * 10.0).round() / 10.0,
-            session_count: count,
-        })
-        .collect();
-    app_breakdown.sort_by(|a, b| b.minutes.partial_cmp(&a.minutes).unwrap());
-
-    let total_sessions = app_breakdown.iter().map(|a| a.session_count).sum();
-
-    // 3. Build prompt for Ollama via the shared core function
-    let prompt_app_entries: Vec<rewindos_core::summary::AppEntry> = app_breakdown
+    // 2-3. App-time breakdown + rich OCR prompt via the shared core function.
+    // The daemon vault export runs this identical code so the in-app History
+    // recap and the Logseq/Obsidian note are generated from the same inputs.
+    let rich = rewindos_core::summary::build_rich_daily(&sessions, capture_interval_secs);
+    let app_breakdown: Vec<AppTimeEntry> = rich
+        .app_breakdown
         .iter()
-        .map(|a| rewindos_core::summary::AppEntry {
+        .map(|a| AppTimeEntry {
             app_name: a.app_name.clone(),
             minutes: a.minutes,
             session_count: a.session_count,
         })
         .collect();
-    let prompt_session_rows: Vec<rewindos_core::summary::SessionRow> = sessions
-        .iter()
-        .map(|(app_name, window_title, _ts, ocr_text)| rewindos_core::summary::SessionRow {
-            app_name: app_name.clone(),
-            window_title: window_title.clone(),
-            ocr_text: ocr_text.clone(),
-        })
-        .collect();
-    let prompt = rewindos_core::summary::build_daily_prompt(&prompt_app_entries, &prompt_session_rows);
+    let total_sessions = rich.total_sessions;
+    let prompt = rich.prompt;
 
     // 4. Generate in the background and return immediately — never block the
     //    view on the variable-latency agentic call. Stash the breakdown under

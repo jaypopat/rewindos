@@ -30,16 +30,6 @@ pub const CORE_SYSTEM_PROMPT: &str = r#"You are RewindOS, a local AI assistant w
 ## Meeting Transcripts
 Context may include meeting transcripts ("You" = the user, "Remote" = the other party). Use them when the question concerns conversations or meetings."#;
 
-/// Shared instruction header for the daily-summary prompts.
-pub const DAILY_PROMPT_INTRO: &str = "You are an AI assistant analyzing a user's desktop activity for the day. \
-    Based on the data below, write a brief productivity summary (3-5 sentences). \
-    Be specific about what the user was working on based on the window titles and screen content. \
-    Mention concrete tasks, not just app names. Be encouraging but honest.";
-
-/// Shared closing instruction for the daily-summary prompts.
-pub const DAILY_PROMPT_OUTRO: &str = "Write a concise daily summary. Focus on what was accomplished, not just what apps were used. \
-    If you can identify specific tasks (coding, writing, browsing topics), mention them.";
-
 /// Opening instruction for the OCR-backed daily recap.
 pub const RICH_DAILY_PROMPT_INTRO: &str = "You are analyzing a user's desktop activity for one day, \
     reconstructed from OCR text of periodic screenshots. Write a daily recap in markdown.";
@@ -101,7 +91,7 @@ mod tests {
 
     #[test]
     fn daily_prompts_present() {
-        assert!(!DAILY_PROMPT_INTRO.is_empty());
         assert!(!RICH_DAILY_PROMPT_INTRO.is_empty());
+        assert!(!RICH_DAILY_PROMPT_OUTRO.is_empty());
     }
 }
