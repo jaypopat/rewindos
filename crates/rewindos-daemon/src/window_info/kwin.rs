@@ -1,10 +1,38 @@
 use std::sync::Mutex;
 
 use async_trait::async_trait;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 use zbus::Connection;
 
 use super::{non_empty, WindowInfo, WindowInfoError, WindowInfoProvider};
+
+const KWIN_SCRIPT_PATH: &str = "/tmp/rewindos-kwin-active-window.js";
+const KWIN_SCRIPT_NAME: &str = "rewindos-window-tracker";
+const KWIN_SCRIPT: &str = r#"
+var reportWindow = function(client) {
+    if (client) {
+        callDBus(
+            "com.rewindos.Daemon",
+            "/com/rewindos/Daemon",
+            "com.rewindos.Daemon",
+            "ReportActiveWindow",
+            client.caption || "",
+            client.resourceClass || "",
+            client.resourceName || ""
+        );
+    }
+};
+
+// KWin exposes different names across Plasma releases and distributions.
+var activationSignal = workspace.windowActivated || workspace.clientActivated;
+if (!activationSignal) {
+    throw new Error("KWin exposes no supported window activation signal");
+}
+activationSignal.connect(reportWindow);
+
+// Report the current active window immediately.
+reportWindow(workspace.activeWindow || workspace.activeClient);
+"#;
 
 /// KWin-based window tracking via a persistent script that sends
 /// D-Bus callbacks on window activation.
@@ -37,37 +65,10 @@ impl KwinWindowInfo {
         );
     }
 
-    async fn load_kwin_script(&self) {
-        let script_path = "/tmp/rewindos-kwin-active-window.js";
-
-        let script_content = r#"
-var reportWindow = function(client) {
-    if (client) {
-        callDBus(
-            "com.rewindos.Daemon",
-            "/com/rewindos/Daemon",
-            "com.rewindos.Daemon",
-            "ReportActiveWindow",
-            client.caption || "",
-            client.resourceClass || "",
-            client.resourceName || ""
-        );
-    }
-};
-
-workspace.windowActivated.connect(reportWindow);
-
-// Report the current active window immediately
-var w = workspace.activeWindow;
-if (w) {
-    reportWindow(w);
-}
-"#;
-
-        if let Err(e) = std::fs::write(script_path, script_content) {
-            warn!(error = %e, "failed to write KWin tracking script");
-            return;
-        }
+    async fn load_kwin_script(&self) -> Result<(), WindowInfoError> {
+        std::fs::write(KWIN_SCRIPT_PATH, KWIN_SCRIPT).map_err(|e| {
+            WindowInfoError::Provider(format!("failed to write KWin tracking script: {e}"))
+        })?;
 
         // Unload any previously loaded instance
         let _ = self
@@ -77,42 +78,30 @@ if (w) {
                 "/Scripting",
                 Some("org.kde.kwin.Scripting"),
                 "unloadScript",
-                &("rewindos-window-tracker",),
+                &(KWIN_SCRIPT_NAME,),
             )
             .await;
 
         // Load the script
-        let reply = match self
+        let reply = self
             .conn
             .call_method(
                 Some("org.kde.KWin"),
                 "/Scripting",
                 Some("org.kde.kwin.Scripting"),
                 "loadScript",
-                &(script_path, "rewindos-window-tracker"),
+                &(KWIN_SCRIPT_PATH, KWIN_SCRIPT_NAME),
             )
             .await
-        {
-            Ok(r) => r,
-            Err(e) => {
-                warn!(error = %e, "failed to load KWin tracking script");
-                return;
-            }
-        };
+            .map_err(|e| WindowInfoError::DBus(format!("failed to load KWin script: {e}")))?;
 
-        let script_id: i32 = match reply.body().deserialize() {
-            Ok(id) => id,
-            Err(e) => {
-                warn!(error = %e, "failed to parse KWin script ID");
-                return;
-            }
-        };
-
-        *self.script_id.lock().unwrap() = Some(script_id);
+        let script_id: i32 = reply
+            .body()
+            .deserialize()
+            .map_err(|e| WindowInfoError::DBus(format!("failed to parse KWin script ID: {e}")))?;
 
         // Start all loaded scripts
-        if let Err(e) = self
-            .conn
+        self.conn
             .call_method(
                 Some("org.kde.KWin"),
                 "/Scripting",
@@ -121,12 +110,33 @@ if (w) {
                 &(),
             )
             .await
-        {
-            warn!(error = %e, "failed to start KWin scripts");
-            return;
+            .map_err(|e| WindowInfoError::DBus(format!("failed to start KWin scripts: {e}")))?;
+
+        let reply = self
+            .conn
+            .call_method(
+                Some("org.kde.KWin"),
+                "/Scripting",
+                Some("org.kde.kwin.Scripting"),
+                "isScriptLoaded",
+                &(KWIN_SCRIPT_NAME,),
+            )
+            .await
+            .map_err(|e| {
+                WindowInfoError::DBus(format!("failed to verify KWin tracking script: {e}"))
+            })?;
+        let loaded: bool = reply.body().deserialize().map_err(|e| {
+            WindowInfoError::DBus(format!("failed to parse KWin script status: {e}"))
+        })?;
+        if !loaded {
+            return Err(WindowInfoError::Provider(
+                "KWin tracking script stopped during startup".to_string(),
+            ));
         }
 
+        *self.script_id.lock().unwrap() = Some(script_id);
         info!("KWin window tracking script loaded (id={script_id})");
+        Ok(())
     }
 
     async fn unload_kwin_script(&self) {
@@ -137,7 +147,7 @@ if (w) {
                 "/Scripting",
                 Some("org.kde.kwin.Scripting"),
                 "unloadScript",
-                &("rewindos-window-tracker",),
+                &(KWIN_SCRIPT_NAME,),
             )
             .await;
 
@@ -165,8 +175,7 @@ impl WindowInfoProvider for KwinWindowInfo {
     }
 
     async fn start(&self) -> Result<(), WindowInfoError> {
-        self.load_kwin_script().await;
-        Ok(())
+        self.load_kwin_script().await
     }
 
     fn current(&self) -> WindowInfo {
@@ -180,5 +189,25 @@ impl WindowInfoProvider for KwinWindowInfo {
 
     fn provides_reliable_metadata(&self) -> bool {
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::KWIN_SCRIPT;
+
+    #[test]
+    fn script_supports_window_api() {
+        assert!(KWIN_SCRIPT.contains("workspace.windowActivated"));
+    }
+
+    #[test]
+    fn script_supports_legacy_client_api() {
+        assert!(KWIN_SCRIPT.contains("workspace.clientActivated"));
+    }
+
+    #[test]
+    fn script_reports_current_window_immediately() {
+        assert!(KWIN_SCRIPT.contains("workspace.activeWindow || workspace.activeClient"));
     }
 }
