@@ -5,7 +5,7 @@
 RewindOS is a privacy-first, local-only screen capture and search tool for Linux/Wayland.
 Core flow: **automated screen capture → OCR indexing → full-text search**, with optional **semantic search** and **AI chat** via Ollama.
 
-All data stays in `~/.rewindos/`. No network requests except optional local Ollama (localhost:11434).
+By default, all captured data stays in `~/.rewindos/`. Network access is limited to configured AI services and, only if the user opts into a non-default meeting transcription engine, sending meeting audio to a self-hosted or third-party transcription endpoint (see `[meeting]` below).
 
 ## System Architecture
 
@@ -335,7 +335,30 @@ temperature = 0.3
 # Custom app→category rules, merged with built-in defaults.
 # rules = { Development = ["code", "zed"], Browsing = ["firefox", "zen"] }
 rules = {}
+
+[meeting]
+enabled = false
+engine = "whisper-cpp"       # whisper-cpp | whisper-cpp-server | openai-compatible
+# Only used when engine != "whisper-cpp":
+service_url = "http://127.0.0.1:8000"   # whisper-cpp-server: native /inference API; openai-compatible: base URL of a /v1/audio/transcriptions-style API
+service_api_key = ""                    # optional bearer token; sent only to openai-compatible (never to whisper-cpp-server)
+service_model = "whisper-1"             # sent as the "model" form field for openai-compatible only
+service_timeout_secs = 120              # per-window HTTP request timeout
+model = "base.en"             # local whisper-cpp GGUF model name (whisper-cpp engine only)
+model_dir = "~/.rewindos/models/whisper"
+keep_audio = true
+summary_enabled = true
+hotkey = "Ctrl+Shift+M"
+sample_rate = 16000
+echo_cancel = true
 ```
+
+**Meeting transcription engines:**
+- `whisper-cpp` (default) — fully local, in-process via `whisper-rs`; no network. Requires a downloaded GGUF model (Settings → Meetings → Download model).
+- `whisper-cpp-server` — sends 16 kHz mono WAV audio windows to a self-hosted [whisper.cpp `whisper-server`](https://github.com/ggml-org/whisper.cpp/tree/master/examples/server) instance's native `/inference` endpoint. No API key is ever sent for this engine.
+- `openai-compatible` — sends audio to any `/v1/audio/transcriptions`-compatible endpoint (e.g. a local `faster-whisper-server`, or a hosted API), with an optional bearer token (`service_api_key`) and `service_model`.
+
+For both remote engines, audio leaves the machine only if the user explicitly switches the engine away from the `whisper-cpp` default — the daemon never does this automatically. Each ~30s audio window is transcribed independently over HTTP; the daemon does not batch or stream raw audio continuously. If a remote request exceeds `service_timeout_secs` or the server is unreachable, that window's transcript is dropped (logged) and capture continues — a meeting is never aborted by a single failed remote call. To avoid unbounded memory growth from a slow/unreachable remote endpoint, the audio-capture queue is bounded (2 pending windows); once full, newly completed windows are dropped rather than blocking capture. This drop-on-full behavior applies only to remote engines; the local `whisper-cpp` engine applies backpressure and does not drop completed windows.
 
 ## Error Handling Strategy
 
@@ -352,4 +375,5 @@ rules = {}
 - Screenshot directory: 0700
 - D-Bus interface only on session bus (user scope, not system)
 - Ollama connection is localhost-only (no external network)
+- Meeting transcription defaults to the fully local `whisper-cpp` engine; the optional `whisper-cpp-server`/`openai-compatible` engines are opt-in and send audio to a user-configured URL (self-hosted or third-party) — the API key for `openai-compatible` is stored in `config.toml` in plaintext, consistent with other config secrets
 - Excluded apps list prevents capture of sensitive windows

@@ -15,6 +15,7 @@ use tracing::{info, warn};
 use crate::capture::audio::AudioCapture;
 use crate::meeting::echo_cancel::{self, EchoCancelGuard};
 use crate::meeting::postprocess;
+use crate::meeting::remote::{RemoteProfile, RemoteTranscriber};
 use crate::meeting::session::{MeetingSession, Transcribe};
 use crate::meeting::whisper::{ensure_model_available, WhisperTranscriber};
 
@@ -111,9 +112,7 @@ async fn start(
     let mut ec_guard: Option<EchoCancelGuard> = None;
     if config.meeting.echo_cancel {
         let master = configured_mic.clone();
-        match tokio::task::spawn_blocking(move || EchoCancelGuard::setup(master.as_deref()))
-            .await
-        {
+        match tokio::task::spawn_blocking(move || EchoCancelGuard::setup(master.as_deref())).await {
             Ok(Ok(guard)) => ec_guard = Some(guard),
             Ok(Err(e)) => warn!(error = %e, "echo-cancel unavailable, recording raw mic"),
             Err(e) => warn!(error = %e, "echo-cancel setup task panicked"),
@@ -174,7 +173,11 @@ async fn start_attempt(
     title: Option<String>,
     mic_source: Option<String>,
 ) -> Result<(i64, AudioCapture, JoinHandle<MeetingSession>, i64), String> {
-    let model_path = ensure_model_available(config).map_err(|e| e.to_string())?;
+    let local_model_path = if config.meeting.engine == "whisper-cpp" {
+        Some(ensure_model_available(config).map_err(|e| e.to_string())?)
+    } else {
+        None
+    };
     let meetings_dir = config.meetings_dir().map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&meetings_dir).map_err(|e| e.to_string())?;
 
@@ -200,13 +203,26 @@ async fn start_attempt(
         .map(|n| n.get() as i32)
         .unwrap_or(4);
     let db_for_session = db.clone();
+    let meeting_config = config.meeting.clone();
 
     // Load the model, open writers, start capture, and spawn the drain worker —
     // all blocking, so do it off the async runtime.
     let setup = tokio::task::spawn_blocking(move || -> Result<_, String> {
-        let transcriber: Arc<dyn Transcribe> = Arc::new(
-            WhisperTranscriber::load(&model_path, n_threads).map_err(|e| e.to_string())?,
-        );
+        let transcriber: Arc<dyn Transcribe> = match meeting_config.engine.as_str() {
+            "whisper-cpp" => Arc::new(
+                WhisperTranscriber::load(local_model_path.as_ref().unwrap(), n_threads)
+                    .map_err(|e| e.to_string())?,
+            ),
+            "openai-compatible" => Arc::new(
+                RemoteTranscriber::new(&meeting_config, RemoteProfile::OpenAi)
+                    .map_err(|e| e.to_string())?,
+            ),
+            "whisper-cpp-server" => Arc::new(
+                RemoteTranscriber::new(&meeting_config, RemoteProfile::WhisperCpp)
+                    .map_err(|e| e.to_string())?,
+            ),
+            other => return Err(format!("unsupported meeting transcription engine: {other}")),
+        };
         let session = MeetingSession::new(
             id,
             db_for_session,
@@ -216,7 +232,9 @@ async fn start_attempt(
             sys_path,
         )
         .map_err(|e| e.to_string())?;
-        let (capture, rx_windows) = AudioCapture::start(mic_source).map_err(|e| e.to_string())?;
+        let drop_windows = meeting_config.engine != "whisper-cpp";
+        let (capture, rx_windows) =
+            AudioCapture::start(mic_source, drop_windows).map_err(|e| e.to_string())?;
 
         // Fail fast if the mic delivers nothing. A working device starts
         // streaming within a few hundred ms; if no bytes arrive at all, the
