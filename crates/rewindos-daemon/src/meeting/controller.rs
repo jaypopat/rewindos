@@ -15,6 +15,7 @@ use tracing::{info, warn};
 use crate::capture::audio::AudioCapture;
 use crate::meeting::echo_cancel::{self, EchoCancelGuard};
 use crate::meeting::postprocess;
+use crate::meeting::remote::{RemoteProfile, RemoteTranscriber};
 use crate::meeting::session::{MeetingSession, Transcribe};
 use crate::meeting::whisper::{ensure_model_available, WhisperTranscriber};
 
@@ -50,6 +51,10 @@ pub enum MeetingCmd {
 
 struct ActiveMeeting {
     meeting_id: i64,
+    /// Configuration captured when this meeting was started. Keeping this
+    /// snapshot here prevents a later settings reload from changing cleanup
+    /// and post-processing for an active meeting.
+    config: Arc<AppConfig>,
     capture: AudioCapture,
     worker: JoinHandle<MeetingSession>,
     ec_guard: Option<EchoCancelGuard>,
@@ -74,20 +79,41 @@ pub async fn run(
     while let Some(cmd) = rx.recv().await {
         match cmd {
             MeetingCmd::Start { title, reply } => {
-                let res = start(&db, &config, &state, &mut active, title).await;
+                // Settings are edited by the UI without notifying the daemon.
+                // Resolve them once per Start command, then pass that immutable
+                // snapshot through all attempts for this meeting.
+                let start_config = load_start_config(&config);
+                let res = start(&db, start_config, &state, &mut active, title).await;
                 let _ = reply.send(res);
             }
             MeetingCmd::Stop { reply } => {
-                let res = stop(&db, &config, &state, &mut active).await;
+                let res = stop(&db, &state, &mut active).await;
                 let _ = reply.send(res);
             }
         }
     }
 }
 
+fn load_start_config(startup_config: &Arc<AppConfig>) -> Arc<AppConfig> {
+    load_start_config_with(startup_config, AppConfig::load)
+}
+
+fn load_start_config_with<F>(startup_config: &Arc<AppConfig>, load: F) -> Arc<AppConfig>
+where
+    F: FnOnce() -> rewindos_core::error::Result<AppConfig>,
+{
+    match load() {
+        Ok(config) => Arc::new(config),
+        Err(e) => {
+            warn!("config reload failed, using startup config: {e:#}");
+            startup_config.clone()
+        }
+    }
+}
+
 async fn start(
     db: &Arc<Mutex<Database>>,
-    config: &Arc<AppConfig>,
+    config: Arc<AppConfig>,
     state: &Arc<MeetingState>,
     active: &mut Option<ActiveMeeting>,
     title: Option<String>,
@@ -111,9 +137,7 @@ async fn start(
     let mut ec_guard: Option<EchoCancelGuard> = None;
     if config.meeting.echo_cancel {
         let master = configured_mic.clone();
-        match tokio::task::spawn_blocking(move || EchoCancelGuard::setup(master.as_deref()))
-            .await
-        {
+        match tokio::task::spawn_blocking(move || EchoCancelGuard::setup(master.as_deref())).await {
             Ok(Ok(guard)) => ec_guard = Some(guard),
             Ok(Err(e)) => warn!(error = %e, "echo-cancel unavailable, recording raw mic"),
             Err(e) => warn!(error = %e, "echo-cancel setup task panicked"),
@@ -125,7 +149,7 @@ async fn start(
         configured_mic.clone()
     };
 
-    let mut attempt = start_attempt(db, config, title.clone(), mic_source).await;
+    let mut attempt = start_attempt(db, &config, title.clone(), mic_source).await;
 
     // If the echo-cancelled source produced no audio (AEC graphs can wedge),
     // tear it down and retry once with the raw mic rather than failing the
@@ -137,7 +161,7 @@ async fn start(
                 if let Some(guard) = ec_guard.take() {
                     let _ = tokio::task::spawn_blocking(move || guard.teardown()).await;
                 }
-                attempt = start_attempt(db, config, title, configured_mic).await;
+                attempt = start_attempt(db, &config, title, configured_mic).await;
             }
         }
     }
@@ -154,6 +178,7 @@ async fn start(
 
     *active = Some(ActiveMeeting {
         meeting_id: id,
+        config,
         capture,
         worker,
         ec_guard,
@@ -174,7 +199,11 @@ async fn start_attempt(
     title: Option<String>,
     mic_source: Option<String>,
 ) -> Result<(i64, AudioCapture, JoinHandle<MeetingSession>, i64), String> {
-    let model_path = ensure_model_available(config).map_err(|e| e.to_string())?;
+    let local_model_path = if config.meeting.engine == "whisper-cpp" {
+        Some(ensure_model_available(config).map_err(|e| e.to_string())?)
+    } else {
+        None
+    };
     let meetings_dir = config.meetings_dir().map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&meetings_dir).map_err(|e| e.to_string())?;
 
@@ -200,13 +229,26 @@ async fn start_attempt(
         .map(|n| n.get() as i32)
         .unwrap_or(4);
     let db_for_session = db.clone();
+    let meeting_config = config.meeting.clone();
 
     // Load the model, open writers, start capture, and spawn the drain worker —
     // all blocking, so do it off the async runtime.
     let setup = tokio::task::spawn_blocking(move || -> Result<_, String> {
-        let transcriber: Arc<dyn Transcribe> = Arc::new(
-            WhisperTranscriber::load(&model_path, n_threads).map_err(|e| e.to_string())?,
-        );
+        let transcriber: Arc<dyn Transcribe> = match meeting_config.engine.as_str() {
+            "whisper-cpp" => Arc::new(
+                WhisperTranscriber::load(local_model_path.as_ref().unwrap(), n_threads)
+                    .map_err(|e| e.to_string())?,
+            ),
+            "openai-compatible" => Arc::new(
+                RemoteTranscriber::new(&meeting_config, RemoteProfile::OpenAi)
+                    .map_err(|e| e.to_string())?,
+            ),
+            "whisper-cpp-server" => Arc::new(
+                RemoteTranscriber::new(&meeting_config, RemoteProfile::WhisperCpp)
+                    .map_err(|e| e.to_string())?,
+            ),
+            other => return Err(format!("unsupported meeting transcription engine: {other}")),
+        };
         let session = MeetingSession::new(
             id,
             db_for_session,
@@ -216,7 +258,9 @@ async fn start_attempt(
             sys_path,
         )
         .map_err(|e| e.to_string())?;
-        let (capture, rx_windows) = AudioCapture::start(mic_source).map_err(|e| e.to_string())?;
+        let drop_windows = meeting_config.engine != "whisper-cpp";
+        let (capture, rx_windows) =
+            AudioCapture::start(mic_source, drop_windows).map_err(|e| e.to_string())?;
 
         // Fail fast if the mic delivers nothing. A working device starts
         // streaming within a few hundred ms; if no bytes arrive at all, the
@@ -267,12 +311,12 @@ async fn start_attempt(
 
 async fn stop(
     db: &Arc<Mutex<Database>>,
-    config: &Arc<AppConfig>,
     state: &Arc<MeetingState>,
     active: &mut Option<ActiveMeeting>,
 ) -> Result<(), String> {
     let ActiveMeeting {
         meeting_id,
+        config,
         capture,
         worker,
         ec_guard,
@@ -301,7 +345,39 @@ async fn stop(
     finalize?;
 
     // Best-effort: embeddings + summary. Does not affect stop success.
-    postprocess::run(db.clone(), config.clone(), meeting_id).await;
+    postprocess::run(db.clone(), config, meeting_id).await;
     info!(meeting_id, "meeting recording stopped");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn start_config_reload_uses_latest_config() {
+        let startup = Arc::new(AppConfig::default());
+        let mut latest = AppConfig::default();
+        latest.meeting.engine = "openai-compatible".to_string();
+
+        let selected = load_start_config_with(&startup, || Ok(latest));
+
+        assert_eq!(selected.meeting.engine, "openai-compatible");
+    }
+
+    #[test]
+    fn start_config_reload_falls_back_to_startup_config() {
+        let mut startup = AppConfig::default();
+        startup.meeting.engine = "whisper-cpp-server".to_string();
+        let startup = Arc::new(startup);
+
+        let selected = load_start_config_with(&startup, || {
+            Err(rewindos_core::error::CoreError::Config(
+                "unreadable".to_string(),
+            ))
+        });
+
+        assert!(Arc::ptr_eq(&selected, &startup));
+        assert_eq!(selected.meeting.engine, "whisper-cpp-server");
+    }
 }

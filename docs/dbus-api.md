@@ -122,7 +122,9 @@ Resumes screen capture after pause.
 ### StartMeeting(title) → i64
 
 Starts recording a meeting: opens mic and system-audio capture streams, begins
-Whisper transcription, and creates a meeting row in the database. `title` may
+transcription with the configured `[meeting].engine` (local `whisper-cpp` by
+default, or a remote `whisper-cpp-server`/`openai-compatible` HTTP service if
+configured), and creates a meeting row in the database. `title` may
 be an empty string (stored as untitled). Returns the new meeting id.
 
 **Request:**
@@ -134,7 +136,19 @@ be an empty string (stored as untitled). Returns the new meeting id.
 **Errors:**
 - `com.rewindos.Error.AlreadyRunning` — a meeting is already being recorded
 - `com.rewindos.Error.ModelNotAvailable` — no Whisper GGUF model is installed
+  (only applies to the `whisper-cpp` engine; remote engines fail per-window
+  instead, see below)
 - `com.rewindos.Error.AudioCaptureFailed` — audio capture streams could not be opened
+
+**Remote engines:** when `engine` is `whisper-cpp-server` or `openai-compatible`,
+each ~30s audio window is sent over HTTP to the configured `service_url`
+instead of being transcribed locally. A failed or timed-out request
+(`service_timeout_secs`, default 120s) drops that window's transcript and logs
+a warning; it does not stop the meeting. Under sustained backpressure (the
+remote endpoint is slow or unreachable) the capture queue holds at most 2
+pending windows and drops newly completed windows rather than blocking audio
+capture — this drop-on-full behavior is remote-engine-only; the local
+`whisper-cpp` engine never drops windows.
 
 ### StopMeeting()
 
