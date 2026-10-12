@@ -87,6 +87,10 @@ async fn spawn_tesseract(image_path: &Path, lang: &str) -> Result<Output> {
         .arg("tsv")
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
+        // A timed-out OCR drops `wait_with_output` but not the child, so the
+        // tesseract process keeps running to completion unconsumed. Repeated
+        // timeouts then stack up and saturate every core.
+        .kill_on_drop(true)
         .spawn()
         .map_err(|e| CoreError::Ocr(format!("failed to spawn tesseract: {e}")))?;
 
