@@ -429,22 +429,16 @@ pub fn resolve_tilde_pub(path: &str) -> Result<PathBuf> {
     resolve_tilde(path)
 }
 
-/// Write a config TOML file with owner-only (0600) permissions — the chat
-/// section may contain an API key. Creates with 0600 from the start and
-/// re-tightens pre-existing files.
+/// Atomically replace a config TOML file with owner-only (0600) permissions.
+/// Existing readers keep the previous complete config until the replacement is ready.
 pub fn write_config_file(path: &Path, toml_str: &str) -> Result<()> {
     use std::io::Write;
-    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-    let mut f = fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(path)?;
-    // Tighten perms before writing the secret-bearing content (fchmod on the
-    // handle — repairs pre-existing world-readable files with no window).
-    f.set_permissions(fs::Permissions::from_mode(0o600))?;
-    f.write_all(toml_str.as_bytes())?;
+
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let mut replacement = tempfile::NamedTempFile::new_in(parent)?;
+    replacement.write_all(toml_str.as_bytes())?;
+    replacement.as_file().sync_all()?;
+    replacement.persist(path).map_err(|e| e.error)?;
     Ok(())
 }
 
@@ -615,6 +609,25 @@ model = "llama3"
         let config = AppConfig::load_from(f.path()).unwrap();
         assert_eq!(config.chat.model, "llama3");
         assert_eq!(config.chat.base_url, "http://localhost:11434/v1");
+    }
+
+    #[test]
+    fn config_replacement_preserves_the_snapshot_for_existing_readers() {
+        use std::io::Read;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let previous = "[privacy]\nanalytics = false\n";
+        write_config_file(&path, previous).unwrap();
+        let mut reader = fs::File::open(&path).unwrap();
+
+        let replacement = "[privacy]\nanalytics = false\n[ui]\ntheme = \"dark\"\n";
+        write_config_file(&path, replacement).unwrap();
+
+        let mut snapshot = String::new();
+        reader.read_to_string(&mut snapshot).unwrap();
+        assert_eq!(snapshot, previous, "an existing reader observed a config rewrite");
+        assert_eq!(fs::read_to_string(path).unwrap(), replacement);
     }
 
     #[test]
