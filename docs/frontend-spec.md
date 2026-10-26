@@ -88,6 +88,7 @@ Full configuration UI organized into tabs.
 - **PrivacyTab**: Excluded apps, window title patterns
 - **StorageTab**: Disk limits, cleanup
 - **AITab**: Ollama endpoint, semantic search, chat model config
+- **MeetingTab**: enable/disable, transcription engine (`whisper-cpp` local / `whisper-cpp-server` / `openai-compatible`), per-engine fields (server URL, API key, model, timeout), keep-audio, summary, hotkey, mic source; whisper model download/status shown only for the local engine
 - Reusable form primitives: TextField, NumberInput, Toggle, ListInput, CategoryRulesEditor
 
 ## Key Components

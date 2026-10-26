@@ -4,6 +4,20 @@
 **Status:** Draft for review (revised against codebase)
 **Author:** brainstormed with Claude, corrected against the tree
 
+> **Addendum (2026-09-25):** `[meeting].engine` now supports
+> two additional values beyond local `whisper-cpp`: `whisper-cpp-server`
+> (native whisper.cpp `/inference` HTTP API) and `openai-compatible`
+> (`/v1/audio/transcriptions`-style API with an optional bearer token). Both
+> send each ~30s audio window as a WAV over HTTP to `service_url`, bounded by
+> `service_timeout_secs`. This is the "unlocking network-hosted/GPU whisper
+> deployments" extension implied but not detailed below; the transcript, DB,
+> search, and UI design in this doc is unchanged — only the transcribe stage
+> gained a remote HTTP implementation (`RemoteTranscriber` in
+> `crates/rewindos-daemon/src/meeting/remote.rs`) alongside the original
+> in-process `whisper-rs` path. See `docs/architecture.md` (`[meeting]` config
+> block) and `docs/dbus-api.md` (`StartMeeting`) for the up-to-date
+> field/error reference.
+
 ## Summary
 
 Add explicit-opt-in meeting capture to RewindOS: the user starts a recording, the

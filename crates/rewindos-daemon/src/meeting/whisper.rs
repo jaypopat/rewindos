@@ -23,6 +23,10 @@ pub enum TranscribeError {
     Config(String),
     #[error("whisper error: {0}")]
     Whisper(#[from] whisper_rs::WhisperError),
+    #[error("remote transcription error: {0}")]
+    Remote(String),
+    #[error("remote transcription returned HTTP {0}: {1}")]
+    RemoteStatus(u16, String),
 }
 
 /// Resolve the configured whisper model path and confirm the GGUF file exists.
@@ -92,8 +96,7 @@ impl WhisperTranscriber {
     /// Load a GGUF model from `model_path` (CPU-only — no GPU features enabled).
     pub fn load(model_path: &Path, n_threads: i32) -> Result<Self, TranscribeError> {
         let language = language_for_model(model_path);
-        let ctx =
-            WhisperContext::new_with_params(model_path, WhisperContextParameters::default())?;
+        let ctx = WhisperContext::new_with_params(model_path, WhisperContextParameters::default())?;
         Ok(Self {
             ctx,
             n_threads,
@@ -173,7 +176,10 @@ mod tests {
         assert_eq!(language_for_model(Path::new("/m/ggml-base.en.bin")), "en");
         assert_eq!(language_for_model(Path::new("/m/ggml-small.en.bin")), "en");
         assert_eq!(language_for_model(Path::new("/m/ggml-base.bin")), "auto");
-        assert_eq!(language_for_model(Path::new("/m/ggml-large-v3.bin")), "auto");
+        assert_eq!(
+            language_for_model(Path::new("/m/ggml-large-v3.bin")),
+            "auto"
+        );
     }
 
     #[test]

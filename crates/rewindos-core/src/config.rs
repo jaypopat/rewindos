@@ -122,6 +122,14 @@ pub struct CategoriesConfig {
 pub struct MeetingConfig {
     pub enabled: bool,
     pub engine: String,
+    /// Remote transcription service base URL (used by the remote engines).
+    pub service_url: String,
+    /// Optional bearer token for the remote transcription service.
+    pub service_api_key: String,
+    /// Model name sent to the remote transcription service.
+    pub service_model: String,
+    /// Per-window remote transcription timeout.
+    pub service_timeout_secs: u64,
     pub model: String,
     pub model_dir: String,
     /// Path or PATH name of the whisper.cpp binary.
@@ -169,6 +177,10 @@ impl Default for MeetingConfig {
         Self {
             enabled: false,
             engine: "whisper-cpp".to_string(),
+            service_url: "http://127.0.0.1:8000".to_string(),
+            service_api_key: String::new(),
+            service_model: "whisper-1".to_string(),
+            service_timeout_secs: 120,
             model: "base.en".to_string(),
             model_dir: "~/.rewindos/models/whisper".to_string(),
             whisper_bin: "whisper-cli".to_string(),
@@ -510,6 +522,20 @@ mod tests {
         assert!(c.meeting.summary_enabled);
         assert_eq!(c.meeting.hotkey, "Ctrl+Shift+M");
         assert_eq!(c.meeting.sample_rate, 16000);
+        assert_eq!(c.meeting.service_url, "http://127.0.0.1:8000");
+        assert!(c.meeting.service_api_key.is_empty());
+        assert_eq!(c.meeting.service_model, "whisper-1");
+        assert_eq!(c.meeting.service_timeout_secs, 120);
+    }
+
+    #[test]
+    fn meeting_config_accepts_legacy_config_without_service_fields() {
+        let config: MeetingConfig =
+            serde_json::from_str(r#"{"enabled":true,"engine":"whisper-cpp","model":"base.en"}"#)
+                .unwrap();
+        assert_eq!(config.engine, "whisper-cpp");
+        assert_eq!(config.service_url, "http://127.0.0.1:8000");
+        assert_eq!(config.service_timeout_secs, 120);
     }
 
     #[test]
@@ -517,8 +543,14 @@ mod tests {
         let mut c = AppConfig::default();
         c.storage.base_dir = "/tmp/rwos-test".to_string();
         c.meeting.model_dir = "/tmp/rwos-test/models/whisper".to_string();
-        assert_eq!(c.meetings_dir().unwrap(), std::path::PathBuf::from("/tmp/rwos-test/meetings"));
-        assert_eq!(c.whisper_model_dir().unwrap(), std::path::PathBuf::from("/tmp/rwos-test/models/whisper"));
+        assert_eq!(
+            c.meetings_dir().unwrap(),
+            std::path::PathBuf::from("/tmp/rwos-test/meetings")
+        );
+        assert_eq!(
+            c.whisper_model_dir().unwrap(),
+            std::path::PathBuf::from("/tmp/rwos-test/models/whisper")
+        );
     }
 
     #[test]
@@ -543,7 +575,10 @@ mod tests {
         assert!(c.copy_thumbnails);
         assert_eq!(c.end_of_day_hour, 23);
         assert!(!c.create_daily_note_if_absent);
-        assert_eq!(c.sections, vec!["journal", "summary", "meetings", "moments", "stats"]);
+        assert_eq!(
+            c.sections,
+            vec!["journal", "summary", "meetings", "moments", "stats"]
+        );
     }
 
     #[test]

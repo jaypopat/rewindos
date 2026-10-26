@@ -10,7 +10,7 @@
 use std::io::{ErrorKind, Read};
 use std::process::{Child, ChildStdout, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -87,7 +87,9 @@ pub fn list_audio_sources() -> Result<Vec<AudioSourceInfo>, CaptureError> {
             if props.get("media.class") != Some("Audio/Source") {
                 return;
             }
-            let Some(name) = props.get("node.name") else { return };
+            let Some(name) = props.get("node.name") else {
+                return;
+            };
             if name.is_empty() {
                 return;
             }
@@ -157,10 +159,10 @@ impl Windower {
             silent_run: 0,
             voiced: false,
             window_start_sample: 0,
-            min_window: CAPTURE_RATE as usize * 2,   // 2 s before a silence-flush
-            max_window: CAPTURE_RATE as usize * 30,  // hard 30 s cap
-            silence_threshold: 0.01,                 // RMS below = silent
-            silence_run_needed: 25,                  // ~0.5 s of silence (25×20 ms)
+            min_window: CAPTURE_RATE as usize * 2, // 2 s before a silence-flush
+            max_window: CAPTURE_RATE as usize * 30, // hard 30 s cap
+            silence_threshold: 0.01,               // RMS below = silent
+            silence_run_needed: 25,                // ~0.5 s of silence (25×20 ms)
         }
     }
 
@@ -292,12 +294,20 @@ pub struct AudioCapture {
     mic_bytes: Arc<AtomicU64>,
 }
 
+/// Keep capture bounded by the amount of work the single session worker can
+/// reasonably catch up with. Dropping a window is preferable to retaining an
+/// unbounded audio backlog (particularly for remote HTTP transcription).
+const WINDOW_QUEUE_CAPACITY: usize = 2;
+
 impl AudioCapture {
     /// Spawn a `pw-cat` capture child per source plus a reader thread each.
     /// Returns the handle and a receiver of completed windows from BOTH sources.
     /// The receiver closes once both readers finish and drop their senders.
-    pub fn start(mic_source: Option<String>) -> Result<(Self, Receiver<AudioWindow>), CaptureError> {
-        let (tx, rx) = mpsc::channel::<AudioWindow>();
+    pub fn start(
+        mic_source: Option<String>,
+        drop_when_full: bool,
+    ) -> Result<(Self, Receiver<AudioWindow>), CaptureError> {
+        let (tx, rx) = mpsc::sync_channel::<AudioWindow>(WINDOW_QUEUE_CAPACITY);
         let should_stop = Arc::new(AtomicBool::new(false));
         let mic_bytes = Arc::new(AtomicU64::new(0));
         let mut cap = Self {
@@ -336,7 +346,7 @@ impl AudioCapture {
             let stop = should_stop.clone();
             let thread = thread::Builder::new()
                 .name(format!("rewindos-audio-{}", source.as_str()))
-                .spawn(move || read_capture_stream(stdout, source, tx, stop, bytes))
+                .spawn(move || read_capture_stream(stdout, source, tx, stop, bytes, drop_when_full))
                 .map_err(|e| {
                     cap.kill_all();
                     CaptureError::PipeWire(format!("spawn reader ({}): {e}", source.as_str()))
@@ -380,9 +390,10 @@ impl AudioCapture {
 fn read_capture_stream<R: Read>(
     mut stdout: R,
     source: AudioSource,
-    tx: Sender<AudioWindow>,
+    tx: SyncSender<AudioWindow>,
     stop: Arc<AtomicBool>,
     bytes: Arc<AtomicU64>,
+    drop_when_full: bool,
 ) {
     let mut windower = Windower::new(source);
     let mut carry = Vec::new();
@@ -397,8 +408,12 @@ fn read_capture_stream<R: Read>(
                 out.clear();
                 windower.push(&samples, &mut out);
                 for w in out.drain(..) {
-                    if tx.send(w).is_err() {
-                        return; // receiver gone
+                    if drop_when_full {
+                        if let Err(TrySendError::Disconnected(_)) = tx.try_send(w) {
+                            return;
+                        }
+                    } else if tx.send(w).is_err() {
+                        return;
                     }
                 }
             }
@@ -409,7 +424,13 @@ fn read_capture_stream<R: Read>(
     out.clear();
     windower.flush(&mut out);
     for w in out.drain(..) {
-        let _ = tx.send(w);
+        if drop_when_full {
+            if matches!(tx.try_send(w), Err(TrySendError::Disconnected(_))) {
+                break;
+            }
+        } else if tx.send(w).is_err() {
+            break;
+        }
     }
 }
 
@@ -564,7 +585,7 @@ mod tests {
         let s1 = drain_samples(&mut carry, &[0x00, 0x40, 0x11]);
         assert_eq!(s1.len(), 1);
         assert_eq!(carry, vec![0x11]); // odd byte held back
-        // the next read completes the split sample
+                                       // the next read completes the split sample
         let s2 = drain_samples(&mut carry, &[0x22]);
         assert_eq!(s2.len(), 1);
         assert!(carry.is_empty());
@@ -576,7 +597,7 @@ mod tests {
         // The byte counter is what the controller's fail-fast gate reads, so it
         // must track all bytes drained from the stream regardless of content.
         let pcm = vec![0u8; 5000];
-        let (tx, _rx) = mpsc::channel();
+        let (tx, _rx) = mpsc::sync_channel(1);
         let bytes = Arc::new(AtomicU64::new(0));
         read_capture_stream(
             Cursor::new(pcm.clone()),
@@ -584,6 +605,7 @@ mod tests {
             tx,
             Arc::new(AtomicBool::new(false)),
             bytes.clone(),
+            false,
         );
         assert_eq!(bytes.load(Ordering::Relaxed), pcm.len() as u64);
     }
@@ -646,11 +668,14 @@ mod tests {
     #[test]
     #[ignore = "requires a live PipeWire daemon"]
     fn audiocapture_produces_windows() {
-        let (cap, rx) = AudioCapture::start(None).expect("start capture");
+        let (cap, rx) = AudioCapture::start(None, false).expect("start capture");
         std::thread::sleep(std::time::Duration::from_secs(4));
         cap.stop(); // flushes + joins; senders drop, so rx iteration ends
         let windows: Vec<AudioWindow> = rx.iter().collect();
-        assert!(!windows.is_empty(), "expected at least one window from capture");
+        assert!(
+            !windows.is_empty(),
+            "expected at least one window from capture"
+        );
         // At least the mic should produce audio; system may be silent if nothing plays.
         assert!(
             windows.iter().any(|w| w.source == AudioSource::Mic),
