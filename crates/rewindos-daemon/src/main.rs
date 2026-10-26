@@ -1,7 +1,6 @@
 mod activity;
 mod capture;
 mod detect;
-mod heartbeat;
 mod lock_watcher;
 mod meeting;
 mod mcp_server;
@@ -940,9 +939,6 @@ async fn run_daemon() -> anyhow::Result<()> {
             }
         });
     }
-
-    // Anonymous daily usage heartbeat (opt-out via [privacy] usage_heartbeat).
-    heartbeat::spawn();
 
     // Register D-Bus service
     let export_lock: Arc<tokio::sync::Mutex<()>> = Arc::new(tokio::sync::Mutex::new(()));

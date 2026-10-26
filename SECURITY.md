@@ -58,10 +58,7 @@ run on your machine, and the captured data never leaves it.
   your user, malware, a logged-in attacker) is outside what a local capture tool
   can defend against.
 
-## The one network call
+## Network calls
 
-RewindOS reaches the network on its own only for a daily update check / anonymous
-device count, which is documented and published in full at
-<https://rewindos-updates.incident-agent.workers.dev/stats>. No screen content,
-IP, or identifier is stored. It can be disabled with `usage_heartbeat = false`
-under `[privacy]` in `~/.rewindos/config.toml`.
+RewindOS reaches the network on its own only to check the GitHub Releases API
+for updates.
