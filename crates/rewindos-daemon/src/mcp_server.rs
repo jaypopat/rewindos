@@ -31,7 +31,6 @@ pub struct RewindosMcpServer {
     // of a single synchronous DB call — no await while holding it — so
     // std::sync::Mutex is fine.
     db: Arc<Mutex<Database>>,
-    capture_interval_seconds: u32,
     // Accessed via #[tool_handler] macro-generated ServerHandler impl.
     #[allow(dead_code)]
     tool_router: ToolRouter<Self>,
@@ -39,10 +38,9 @@ pub struct RewindosMcpServer {
 
 #[tool_router]
 impl RewindosMcpServer {
-    pub fn new(db: Database, capture_interval_seconds: u32) -> Self {
+    pub fn new(db: Database) -> Self {
         Self {
             db: Arc::new(Mutex::new(db)),
-            capture_interval_seconds,
             tool_router: Self::tool_router(),
         }
     }
@@ -87,7 +85,7 @@ impl RewindosMcpServer {
         Parameters(input): Parameters<GetAppUsageInput>,
     ) -> Result<CallToolResult, McpError> {
         let db = self.db.lock().map_err(Self::lock_err)?;
-        let out = get_app_usage(&db, input, self.capture_interval_seconds)
+        let out = get_app_usage(&db, input)
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
         Self::ok_json(&out)
     }
@@ -150,7 +148,7 @@ impl ServerHandler for RewindosMcpServer {}
 pub async fn run(config: AppConfig) -> anyhow::Result<()> {
     let db_path = config.db_path()?;
     let db = Database::open(&db_path)?;
-    let server = RewindosMcpServer::new(db, config.capture.interval_seconds);
+    let server = RewindosMcpServer::new(db);
     let service = server.serve(stdio()).await?;
     service.waiting().await?;
     Ok(())

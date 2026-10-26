@@ -1117,9 +1117,9 @@ async fn ask_agentic(
     use rewindos_core::agentic::{execute_tool, tool_schemas};
     use rewindos_core::chat::{ChatClient, ToolTurn};
 
-    let (config, capture_interval) = {
+    let config = {
         let cfg = state.config.lock().map_err(|e| format!("config lock: {e}"))?;
-        (cfg.chat.clone(), cfg.capture.interval_seconds)
+        cfg.chat.clone()
     };
     let client = ChatClient::new(&config);
     let tools = tool_schemas();
@@ -1171,7 +1171,7 @@ async fn ask_agentic(
 
                     let result = {
                         let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
-                        execute_tool(&db, &call.name, &call.arguments, now, capture_interval)
+                        execute_tool(&db, &call.name, &call.arguments, now)
                     };
                     let (content, is_error) = match result {
                         Ok(s) => (s, false),
