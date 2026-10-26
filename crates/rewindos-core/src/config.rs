@@ -49,6 +49,9 @@ pub struct PrivacyConfig {
     /// set here to make the risk-acceptance durable across restarts.
     #[serde(default)]
     pub capture_without_exclusion_enforcement: bool,
+    /// Send usage analytics to PostHog. Every event and property is listed in
+    /// docs/analytics.md.
+    pub analytics: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -235,6 +238,7 @@ impl Default for PrivacyConfig {
                 "Screen Locker".to_string(),
             ],
             capture_without_exclusion_enforcement: false,
+            analytics: true,
         }
     }
 }
@@ -480,6 +484,13 @@ mod tests {
     fn privacy_override_defaults_to_false() {
         let p = PrivacyConfig::default();
         assert!(!p.capture_without_exclusion_enforcement);
+    }
+
+    #[test]
+    fn analytics_defaults_on_including_for_configs_without_the_key() {
+        assert!(PrivacyConfig::default().analytics);
+        let config: AppConfig = toml::from_str("[privacy]\nexcluded_apps = []\n").unwrap();
+        assert!(config.privacy.analytics);
     }
 
     #[test]

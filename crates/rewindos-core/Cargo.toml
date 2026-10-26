@@ -25,6 +25,7 @@ regex-lite = { workspace = true }
 sqlite-vec = "0.1"
 webp = { workspace = true }
 schemars = "1"
+uuid = { version = "1", features = ["v4"] }
 
 [build-dependencies]
 serde_json = { workspace = true }
