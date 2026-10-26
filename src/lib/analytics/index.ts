@@ -6,12 +6,17 @@ export const analytics = new AnalyticsController(() => invoke<Bootstrap>("analyt
 
 export function startAnalytics() {
   let stopped = false;
+  let unlisten: (() => void) | undefined;
   const stop = analytics.start();
-  const subscription = listen<unknown>("analytics-action", ({ payload }) => analytics.nativeEvent(payload));
-  void subscription.then((unlisten) => { if (stopped) unlisten(); }).catch(() => {});
+  void listen<unknown>("analytics-action", ({ payload }) => {
+    if (!stopped) analytics.nativeEvent(payload);
+  }).then((unsubscribe) => {
+    if (stopped) unsubscribe();
+    else unlisten = unsubscribe;
+  }).catch(() => {});
   return () => {
     stopped = true;
     stop();
-    void subscription.then((unlisten) => unlisten()).catch(() => {});
+    unlisten?.();
   };
 }
