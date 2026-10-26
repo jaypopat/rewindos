@@ -4,40 +4,21 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::{json, Map, Value};
 use tracing::debug;
 use uuid::Uuid;
 
 use crate::config::{AppConfig, ChatConfig};
 use crate::ocr::OcrEngine;
-use crate::schema::SearchMode;
 
 const DEFAULT_HOST: &str = "https://us.i.posthog.com";
 
 #[derive(Debug, Serialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum Event {
-    AppOpened,
-    ViewOpened { view: View },
-    SearchPerformed { mode: SearchMode, has_filters: bool },
-    AskSent { provider: ChatProvider },
     PrivateModeToggled { enabled: bool },
     DaemonHeartbeat(Heartbeat),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum View {
-    Dashboard,
-    History,
-    Rewind,
-    Search,
-    Saved,
-    Journal,
-    Ask,
-    Meetings,
-    Settings,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -139,7 +120,7 @@ impl Desktop {
 }
 
 #[derive(Debug, Serialize)]
-struct CommonProps {
+pub struct CommonProps {
     app_version: &'static str,
     desktop: Desktop,
     distro: String,
@@ -149,7 +130,7 @@ struct CommonProps {
 }
 
 impl CommonProps {
-    fn detect(source: Source) -> Self {
+    pub fn detect(source: Source) -> Self {
         Self {
             app_version: crate::VERSION,
             desktop: Desktop::from_xdg(&std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default()),
@@ -169,8 +150,7 @@ fn distro_id(os_release: &str) -> String {
         .unwrap_or_else(|| "unknown".to_string())
 }
 
-/// An event and the moment it happened. The app sends in batches, so the send
-/// time is not the event time.
+/// A daemon event and the moment it happened.
 #[derive(Debug)]
 pub struct Stamped {
     event: Event,
@@ -183,7 +163,7 @@ impl Stamped {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Endpoint {
     host: String,
     api_key: String,
@@ -298,7 +278,7 @@ fn object(value: impl Serialize) -> Map<String, Value> {
     }
 }
 
-fn install_id(dir: &Path) -> io::Result<Uuid> {
+pub fn install_id(dir: &Path) -> io::Result<Uuid> {
     let path = dir.join("install_id");
     match read_install_id(&path) {
         Err(e) if e.kind() == io::ErrorKind::NotFound => {}
@@ -367,36 +347,16 @@ mod tests {
 
     fn every_event() -> Vec<Event> {
         let events = vec![
-            Event::AppOpened,
-            Event::ViewOpened { view: View::Search },
-            Event::SearchPerformed { mode: SearchMode::Keyword, has_filters: false },
-            Event::AskSent { provider: ChatProvider::ClaudeCode },
             Event::PrivateModeToggled { enabled: true },
             Event::DaemonHeartbeat(sample_heartbeat()),
         ];
         for event in &events {
             match event {
-                Event::AppOpened
-                | Event::ViewOpened { .. }
-                | Event::SearchPerformed { .. }
-                | Event::AskSent { .. }
-                | Event::PrivateModeToggled { .. }
+                Event::PrivateModeToggled { .. }
                 | Event::DaemonHeartbeat(_) => {}
             }
         }
         events
-    }
-
-    fn every_view() -> Vec<View> {
-        use View::*;
-        let views = vec![Dashboard, History, Rewind, Search, Saved, Journal, Ask, Meetings, Settings];
-        for view in &views {
-            match view {
-                Dashboard | History | Rewind | Search | Saved | Journal | Ask | Meetings
-                | Settings => {}
-            }
-        }
-        views
     }
 
     fn keys(value: &Value, out: &mut Vec<String>) {
@@ -488,8 +448,8 @@ mod tests {
         let id = Uuid::parse_str("6f1c2a54-93b5-4d0e-9a51-2b7c8e1f0d3a").unwrap();
         let at = Utc.with_ymd_and_hms(2026, 10, 26, 12, 30, 0).unwrap();
         let events = vec![
-            Stamped { event: Event::SearchPerformed { mode: SearchMode::Hybrid, has_filters: true }, at },
-            Stamped { event: Event::AppOpened, at },
+            Stamped { event: Event::PrivateModeToggled { enabled: true }, at },
+            Stamped { event: Event::PrivateModeToggled { enabled: false }, at },
         ];
         let common = json!({
             "app_version": "1.2.3",
@@ -509,16 +469,16 @@ mod tests {
                 "api_key": "phc_test",
                 "batch": [
                     {
-                        "event": "search_performed",
+                        "event": "private_mode_toggled",
                         "distinct_id": "6f1c2a54-93b5-4d0e-9a51-2b7c8e1f0d3a",
                         "timestamp": "2026-10-26T12:30:00Z",
-                        "properties": with_common(json!({ "mode": "hybrid", "has_filters": true })),
+                        "properties": with_common(json!({ "enabled": true })),
                     },
                     {
-                        "event": "app_opened",
+                        "event": "private_mode_toggled",
                         "distinct_id": "6f1c2a54-93b5-4d0e-9a51-2b7c8e1f0d3a",
                         "timestamp": "2026-10-26T12:30:00Z",
-                        "properties": with_common(json!({})),
+                        "properties": with_common(json!({ "enabled": false })),
                     },
                 ],
             })
@@ -571,34 +531,6 @@ mod tests {
                     "docs/analytics.md does not list property `{property}` of `{name}`"
                 );
             }
-        }
-    }
-
-    #[test]
-    fn view_matches_the_sidebar_union() {
-        let sidebar = manifest_file("../../src/components/Sidebar.tsx");
-        let union = sidebar
-            .split("export type View =")
-            .nth(1)
-            .and_then(|rest| rest.split(';').next())
-            .expect("Sidebar.tsx exports a View union");
-        let ts_names: Vec<&str> = union
-            .split('|')
-            .map(|v| v.trim().trim_matches('"'))
-            .filter(|v| !v.is_empty())
-            .collect();
-        for name in &ts_names {
-            assert!(
-                serde_json::from_value::<View>(json!(name)).is_ok(),
-                "Sidebar.tsx view \"{name}\" is missing from analytics::View"
-            );
-        }
-        for view in every_view() {
-            let name = serde_json::to_value(view).unwrap();
-            assert!(
-                ts_names.contains(&name.as_str().unwrap()),
-                "analytics::View {view:?} is not in the Sidebar.tsx union"
-            );
         }
     }
 
@@ -693,7 +625,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (host, mut requests) = fake_posthog().await;
         let analytics = Analytics::new(Source::Ui, dir.path().to_path_buf(), Some(Endpoint::new(&host, "test")));
-        analytics.send(vec![Stamped::now(Event::AppOpened)]).await;
+        analytics.send(vec![Stamped::now(Event::PrivateModeToggled { enabled: false })]).await;
         assert!(requests.try_recv().is_err());
     }
 }
