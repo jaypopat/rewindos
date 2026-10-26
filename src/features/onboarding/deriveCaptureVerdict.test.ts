@@ -84,6 +84,13 @@ describe("deriveCaptureVerdict", () => {
     expect(v.actions).toContain("resume");
   });
 
+  it("usage_only → neutral/usage-only, no actions", () => {
+    const v = deriveCaptureVerdict(s({ capture_state: "usage_only", usage_only: true }), false);
+    expect(v.code).toBe("usage-only");
+    expect(v.level).toBe("neutral");
+    expect(v.actions).toEqual([]);
+  });
+
   it("paused_locked → amber/paused-locked, benign, no actions", () => {
     const v = deriveCaptureVerdict(s({ capture_state: "paused_locked" }), false);
     expect(v.code).toBe("paused-locked");
