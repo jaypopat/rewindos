@@ -366,6 +366,18 @@ fn open_extension_page(app: tauri::AppHandle) -> Result<(), String> {
         .map_err(|e| format!("failed to open browser: {e}"))
 }
 
+/// Open docs/analytics.md on GitHub: every event and property analytics sends.
+#[tauri::command]
+fn open_analytics_doc(app: tauri::AppHandle) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    app.opener()
+        .open_url(
+            "https://github.com/jaypopat/rewindos/blob/master/docs/analytics.md",
+            None::<&str>,
+        )
+        .map_err(|e| format!("failed to open browser: {e}"))
+}
+
 #[tauri::command]
 fn get_screenshot(state: State<'_, AppState>, id: i64) -> Result<ScreenshotDetail, String> {
     let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
@@ -2403,6 +2415,7 @@ pub fn run() {
             gnome_extension_status,
             recheck_window_info,
             open_extension_page,
+            open_analytics_doc,
             set_unfiltered_capture,
             vault_export_day,
             vault_export_range,

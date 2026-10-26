@@ -136,6 +136,10 @@ export async function openExtensionPage(): Promise<void> {
   return invoke("open_extension_page");
 }
 
+export async function openAnalyticsDoc(): Promise<void> {
+  return invoke("open_analytics_doc");
+}
+
 /** Must match `UiEvent` in src-tauri/src/analytics.rs, which rejects anything else. */
 export type UiEvent = { event: "view_opened"; view: View };
 
