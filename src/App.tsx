@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { useHotkey, useHotkeySequences, type HotkeySequence } from "@tanstack/react-hotkeys";
-import type { SearchFilters } from "@/lib/api";
+import { trackEvent, type SearchFilters } from "@/lib/api";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useGlobalKeyboard } from "@/hooks/useGlobalKeyboard";
 import { Sidebar, type View } from "@/components/Sidebar";
@@ -172,6 +172,10 @@ function App() {
       }, 100);
     }
   }, []);
+
+  useEffect(() => {
+    void trackEvent({ event: "view_opened", view });
+  }, [view]);
 
   const handleGoToHistoryDate = useCallback((date: string) => {
     dispatch({ type: "CHANGE_VIEW", view: "history", date });

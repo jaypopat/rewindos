@@ -1,4 +1,5 @@
 mod agentic_loop;
+mod analytics;
 mod ask_stream;
 mod audio_server;
 mod chat_commands;
@@ -10,6 +11,7 @@ mod updater;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use rewindos_core::analytics::{Analytics, ChatProvider, Endpoint, Event, Source};
 use rewindos_core::config::AppConfig;
 use rewindos_core::db::Database;
 use rewindos_core::embedding::OllamaClient as EmbeddingClient;
@@ -58,6 +60,17 @@ struct AppState {
     /// the precomputed (app_breakdown, screenshot_count) so polls can render
     /// without recomputing or surfacing a stale cache mid-regeneration.
     daily_summary_in_flight: Arc<tokio::sync::Mutex<HashMap<String, (Vec<AppTimeEntry>, i64)>>>,
+    analytics: Arc<analytics::Queue>,
+}
+
+impl AppState {
+    /// Queues only while analytics is on, so nothing recorded during an
+    /// opt-out goes out after the user opts back in.
+    fn track(&self, event: Event) {
+        if self.config.lock().is_ok_and(|c| c.privacy.analytics) {
+            self.analytics.push(event);
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -148,7 +161,17 @@ async fn search(
     let response: SearchResponse =
         serde_json::from_str(&result_json).map_err(|e| format!("parse response: {e}"))?;
 
+    if let Some(mode) = response.search_mode {
+        let has_filters =
+            filters.start_time.is_some() || filters.end_time.is_some() || filters.app_name.is_some();
+        state.track(Event::SearchPerformed { mode, has_filters });
+    }
     Ok(response)
+}
+
+#[tauri::command]
+fn track_event(state: State<'_, AppState>, event: analytics::UiEvent) {
+    state.track(event.into());
 }
 
 #[tauri::command]
@@ -1015,6 +1038,7 @@ async fn ask_claude(
         )
         .map_err(|e| e.to_string())?;
     }
+    state.track(Event::AskSent { provider: ChatProvider::ClaudeCode });
 
     let resume = existing_session_id.is_some();
     let session_arg = existing_session_id
@@ -1121,6 +1145,7 @@ async fn ask_agentic(
         let cfg = state.config.lock().map_err(|e| format!("config lock: {e}"))?;
         cfg.chat.clone()
     };
+    state.track(Event::AskSent { provider: ChatProvider::from_config(&config) });
     let client = ChatClient::new(&config);
     let tools = tool_schemas();
     let now = chrono::Utc::now().timestamp();
@@ -1842,6 +1867,7 @@ async fn chat_stream_completion(
     messages: Vec<rewindos_core::chat::ChatMessage>,
     on_event: tauri::ipc::Channel<ChatStreamEvent>,
 ) -> Result<(), String> {
+    state.track(Event::AskSent { provider: ChatProvider::from_config(&chat) });
     let cancelled = Arc::new(std::sync::atomic::AtomicBool::new(false));
     {
         let mut map = state.chat_cancel_flags.lock().await;
@@ -2055,6 +2081,13 @@ pub fn run() {
                 None
             };
 
+            let analytics = Arc::new(analytics::Queue::new(Analytics::new(
+                Source::Ui,
+                AppConfig::default_base_dir().map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?,
+                Endpoint::compiled(),
+            )));
+            analytics::spawn_flusher(analytics.clone());
+
             let audio_server = match audio_server::AudioServer::start() {
                 Ok(s) => Some(s),
                 Err(e) => {
@@ -2072,7 +2105,9 @@ pub fn run() {
                 chat_cancel_flags: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
                 audio_server,
                 daily_summary_in_flight: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+                analytics,
             });
+            app.state::<AppState>().track(Event::AppOpened);
 
             // Register Ctrl+Shift+Space global shortcut
             let ctrl_shift_space =
@@ -2360,6 +2395,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             search,
+            track_event,
             get_daemon_status,
             pause_capture,
             resume_capture,
@@ -2451,7 +2487,14 @@ pub fn run() {
             updater::install_update,
             updater::restart_app,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                if let Some(state) = app.try_state::<AppState>() {
+                    analytics::flush_on_exit(&state.analytics);
+                }
+            }
+        });
 }
 

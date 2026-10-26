@@ -1,5 +1,6 @@
 import { invoke, convertFileSrc, Channel } from "@tauri-apps/api/core";
 import type { AppConfig } from "./config";
+import type { View } from "@/components/Sidebar";
 
 export interface SearchFilters {
   start_time?: number;
@@ -133,6 +134,13 @@ export async function recheckWindowInfo(): Promise<string> {
 
 export async function openExtensionPage(): Promise<void> {
   return invoke("open_extension_page");
+}
+
+/** Must match `UiEvent` in src-tauri/src/analytics.rs, which rejects anything else. */
+export type UiEvent = { event: "view_opened"; view: View };
+
+export async function trackEvent(event: UiEvent): Promise<void> {
+  return invoke("track_event", { event });
 }
 
 export async function setUnfilteredCapture(enabled: boolean): Promise<void> {
