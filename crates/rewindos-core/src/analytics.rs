@@ -1,6 +1,3 @@
-//! Usage analytics sent to PostHog's `/batch/` endpoint. `docs/analytics.md`
-//! lists every event and property, and a test below keeps the two in sync.
-
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -29,7 +26,6 @@ pub enum Event {
     DaemonHeartbeat(Heartbeat),
 }
 
-/// Mirrors the `View` union in `src/components/Sidebar.tsx`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum View {
@@ -302,10 +298,6 @@ fn object(value: impl Serialize) -> Map<String, Value> {
     }
 }
 
-/// The install's PostHog `distinct_id`, created on first use. The daemon and
-/// the app can race to create it, so the ID goes to a temp file that is
-/// hard-linked into place: the link lands whole or fails with `AlreadyExists`,
-/// and the loser reads the winner's ID.
 fn install_id(dir: &Path) -> io::Result<Uuid> {
     let path = dir.join("install_id");
     match read_install_id(&path) {
@@ -382,7 +374,6 @@ mod tests {
             Event::PrivateModeToggled { enabled: true },
             Event::DaemonHeartbeat(sample_heartbeat()),
         ];
-        // A new variant fails to compile here until it gets a sample above.
         for event in &events {
             match event {
                 Event::AppOpened
@@ -399,7 +390,6 @@ mod tests {
     fn every_view() -> Vec<View> {
         use View::*;
         let views = vec![Dashboard, History, Rewind, Search, Saved, Journal, Ask, Meetings, Settings];
-        // A new variant fails to compile here until it is listed above.
         for view in &views {
             match view {
                 Dashboard | History | Rewind | Search | Saved | Journal | Ask | Meetings
@@ -422,8 +412,6 @@ mod tests {
         }
     }
 
-    /// One-request-per-connection HTTP server that forwards each request's
-    /// path and JSON body, then answers 200.
     async fn fake_posthog() -> (String, mpsc::UnboundedReceiver<(String, Value)>) {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let host = format!("http://{}", listener.local_addr().unwrap());

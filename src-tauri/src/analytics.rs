@@ -1,6 +1,3 @@
-//! The app's analytics queue. Events wait in memory and go out every 60
-//! seconds and on exit. A failed batch is dropped, never retried.
-
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -78,7 +75,6 @@ mod tests {
         serde_json::from_value(value)
     }
 
-    /// Forwards each request body, then answers 200.
     fn fake_posthog() -> (String, std::sync::mpsc::Receiver<serde_json::Value>) {
         let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
         let host = format!("http://{}", server.server_addr().to_ip().unwrap());
