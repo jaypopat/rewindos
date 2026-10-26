@@ -100,7 +100,14 @@ pub struct SearchResponse {
     pub results: Vec<SearchResult>,
     pub total_count: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub search_mode: Option<String>,
+    pub search_mode: Option<SearchMode>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SearchMode {
+    Keyword,
+    Hybrid,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
