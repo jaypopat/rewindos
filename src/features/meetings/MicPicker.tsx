@@ -39,7 +39,7 @@ export function MicPicker({ active }: { active: boolean }) {
       await updateConfig({
         ...config,
         meeting: { ...config.meeting, mic_source: name },
-      } as unknown as Record<string, unknown>);
+      });
     },
     onSuccess: (_d, name) => {
       qc.setQueryData(queryKeys.config(), (old: AppConfig | undefined) =>

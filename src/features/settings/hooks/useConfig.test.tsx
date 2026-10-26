@@ -54,7 +54,7 @@ const hotkey = () =>
 
 describe("useConfig auto-save", () => {
   beforeEach(() => {
-    remote.config = { ui: { global_hotkey: "Ctrl+Shift+Space" } };
+    remote.config = { ui: { global_hotkey: "Ctrl+Shift+Space" }, privacy: { analytics: true } };
     remote.failNext = false;
     vi.clearAllMocks();
     vi.useFakeTimers();
@@ -76,6 +76,59 @@ describe("useConfig auto-save", () => {
     });
     expect(updateConfig).toHaveBeenCalledTimes(1);
     expect(hotkey()).toEqual(["ABC"]);
+  });
+
+  it("saves rapid analytics off/on transitions immediately and in order", async () => {
+    const { result } = await renderLoaded();
+    let releaseOff!: () => void;
+    vi.mocked(updateConfig).mockImplementationOnce(
+      () => new Promise<void>((resolve) => { releaseOff = resolve; }),
+    );
+
+    act(() => {
+      result.current.update("privacy", "analytics", false);
+      result.current.update("privacy", "analytics", true);
+    });
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(vi.mocked(updateConfig).mock.calls.map(([c]) => c.privacy.analytics)).toEqual([false]);
+
+    await act(async () => {
+      releaseOff();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(vi.mocked(updateConfig).mock.calls.map(([c]) => c.privacy.analytics)).toEqual([false, true]);
+    await act(async () => { await vi.advanceTimersByTimeAsync(800); });
+    expect(updateConfig).toHaveBeenCalledTimes(2);
+  });
+
+  it("orders analytics transitions behind an in-flight save and preserves newer edits", async () => {
+    const { result } = await renderLoaded();
+    let releaseSave!: () => void;
+    vi.mocked(updateConfig).mockImplementationOnce(
+      () => new Promise<void>((resolve) => { releaseSave = resolve; }),
+    );
+    act(() => result.current.update("ui", "global_hotkey", "A"));
+    await act(async () => {
+      result.current.flush();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    act(() => {
+      result.current.update("privacy", "analytics", false);
+      result.current.update("ui", "global_hotkey", "AB");
+      result.current.update("privacy", "analytics", true);
+    });
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(updateConfig).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      releaseSave();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(vi.mocked(updateConfig).mock.calls.map(([c]) => c.privacy.analytics)).toEqual([true, false, true]);
+    expect(hotkey()).toEqual(["A", "A", "AB"]);
+    await act(async () => { await vi.advanceTimersByTimeAsync(800); });
+    expect(updateConfig).toHaveBeenCalledTimes(3);
   });
 
   it("flush() persists immediately without waiting for the debounce", async () => {
