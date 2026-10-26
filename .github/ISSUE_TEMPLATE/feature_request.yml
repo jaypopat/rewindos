@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        RewindOS is **local-first and privacy-focused** — requests are weighed against that (no cloud dependencies, no telemetry, works offline). Ideas that fit that ethos get priority.
+        RewindOS stores screen history locally, and capture and search work offline. Requests should protect user content and preserve those capabilities.
   - type: textarea
     id: problem
     attributes:
