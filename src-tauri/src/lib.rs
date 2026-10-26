@@ -63,14 +63,6 @@ struct AppState {
     analytics: Arc<analytics::Queue>,
 }
 
-impl AppState {
-    fn track(&self, event: Event) {
-        if self.config.lock().is_ok_and(|c| c.privacy.analytics) {
-            self.analytics.push(event);
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize)]
 struct ScreenshotDetail {
     id: i64,
@@ -162,14 +154,14 @@ async fn search(
     if let Some(mode) = response.search_mode {
         let has_filters =
             filters.start_time.is_some() || filters.end_time.is_some() || filters.app_name.is_some();
-        state.track(Event::SearchPerformed { mode, has_filters });
+        state.analytics.push(Event::SearchPerformed { mode, has_filters });
     }
     Ok(response)
 }
 
 #[tauri::command]
 fn track_event(state: State<'_, AppState>, event: analytics::UiEvent) {
-    state.track(event.into());
+    state.analytics.push(event.into());
 }
 
 #[tauri::command]
@@ -1047,7 +1039,7 @@ async fn ask_claude(
         )
         .map_err(|e| e.to_string())?;
     }
-    state.track(Event::AskSent { provider: ChatProvider::ClaudeCode });
+    state.analytics.push(Event::AskSent { provider: ChatProvider::ClaudeCode });
 
     let resume = existing_session_id.is_some();
     let session_arg = existing_session_id
@@ -1154,7 +1146,7 @@ async fn ask_agentic(
         let cfg = state.config.lock().map_err(|e| format!("config lock: {e}"))?;
         cfg.chat.clone()
     };
-    state.track(Event::AskSent { provider: ChatProvider::from_config(&config) });
+    state.analytics.push(Event::AskSent { provider: ChatProvider::from_config(&config) });
     let client = ChatClient::new(&config);
     let tools = tool_schemas();
     let now = chrono::Utc::now().timestamp();
@@ -1876,7 +1868,7 @@ async fn chat_stream_completion(
     messages: Vec<rewindos_core::chat::ChatMessage>,
     on_event: tauri::ipc::Channel<ChatStreamEvent>,
 ) -> Result<(), String> {
-    state.track(Event::AskSent { provider: ChatProvider::from_config(&chat) });
+    state.analytics.push(Event::AskSent { provider: ChatProvider::from_config(&chat) });
     let cancelled = Arc::new(std::sync::atomic::AtomicBool::new(false));
     {
         let mut map = state.chat_cancel_flags.lock().await;
@@ -1958,7 +1950,7 @@ fn update_config(state: State<'_, AppState>, config_json: serde_json::Value) -> 
     let new_config: AppConfig =
         serde_json::from_value(config_json).map_err(|e| format!("invalid config: {e}"))?;
 
-    // Save to disk
+    let mut cfg = state.config.lock().map_err(|e| format!("config lock: {e}"))?;
     let base_dir = AppConfig::default_base_dir().map_err(|e| format!("{e}"))?;
     let config_path = base_dir.join("config.toml");
     let toml_str =
@@ -1966,11 +1958,7 @@ fn update_config(state: State<'_, AppState>, config_json: serde_json::Value) -> 
     rewindos_core::config::write_config_file(&config_path, &toml_str)
         .map_err(|e| format!("write config: {e}"))?;
 
-    // Update in-memory config
-    let mut cfg = state
-        .config
-        .lock()
-        .map_err(|e| format!("config lock: {e}"))?;
+    state.analytics.set_enabled(new_config.privacy.analytics);
     *cfg = new_config;
 
     Ok(())
@@ -2094,7 +2082,7 @@ pub fn run() {
                 Source::Ui,
                 AppConfig::default_base_dir().map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?,
                 Endpoint::compiled(),
-            )));
+            ), config.privacy.analytics));
             analytics::spawn_flusher(analytics.clone());
 
             let audio_server = match audio_server::AudioServer::start() {
@@ -2116,7 +2104,7 @@ pub fn run() {
                 daily_summary_in_flight: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
                 analytics,
             });
-            app.state::<AppState>().track(Event::AppOpened);
+            app.state::<AppState>().analytics.push(Event::AppOpened);
 
             // Register Ctrl+Shift+Space global shortcut
             let ctrl_shift_space =
