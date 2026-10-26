@@ -29,6 +29,9 @@ jobs:
       version: ${{ steps.version.outputs.version }}
     permissions:
       contents: write
+    env:
+      REWINDOS_POSTHOG_KEY: ${{ vars.REWINDOS_POSTHOG_KEY }}
+      REWINDOS_POSTHOG_HOST: ${{ vars.REWINDOS_POSTHOG_HOST }}
 
     steps:
       - uses: actions/checkout@v4

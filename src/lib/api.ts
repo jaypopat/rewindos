@@ -135,6 +135,10 @@ export async function openExtensionPage(): Promise<void> {
   return invoke("open_extension_page");
 }
 
+export async function openAnalyticsDoc(): Promise<void> {
+  return invoke("open_analytics_doc");
+}
+
 export async function setUnfilteredCapture(enabled: boolean): Promise<void> {
   return invoke("set_unfiltered_capture", { enabled });
 }
@@ -732,7 +736,7 @@ export async function getConfig(): Promise<AppConfig> {
 }
 
 export async function updateConfig(
-  config: Record<string, unknown>,
+  config: AppConfig,
 ): Promise<void> {
   return invoke("update_config", { configJson: config });
 }

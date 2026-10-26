@@ -5,7 +5,7 @@ use crate::schema::{
     Collection, DailyActivity, HourlyActivity, JournalDateInfo, JournalEntry, JournalScreenshot,
     JournalSearchResponse, JournalSearchResult, JournalStreakInfo, JournalSummary, JournalTag,
     JournalTemplate, Meeting, NewBoundingBox, NewCollection, NewScreenshot, NewTranscriptSegment, OcrStatus,
-    OpenTodo, Screenshot, SearchFilters, SearchResponse, SearchResult, TaskUsageStat,
+    OpenTodo, Screenshot, SearchFilters, SearchMode, SearchResponse, SearchResult, TaskUsageStat,
     TranscriptSearchResult, TranscriptSegment, UpdateCollection, UpsertJournalEntry,
 };
 use rusqlite::{ffi::sqlite3_auto_extension, params, Connection, OptionalExtension};
@@ -1239,14 +1239,14 @@ impl Database {
             return Ok(SearchResponse {
                 results: paged,
                 total_count: deduped_total,
-                search_mode: Some("keyword".to_string()),
+                search_mode: Some(SearchMode::Keyword),
             });
         }
 
         Ok(SearchResponse {
             results,
             total_count,
-            search_mode: Some("keyword".to_string()),
+            search_mode: Some(SearchMode::Keyword),
         })
     }
 
@@ -1643,7 +1643,7 @@ impl Database {
                 return Ok(SearchResponse {
                     results: paged,
                     total_count: deduped_total,
-                    search_mode: Some("keyword".to_string()),
+                    search_mode: Some(SearchMode::Keyword),
                 });
             }
         };
@@ -1740,7 +1740,7 @@ impl Database {
         Ok(SearchResponse {
             results: paged,
             total_count: deduped_total,
-            search_mode: Some("hybrid".to_string()),
+            search_mode: Some(SearchMode::Hybrid),
         })
     }
 

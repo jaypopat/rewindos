@@ -7,9 +7,10 @@ export function WelcomeStep() {
         (OCR), and gives you instant full-text search of everything you've seen.
       </p>
       <p className="text-sm leading-relaxed text-text-secondary">
-        It's <span className="font-medium text-text-primary">100% local by default</span> —
-        nothing leaves this machine unless you explicitly connect a cloud AI provider.
-        No account, no telemetry.
+        Your screen history stays on this machine unless you connect a cloud AI provider.
+        Usage analytics are on by default, including browser metadata, fixed-control clicks,
+        with session replay disabled in this build. Turn analytics off in Settings → Privacy.
+        No account is required.
       </p>
       <p className="text-xs text-text-muted">
         Next, we'll make sure capture is actually working on your setup.

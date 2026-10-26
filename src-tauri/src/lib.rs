@@ -1,4 +1,5 @@
 mod agentic_loop;
+mod analytics;
 mod ask_stream;
 mod audio_server;
 mod chat_commands;
@@ -10,6 +11,7 @@ mod updater;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use rewindos_core::analytics::{ChatProvider, Endpoint};
 use rewindos_core::config::AppConfig;
 use rewindos_core::db::Database;
 use rewindos_core::embedding::OllamaClient as EmbeddingClient;
@@ -122,6 +124,7 @@ struct UiSearchFilters {
 
 #[tauri::command]
 async fn search(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     query: String,
     filters: UiSearchFilters,
@@ -148,7 +151,18 @@ async fn search(
     let response: SearchResponse =
         serde_json::from_str(&result_json).map_err(|e| format!("parse response: {e}"))?;
 
+    if let Some(mode) = response.search_mode {
+        let has_filters =
+            filters.start_time.is_some() || filters.end_time.is_some() || filters.app_name.is_some();
+        analytics::emit(&app, analytics::NativeEvent::SearchPerformed { mode, has_filters });
+    }
     Ok(response)
+}
+
+#[tauri::command]
+fn analytics_bootstrap() -> Result<analytics::Bootstrap, String> {
+    let dir = AppConfig::default_base_dir().map_err(|e| e.to_string())?;
+    analytics::bootstrap(&dir, Endpoint::compiled())
 }
 
 #[tauri::command]
@@ -338,6 +352,17 @@ fn open_extension_page(app: tauri::AppHandle) -> Result<(), String> {
     app.opener()
         .open_url(
             "https://extensions.gnome.org/extension/4974/window-calls-extended/",
+            None::<&str>,
+        )
+        .map_err(|e| format!("failed to open browser: {e}"))
+}
+
+#[tauri::command]
+fn open_analytics_doc(app: tauri::AppHandle) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    app.opener()
+        .open_url(
+            "https://github.com/jaypopat/rewindos/blob/master/docs/analytics.md",
             None::<&str>,
         )
         .map_err(|e| format!("failed to open browser: {e}"))
@@ -983,6 +1008,7 @@ async fn build_chat_context(
 
 #[tauri::command]
 async fn ask_claude(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     chat_id: i64,
     prompt: String,
@@ -1015,6 +1041,7 @@ async fn ask_claude(
         )
         .map_err(|e| e.to_string())?;
     }
+    analytics::emit(&app, analytics::NativeEvent::AskSent { provider: ChatProvider::ClaudeCode });
 
     let resume = existing_session_id.is_some();
     let session_arg = existing_session_id
@@ -1109,6 +1136,7 @@ async fn ask_claude(
 /// user message is NOT written here to avoid a double-write.
 #[tauri::command]
 async fn ask_agentic(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     chat_id: i64,
     prompt: String,
@@ -1121,6 +1149,7 @@ async fn ask_agentic(
         let cfg = state.config.lock().map_err(|e| format!("config lock: {e}"))?;
         cfg.chat.clone()
     };
+    analytics::emit(&app, analytics::NativeEvent::AskSent { provider: ChatProvider::from_config(&config) });
     let client = ChatClient::new(&config);
     let tools = tool_schemas();
     let now = chrono::Utc::now().timestamp();
@@ -1836,12 +1865,14 @@ enum ChatStreamEvent {
 
 #[tauri::command]
 async fn chat_stream_completion(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     stream_id: String,
     chat: rewindos_core::config::ChatConfig,
     messages: Vec<rewindos_core::chat::ChatMessage>,
     on_event: tauri::ipc::Channel<ChatStreamEvent>,
 ) -> Result<(), String> {
+    analytics::emit(&app, analytics::NativeEvent::AskSent { provider: ChatProvider::from_config(&chat) });
     let cancelled = Arc::new(std::sync::atomic::AtomicBool::new(false));
     {
         let mut map = state.chat_cancel_flags.lock().await;
@@ -1923,7 +1954,7 @@ fn update_config(state: State<'_, AppState>, config_json: serde_json::Value) -> 
     let new_config: AppConfig =
         serde_json::from_value(config_json).map_err(|e| format!("invalid config: {e}"))?;
 
-    // Save to disk
+    let mut cfg = state.config.lock().map_err(|e| format!("config lock: {e}"))?;
     let base_dir = AppConfig::default_base_dir().map_err(|e| format!("{e}"))?;
     let config_path = base_dir.join("config.toml");
     let toml_str =
@@ -1931,11 +1962,6 @@ fn update_config(state: State<'_, AppState>, config_json: serde_json::Value) -> 
     rewindos_core::config::write_config_file(&config_path, &toml_str)
         .map_err(|e| format!("write config: {e}"))?;
 
-    // Update in-memory config
-    let mut cfg = state
-        .config
-        .lock()
-        .map_err(|e| format!("config lock: {e}"))?;
     *cfg = new_config;
 
     Ok(())
@@ -2360,6 +2386,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             search,
+            analytics_bootstrap,
             get_daemon_status,
             pause_capture,
             resume_capture,
@@ -2367,6 +2394,7 @@ pub fn run() {
             gnome_extension_status,
             recheck_window_info,
             open_extension_page,
+            open_analytics_doc,
             set_unfiltered_capture,
             vault_export_day,
             vault_export_range,
@@ -2451,7 +2479,7 @@ pub fn run() {
             updater::install_update,
             updater::restart_app,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app, _event| {});
 }
-

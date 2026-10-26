@@ -57,3 +57,6 @@ rewindos-test-bundle.tar.gz
 docs/superpowers/
 tests/
 /doc/
+
+# Synthetic native analytics verification build artifacts
+.audit/analytics-native*/
