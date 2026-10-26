@@ -1,7 +1,10 @@
 import type { AppConfig } from "@/lib/config";
+import { openAnalyticsDoc } from "@/lib/api";
+import { Button } from "@/components/ui/button";
 import { SectionTitle } from "../primitives/SectionTitle";
 import { Field } from "../primitives/Field";
 import { ListInput } from "../primitives/ListInput";
+import { Toggle } from "../primitives/Toggle";
 
 interface TabProps {
   config: AppConfig;
@@ -26,6 +29,29 @@ export function PrivacyTab({ config, update }: TabProps) {
           values={config.privacy.excluded_title_patterns}
           onChange={(v) => update("privacy", "excluded_title_patterns", v)}
           placeholder="pattern"
+        />
+      </Field>
+      <Field
+        label="Share anonymous usage analytics"
+        hint={
+          <>
+            Sends a random install ID, the app version, your desktop and distro, and which
+            features you use. Never your screen content, app names, window titles, searches,
+            or chats.{" "}
+            <Button
+              variant="link"
+              size="xs"
+              onClick={() => void openAnalyticsDoc()}
+              className="h-auto p-0 text-[12.5px]"
+            >
+              See everything that is sent
+            </Button>
+          </>
+        }
+      >
+        <Toggle
+          checked={config.privacy.analytics}
+          onChange={(v) => update("privacy", "analytics", v)}
         />
       </Field>
     </>
