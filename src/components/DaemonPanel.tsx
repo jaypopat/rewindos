@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { getDaemonStatus, pauseCapture, resumeCapture } from "@/lib/api";
+import { getDaemonStatus, pauseCapture, resumeCapture, setUsageOnly } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import { formatDuration, formatBytes } from "@/lib/format";
 import {
@@ -8,7 +8,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { RefreshCw } from "lucide-react";
+import { EyeOff, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export function DaemonPanel() {
@@ -28,6 +28,11 @@ export function DaemonPanel() {
 
   const resumeMutation = useMutation({
     mutationFn: resumeCapture,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.daemonStatus() }),
+  });
+
+  const usageOnlyMutation = useMutation({
+    mutationFn: setUsageOnly,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.daemonStatus() }),
   });
 
@@ -89,6 +94,7 @@ export function DaemonPanel() {
     capturing:      { color: "bg-signal-active",  label: "capturing", ping: true },
     stalled:        { color: "bg-signal-stalled", label: "stalled",   ping: false },
     paused_user:    { color: "bg-signal-paused",  label: "paused",    ping: false },
+    usage_only:     { color: "bg-signal-paused",  label: "private — apps only", ping: false },
     paused_locked:  { color: "bg-signal-paused",  label: "paused — locked",  ping: false },
     paused_privacy: { color: "bg-signal-paused",  label: "paused — privacy", ping: false },
   }[captureState] ?? { color: "bg-signal-paused", label: captureState, ping: false };
@@ -97,6 +103,7 @@ export function DaemonPanel() {
   const reasonHint =
     captureState === "paused_locked" ? " (screen locked)" :
     captureState === "paused_privacy" ? " (exclusions can't be enforced)" :
+    captureState === "usage_only" ? " (app time is tracked, no screenshots)" :
     captureState === "stalled" ? " (no frames arriving)" : "";
 
   return (
@@ -121,6 +128,30 @@ export function DaemonPanel() {
             </Button>
           </TooltipTrigger>
           <TooltipContent>{toggleHint}{reasonHint}</TooltipContent>
+        </Tooltip>
+
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              aria-label="Private mode"
+              aria-pressed={!!status.usage_only}
+              onClick={() => usageOnlyMutation.mutate(!status.usage_only)}
+              disabled={usageOnlyMutation.isPending}
+              className={`h-auto p-0 hover:bg-transparent ${
+                status.usage_only
+                  ? "text-signal-paused hover:text-signal-paused"
+                  : "text-text-muted hover:text-text-primary"
+              }`}
+            >
+              <EyeOff className="size-3" strokeWidth={2} />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            {status.usage_only
+              ? "Private mode on: tracking app time only. Click to resume screenshots"
+              : "Private mode: keep tracking app time, stop taking screenshots"}
+          </TooltipContent>
         </Tooltip>
 
         <span className="text-border">|</span>

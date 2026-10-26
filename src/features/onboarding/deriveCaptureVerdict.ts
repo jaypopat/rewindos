@@ -3,7 +3,7 @@ import type { DaemonStatus } from "@/lib/api";
 export type VerdictLevel = "green" | "amber" | "red" | "neutral";
 
 export type VerdictCode =
-  | "offline" | "checking" | "paused-locked" | "paused-user"
+  | "offline" | "checking" | "paused-locked" | "paused-user" | "usage-only"
   | "paused-privacy" | "unfiltered" | "gnome-degraded"
   | "unsupported"
   | "working" | "waiting" | "stalled" | "unknown";
@@ -77,6 +77,14 @@ export function deriveCaptureVerdict(
       headline: "Capture is paused.",
       guidance: "Resume to verify capture is working.",
       actions: ["resume"], framesToday: frames,
+    };
+  }
+  if (cs === "usage_only") {
+    return {
+      code: "usage-only", level: "neutral",
+      headline: "Private mode is on: app time is tracked, screenshots are off.",
+      guidance: "Turn off Private Mode from the tray or the status bar to resume screenshots.",
+      actions: [], framesToday: frames,
     };
   }
   if (cs === "paused_privacy") {

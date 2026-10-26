@@ -1,5 +1,6 @@
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
 import type { AppUsageStat } from "@/lib/api";
+import { formatDuration } from "@/lib/format";
 import { getAppColor } from "@/lib/app-colors";
 import { AppDot } from "@/components/AppDot";
 
@@ -13,7 +14,7 @@ export function AppDonutChart({ data }: Props) {
   // Filter out entries with < 1% to reduce noise in legend
   const meaningful = data.filter((d) => d.percentage >= 1);
   const top8 = (meaningful.length > 0 ? meaningful : data).slice(0, 8);
-  const total = data.reduce((sum, d) => sum + d.screenshot_count, 0);
+  const total = data.reduce((sum, d) => sum + d.active_seconds, 0);
 
   if (top8.length === 0) {
     return (
@@ -30,7 +31,7 @@ export function AppDonutChart({ data }: Props) {
           <PieChart>
             <Pie
               data={top8}
-              dataKey="screenshot_count"
+              dataKey="active_seconds"
               nameKey="app_name"
               cx="50%"
               cy="50%"
@@ -53,13 +54,13 @@ export function AppDonutChart({ data }: Props) {
               }}
               itemStyle={{ color: "#e2e8f0" }}
               labelStyle={{ color: "#94a3b8" }}
-              formatter={((value: any, name: any) => [`${value ?? 0} captures (${(((value ?? 0) / total) * 100).toFixed(1)}%)`, name]) as any}
+              formatter={((value: any, name: any) => [`${formatDuration(value ?? 0)} (${(((value ?? 0) / total) * 100).toFixed(1)}%)`, name]) as any}
             />
           </PieChart>
         </ResponsiveContainer>
         {/* Center label */}
         <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-          <span className="font-display text-xl text-text-primary leading-none">{total}</span>
+          <span className="font-display text-xl text-text-primary leading-none">{formatDuration(total)}</span>
           <span className="text-[10px] text-text-muted mt-0.5">total</span>
         </div>
       </div>
