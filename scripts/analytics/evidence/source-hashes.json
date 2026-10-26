@@ -1,0 +1,6 @@
+{
+  "src/lib/analytics/controller.ts": "4a2391074572164dcd7819d3de3b95b3f4fa59b00e69208f7f9e47b38712ada7",
+  "src/lib/analytics/privacy.ts": "685057404979af023ff204a1026b4358485f07eb8a4bf38e76c0c383f8b89b33",
+  "scripts/analytics/fixture.ts": "e5818c926d668a06de6961ecd5a2e1472997b0ca01370b07c7e6517f2fcde8f4",
+  "scripts/analytics/native_webkit.py": "23c13ef24ddd5998a435fdc29817b49d73b8375d14775b45f674b247a8c4b864"
+}

@@ -10,6 +10,7 @@ async function run() {
   await delay(2000);
   const button = document.querySelector<HTMLButtonElement>("[data-analytics-control]");
   button?.click();
+  document.querySelector<HTMLButtonElement>("#unapproved")?.click();
   controller.setView("search");
   controller.nativeEvent({ event: "search_performed", mode: "hybrid", has_filters: true });
   controller.nativeEvent({ event: "ask_sent", provider: "ollama" });
@@ -39,6 +40,11 @@ async function run() {
   history.replaceState({}, "", "/CANARY_PATH?secret=CANARY_QUERY#CANARY_HASH");
   const canvas = document.querySelector("canvas");
   canvas?.getContext("2d")?.fillText("CANARY_CANVAS_PIXELS", 10, 10);
+  const style = document.querySelector<HTMLStyleElement>("#synthetic-style");
+  style?.sheet?.insertRule('.mutated::before { content: "CANARY_STYLESHEET_MUTATION"; }');
+  const adopted = new CSSStyleSheet();
+  adopted.replaceSync('.adopted::before { content: "CANARY_ADOPTED_STYLESHEET"; }');
+  document.adoptedStyleSheets = [adopted];
   console.error("CANARY_CONSOLE_ERROR");
   await fetch("/CANARY_NETWORK_REQUEST", { method: "POST", headers: { "x-secret": "CANARY_NETWORK_HEADER" }, body: "CANARY_NETWORK_BODY" });
   await delay(13000);

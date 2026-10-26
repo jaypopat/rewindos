@@ -35,9 +35,9 @@ export function PrivacyTab({ config, update }: TabProps) {
         label="Share anonymous usage analytics"
         hint={
           <>
-            Sends a random install ID, the app version, your desktop and distro, and which
-            features you use. Never your screen content, app names, window titles, searches,
-            or chats.{" "}
+            Sends a random install ID, feature use, and browser, screen-size, desktop,
+            and distro metadata. Session replay is disabled in this build. Never your screen history, app names,
+            window titles, searches, chats, or journal text.{" "}
             <Button
               variant="link"
               size="xs"

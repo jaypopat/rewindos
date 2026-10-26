@@ -8,7 +8,8 @@ export function WelcomeStep() {
       </p>
       <p className="text-sm leading-relaxed text-text-secondary">
         Your screen history stays on this machine unless you connect a cloud AI provider.
-        Usage analytics are on by default. You can turn them off in Settings → Privacy.
+        Usage analytics are on by default, including browser metadata, fixed-control clicks,
+        with session replay disabled in this build. Turn analytics off in Settings → Privacy.
         No account is required.
       </p>
       <p className="text-xs text-text-muted">
