@@ -60,5 +60,11 @@ run on your machine, and the captured data never leaves it.
 
 ## Network calls
 
-RewindOS reaches the network on its own only to check the GitHub Releases API
-for updates.
+RewindOS checks the GitHub Releases API for updates and sends usage analytics
+to PostHog by default. Analytics use a random install ID and fixed feature
+properties. They never include screen content, OCR text, app names, window
+titles, search queries, chat messages, file paths, or journal text.
+
+Turn analytics off in **Settings → Privacy** or set `analytics = false` under
+`[privacy]` in `~/.rewindos/config.toml`. The setting applies without a restart.
+[Analytics documentation](docs/analytics.md) lists every event and property.

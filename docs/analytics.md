@@ -70,4 +70,4 @@ Or set `analytics` to `false` under `[privacy]` in `~/.rewindos/config.toml`:
 analytics = false
 ```
 
-RewindOS reads the setting before every send, so you don't need to restart. Events the app was holding when you turned analytics off are dropped.
+RewindOS reads the setting before every send, so you don't need to restart. A batch blocked by this setting is discarded. Turning the Settings switch off also immediately clears the app's pending events.
