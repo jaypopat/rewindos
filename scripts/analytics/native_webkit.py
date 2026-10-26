@@ -54,9 +54,11 @@ class Receiver(BaseHTTPRequestHandler):
     def log_message(self, *_args):
         pass
 
-    def respond(self, body=b'{}'):
-        self.send_response(200)
-        for name, value in [('Content-Type', 'application/json'), ('Content-Length', str(len(body))), ('Access-Control-Allow-Origin', '*'), ('Access-Control-Allow-Headers', '*'), ('Cache-Control', 'no-store')]:
+    def respond(self, body=b'{}', status=200):
+        self.send_response(status)
+        if status == 503:
+            self.send_header('Retry-After', '60')
+        for name, value in [('Content-Type', 'application/json'), ('Content-Length', str(len(body))), ('Access-Control-Allow-Origin', '*'), ('Access-Control-Allow-Headers', '*'), ('Access-Control-Expose-Headers', 'Retry-After'), ('Cache-Control', 'no-store')]:
             self.send_header(name, value)
         self.end_headers()
         self.wfile.write(body)
@@ -67,7 +69,7 @@ class Receiver(BaseHTTPRequestHandler):
     def do_GET(self):
         requests.append({'phase': phase, 'method': 'GET', 'path': self.path})
         self.respond(json.dumps({
-            'hasFeatureFlags': False, 'autocapture_opt_out': False, 'supportedCompression': ['gzip', 'gzip-js'], 'capturePerformance': True,
+            'hasFeatureFlags': False, 'logs': {'captureConsoleLogs': True}, 'autocapture_opt_out': False, 'supportedCompression': ['gzip', 'gzip-js'], 'capturePerformance': True,
             'sessionRecording': {'endpoint': '/s/', 'sampleRate': 1, 'minimumDurationMilliseconds': 0, 'consoleLogRecordingEnabled': True, 'recordCanvas': True,
                 'networkPayloadCapture': {'recordHeaders': True, 'recordBody': True},
                 'masking': {'maskAllInputs': False, 'maskTextSelector': '', 'blockSelector': '', 'maskAllElementAttributes': False}}
@@ -76,10 +78,12 @@ class Receiver(BaseHTTPRequestHandler):
     def do_POST(self):
         body = self.rfile.read(int(self.headers.get('Content-Length', '0')))
         try:
-            requests.append({'phase': phase, 'method': 'POST', 'path': self.path, 'payload': decode_body(body, self.headers)})
+            status = 503 if self.path == '/e/' and not any(r.get('response_status') == 503 for r in requests) else 200
+            requests.append({'phase': phase, 'method': 'POST', 'path': self.path, 'payload': decode_body(body, self.headers), 'response_status': status})
         except Exception as error:
             failures.append(f'decode {type(error).__name__}: {error}')
-        self.respond()
+            status = 200
+        self.respond(status=status)
 
 
 ingestion = ThreadingHTTPServer(('127.0.0.1', 0), Receiver)
@@ -110,7 +114,7 @@ class Fixture(BaseHTTPRequestHandler):
             body = b'{}'
         else:
             body = b'''<!doctype html><html><head><title>CANARY_INITIAL_TITLE</title></head><body>
-<div id="root"><nav><button data-analytics-control="nav-search" data-ph-capture-attribute-control="nav-search" title="CANARY_CONTROL_TITLE" data-private="CANARY_CONTROL_ATTRIBUTE"><span data-replay-label="nav-search">Search</span></button></nav>
+<div id="root"><style id="synthetic-style">.initial::before { content: "CANARY_INITIAL_STYLESHEET"; }</style><button id="unapproved" data-private="CANARY_UNAPPROVED_CONTROL">CANARY_UNAPPROVED_TEXT</button><nav><button data-analytics-control="nav-search" data-ph-capture-attribute-control="nav-search" title="CANARY_CONTROL_TITLE" data-private="CANARY_CONTROL_ATTRIBUTE"><span data-replay-label="nav-search">Search</span></button></nav>
 <div id="unsafe" title="CANARY_INITIAL_TITLE_ATTRIBUTE" data-private="CANARY_INITIAL_ATTRIBUTE" style="background-image:url('/CANARY_INITIAL_CSS')">CANARY_INITIAL_TEXT</div>
 <input value="CANARY_INITIAL_INPUT" placeholder="CANARY_INITIAL_PLACEHOLDER" name="CANARY_INPUT_NAME" title="CANARY_INPUT_TITLE"><input type="hidden" value="CANARY_HIDDEN"><input type="file" name="CANARY_FILE_PATH">
 <div data-analytics-sensitive><p>CANARY_SCREENSHOT_OCR_APP_WINDOW_SEARCH_PROMPT_CHAT_JOURNAL_MEETING_PATH_API_KEY</p><img src="/CANARY_SCREENSHOT_ASSET"><canvas></canvas></div>
@@ -155,22 +159,23 @@ checks = {
     'fixture_completed': done.is_set(),
     'decoded_every_payload': not failures,
     'no_secret_canaries_in_any_request': 'CANARY_' not in json.dumps(requests),
-    'initial_snapshot_recorded': any(s.get('type') == 2 for s in snapshots),
-    'incremental_mutations_recorded': any(s.get('type') == 3 and s.get('data', {}).get('source') == 0 for s in snapshots),
+    'replay_hard_disabled_despite_remote_enable': not snapshots and not any(e.get('event') == '$snapshot' for e in events),
     'safe_control_autocapture': any(e.get('event') == '$autocapture' and e['properties'].get('control') == 'nav-search' for e in events),
     'navigation_and_native_actions': {'app_opened', 'view_opened', 'ask_sent', 'search_performed'}.issubset({e.get('event') for e in events}),
     'shared_install_identity': bool(events) and all(e['properties'].get('distinct_id') == INSTALL_ID for e in events),
     'no_alias_or_identify': not any(e.get('event') in ['$identify', '$create_alias'] for e in events),
     'sdk_enrichment_preserved': any(all(k in e['properties'] for k in ['$session_id', '$window_id', '$browser', '$os', '$viewport_width', '$screen_height', '$lib_version']) for e in events if e.get('event') != '$snapshot'),
     'off_pending_on_external_off_silent': not any(r['phase'] in ['off', 'pending-on', 'external-off', 'done'] for r in requests),
+    'pending_retry_exercised': any(r.get('response_status') == 503 for r in requests),
+    'discarded_retry_not_resent': len({e['uuid'] for e in events}) == len(events),
     'queued_events_discarded': not any(e.get('event') == 'search_performed' and e['properties'].get('mode') == 'keyword' for e in events),
     'opted_out_native_events_discarded': not any(e.get('event') == 'ask_sent' and e['properties'].get('provider') == 'custom' for e in events),
     'resumed_after_persisted_on': any(r['phase'] == 'on' and 'payload' in r for r in requests),
     'token_preserved': bool(events) and all(e['properties'].get('token') == 'phc_synthetic_only' for e in events),
-    'no_external_script_requests': all('/array/' in r['path'] or r['path'].startswith(('/e/', '/s/')) for r in requests),
+    'no_external_script_requests': all((r['method'] == 'GET' and r['path'] == '/array/phc_synthetic_only/config') or (r['method'] == 'POST' and r['path'] in ['/e/', '/s/']) for r in requests),
+    'only_approved_controls': all(e['properties'].get('control') == 'nav-search' for e in events if e.get('event') == '$autocapture'),
 }
-report = {'runtime': 'WebKitGTK ' + '.'.join(str(fn()) for fn in [WebKit2.get_major_version, WebKit2.get_minor_version, WebKit2.get_micro_version]), 'sdk': 'posthog-js 1.438.23', 'checks': checks, 'failures': failures, 'requests': len(requests), 'events': len(events), 'snapshots': len(snapshots), 'playback_verified': False}
-(args.output / 'payloads.json').write_text(json.dumps(requests, indent=2))
+report = {'runtime': 'WebKitGTK ' + '.'.join(str(fn()) for fn in [WebKit2.get_major_version, WebKit2.get_minor_version, WebKit2.get_micro_version]), 'sdk': 'posthog-js 1.438.23', 'checks': checks, 'failures': failures, 'requests': len(requests), 'events': len(events), 'snapshots': len(snapshots), 'replay_policy': 'hard-disabled after native stylesheet canary leak', 'playback_verified': False}
 (args.output / 'report.json').write_text(json.dumps(report, indent=2))
 print(json.dumps(report, indent=2))
 raise SystemExit(0 if all(checks.values()) else 1)

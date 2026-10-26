@@ -61,9 +61,17 @@ run on your machine, and the captured data never leaves it.
 ## Network calls
 
 RewindOS checks the GitHub Releases API for updates and sends usage analytics
-to PostHog by default. Analytics use a random install ID and fixed feature
-properties. They never include screen content, OCR text, app names, window
-titles, search queries, chat messages, file paths, or journal text.
+to PostHog by default. Analytics use a random install ID, feature properties,
+browser and screen-size metadata, and clicks on allowlisted fixed controls.
+Session replay is hard-disabled locally and remote settings cannot enable it.
+Native verification of the candidate recorder found that stylesheet mutations
+and adopted stylesheets could bypass text and attribute masking. The candidate
+masking configuration remains in source for further investigation. No replay
+snapshots are sent in this build.
+Analytics never include screen content, OCR text, app names, window titles,
+search queries, chat messages, file paths, or journal and meeting content.
+Console, network bodies and headers, canvas recording, and error autocapture
+are disabled locally. Remote settings cannot loosen these privacy rules.
 
 Turn analytics off in **Settings → Privacy** or set `analytics = false` under
 `[privacy]` in `~/.rewindos/config.toml`. The setting applies without a restart.

@@ -1,0 +1,30 @@
+{
+  "runtime": "WebKitGTK 2.52.6",
+  "sdk": "posthog-js 1.438.23",
+  "checks": {
+    "fixture_completed": true,
+    "decoded_every_payload": true,
+    "no_secret_canaries_in_any_request": true,
+    "replay_hard_disabled_despite_remote_enable": true,
+    "safe_control_autocapture": true,
+    "navigation_and_native_actions": true,
+    "shared_install_identity": true,
+    "no_alias_or_identify": true,
+    "sdk_enrichment_preserved": true,
+    "off_pending_on_external_off_silent": true,
+    "pending_retry_exercised": true,
+    "discarded_retry_not_resent": true,
+    "queued_events_discarded": true,
+    "opted_out_native_events_discarded": true,
+    "resumed_after_persisted_on": true,
+    "token_preserved": true,
+    "no_external_script_requests": true,
+    "only_approved_controls": true
+  },
+  "failures": [],
+  "requests": 4,
+  "events": 9,
+  "snapshots": 0,
+  "replay_policy": "hard-disabled after native stylesheet canary leak",
+  "playback_verified": false
+}

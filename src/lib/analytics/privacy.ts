@@ -33,7 +33,9 @@ export function parseNativeEvent(value: unknown): NativeEvent | null {
   return null;
 }
 
-const SDK_PROPERTIES = [
+export const COMMON_PROPERTIES = ["app_version", "desktop", "distro", "source", "$geoip_disable"];
+
+export const SDK_PROPERTIES = [
   "token", "distinct_id", "$device_id", "$session_id", "$window_id", "$lib", "$lib_version", "$browser", "$browser_version",
   "$os", "$os_version", "$device_type", "$device_model", "$screen_height", "$screen_width", "$viewport_height", "$viewport_width",
   "$timezone", "$timezone_offset", "$time", "$is_identified", "$insert_id", "$process_person_profile",
@@ -56,7 +58,7 @@ function fixedProperties(event: CaptureResult): Record<string, unknown> | null {
       return props.$event_type === "click" && CONTROLS.includes(props.control)
         ? { control: props.control, $event_type: "click", $elements: [{ tag_name: "button" }] }
         : null;
-    case "$snapshot": return { $snapshot_data: props.$snapshot_data, $snapshot_bytes: props.$snapshot_bytes };
+    case "$snapshot": return null;
     default: return null;
   }
 }
@@ -69,9 +71,11 @@ export function sanitizeEvent(event: CaptureResult, common: Record<string, unkno
     const value: unknown = event.properties[key];
     if (typeof value === "string" || typeof value === "boolean" || (typeof value === "number" && Number.isFinite(value))) properties[key] = value;
   }
+  const safeCommon: Record<string, unknown> = {};
+  for (const key of COMMON_PROPERTIES) safeCommon[key] = common[key];
   return {
     uuid: event.uuid, event: event.event, timestamp: event.timestamp,
-    properties: { ...properties, ...common, ...fixed, $current_url: SAFE_URL, $pathname: "/", $host: "rewindos.local", $title: "RewindOS", $referrer: "", $referring_domain: "", $geoip_disable: true },
+    properties: { ...properties, ...safeCommon, ...fixed, $current_url: SAFE_URL, $pathname: "/", $host: "rewindos.local", $title: "RewindOS", $referrer: "", $referring_domain: "", $geoip_disable: true },
   };
 }
 
@@ -94,7 +98,12 @@ export function privacyConfig(): Partial<PostHogConfig> {
     },
     rageclick: false, capture_dead_clicks: false, enable_heatmaps: false,
     capture_exceptions: false, capture_performance: false,
+    // Native stylesheet canaries escaped rrweb masking. Keep replay disabled.
+    disable_session_recording: true,
     enable_recording_console_log: false,
+    logs: { captureConsoleLogs: false, beforeSend: () => null },
+    metrics: { network: false, beforeSend: () => null },
+    capture_webmcp: false, tracing_headers: [],
     disable_external_dependency_loading: true,
     disable_surveys: true, disable_product_tours: true, disable_conversations: true, disable_web_experiments: true,
     advanced_disable_feature_flags: true, advanced_disable_toolbar_metrics: true,

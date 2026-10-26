@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PostHog } from "posthog-js/full/no-external";
 import type { CaptureResult } from "posthog-js";
 import { AnalyticsController, type Bootstrap } from "./controller";
-import { BLOCK_SELECTOR, CONTROLS, parseNativeEvent, privacyConfig, SAFE_URL, sanitizeEvent, VIEWS } from "./privacy";
+import { BLOCK_SELECTOR, COMMON_PROPERTIES, CONTROLS, SDK_PROPERTIES, parseNativeEvent, privacyConfig, SAFE_URL, sanitizeEvent, VIEWS } from "./privacy";
 
 const project: NonNullable<Bootstrap["project"]> = {
   endpoint: { host: "http://127.0.0.1:9", api_key: "phc_test" },
@@ -13,7 +13,7 @@ const flush = async () => { await Promise.resolve(); await Promise.resolve(); };
 
 beforeEach(() => {
   vi.useFakeTimers();
-  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ sessionRecording: false, hasFeatureFlags: false }), { status: 200 })));
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ sessionRecording: false, hasFeatureFlags: false, logs: { captureConsoleLogs: true } }), { status: 200 })));
 });
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
@@ -30,6 +30,7 @@ describe("SDK lifecycle with real PostHog initialization", () => {
   });
 
   it("uses the daemon UUID before the first event, without identify or alias", async () => {
+    const init = vi.spyOn(PostHog.prototype, "init");
     const capture = vi.spyOn(PostHog.prototype, "capture");
     const identify = vi.spyOn(PostHog.prototype, "identify");
     const alias = vi.spyOn(PostHog.prototype, "alias");
@@ -42,6 +43,10 @@ describe("SDK lifecycle with real PostHog initialization", () => {
     expect(capture.mock.results.some((result) => result.value?.properties?.view === "journal")).toBe(true);
     expect(identify).not.toHaveBeenCalled();
     expect(alias).not.toHaveBeenCalled();
+    const sdk = init.mock.results[0]?.value;
+    expect(sdk?.logs).toBeUndefined();
+    expect(sdk?.metrics).toBeUndefined();
+    expect(sdk?.webMCP).toBeUndefined();
     stop();
   });
 
@@ -111,6 +116,13 @@ describe("SDK lifecycle with real PostHog initialization", () => {
 });
 
 describe("content boundary", () => {
+  it("documents every collected property and fixed control", async () => {
+    const docs = await import("../../../docs/analytics.md?raw");
+    for (const key of [...COMMON_PROPERTIES, ...SDK_PROPERTIES, ...CONTROLS, "control", "$event_type", "$elements", "$snapshot_data", "$snapshot_bytes"]) {
+      expect(docs.default, `undocumented analytics field ${key}`).toContain(`\`${key}\``);
+    }
+  });
+
   it("accepts only exact native action shapes", () => {
     expect(parseNativeEvent({ event: "search_performed", mode: "hybrid", has_filters: true })).toEqual({ event: "search_performed", mode: "hybrid", has_filters: true });
     for (const value of [null, "ask_sent", { event: "app_opened" }, { event: "ask_sent", provider: "unknown" }, { event: "ask_sent", provider: "custom", prompt: "secret" }, { event: "search_performed", mode: "keyword", has_filters: "true" }]) {
@@ -123,7 +135,7 @@ describe("content boundary", () => {
       token: "public", distinct_id: "install", $session_id: "session", $browser: "Safari", $viewport_width: 900,
       view: "ask", $current_url: "secret", $title: "secret", $referrer: "secret", $initial_referrer: "secret", path: "secret", $elements: [{ attr__title: "secret" }],
     } };
-    expect(sanitizeEvent(input, project.common)).toEqual({ uuid: "id", event: "view_opened", timestamp: undefined, properties: {
+    expect(sanitizeEvent(input, { ...project.common, prompt: "secret" })).toEqual({ uuid: "id", event: "view_opened", timestamp: undefined, properties: {
       token: "public", distinct_id: "install", $session_id: "session", $browser: "Safari", $viewport_width: 900,
       ...project.common, view: "ask", $current_url: SAFE_URL, $pathname: "/", $host: "rewindos.local", $title: "RewindOS", $referrer: "", $referring_domain: "",
     } });
@@ -143,9 +155,10 @@ describe("content boundary", () => {
 
   it("masks initial and mutated attributes and inputs, blocks pixels and portals", () => {
     document.body.innerHTML = '<div id="root"><button data-analytics-control="nav-search" title="secret"><span data-replay-label="nav-search">secret</span></button><img src="secret"><canvas></canvas><div data-analytics-sensitive>secret</div></div><aside>secret</aside>';
-    const options = privacyConfig().session_recording!;
-    const button = document.querySelector("button")!;
-    const label = document.querySelector("span")!;
+    const options = privacyConfig().session_recording;
+    const button = document.querySelector("button");
+    const label = document.querySelector("span");
+    if (!options || !button || !label) throw new Error("Privacy fixture is incomplete");
     expect(options.maskTextFn?.("secret", label)).toBe("nav-search");
     expect(options.maskTextFn?.("secret", button)).toBe("***");
     expect(options.maskAttributeFn?.("title", "secret", button)).toBe("***");
@@ -154,6 +167,8 @@ describe("content boundary", () => {
     expect(options.maskAttributeFn?.("data-analytics-control", "nav-search", button)).toBe("nav-search");
     for (const selector of ["img", "canvas", "[data-analytics-sensitive]", "aside"]) expect(document.querySelector(selector)?.matches(BLOCK_SELECTOR)).toBe(true);
     expect(options.maskInputFn?.("secret")).toBe("***");
+    expect(privacyConfig().disable_session_recording).toBe(true);
+    expect(sanitizeEvent({ uuid: "id", event: "$snapshot", properties: { $snapshot_data: "secret" } }, project.common)).toBeNull();
     expect(options.recordBody).toBe(false);
     expect(options.recordHeaders).toBe(false);
     expect(options.captureCanvas?.recordCanvas).toBe(false);

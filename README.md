@@ -75,7 +75,7 @@ A rich-text **journal** (Tiptap) with tags, templates, screenshot attachments, a
 **🔒 Privacy**
 Exclude specific apps or window-title patterns (password managers, private browsing). Global hotkey `Ctrl+Shift+Space` opens search instantly; the app runs quietly in the system tray.
 
-RewindOS checks GitHub for updates and sends usage analytics to PostHog by default. Turn analytics off in **Settings → Privacy** or set `[privacy] analytics = false`. Analytics include a random install ID and feature usage, never screen content, app names, window titles, searches, or chats. [See every event and property](docs/analytics.md).
+RewindOS checks GitHub for updates and sends usage analytics to PostHog by default. Turn analytics off in **Settings → Privacy** or set `[privacy] analytics = false`. Analytics include a random install ID, feature use, browser and screen-size metadata, and fixed-control clicks. Session replay is disabled in this build because native verification found a stylesheet privacy leak. Screen history, app names, window titles, searches, chats, and journal text stay out of analytics. [See every event and property](docs/analytics.md).
 
 <div align="center">
 <table>

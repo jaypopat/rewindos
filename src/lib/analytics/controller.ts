@@ -2,6 +2,13 @@ import { PostHog } from "posthog-js/full/no-external";
 import type { View } from "@/components/Sidebar";
 import { parseNativeEvent, privacyConfig, sanitizeEvent } from "./privacy";
 
+// Only these bundled extensions may react to remote project configuration.
+const bundledExtensions = PostHog.__defaultExtensionClasses;
+PostHog.__defaultExtensionClasses = {
+  autocapture: bundledExtensions?.autocapture,
+  sessionRecording: bundledExtensions?.sessionRecording,
+};
+
 export interface Bootstrap {
   enabled: boolean;
   project: null | {
