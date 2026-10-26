@@ -128,6 +128,9 @@ pub struct DaemonStatus {
     pub seconds_since_last_frame: Option<u64>,
     #[serde(default)]
     pub unfiltered_capture: bool,
+    /// Private mode: app time is tracked, screenshots are not taken.
+    #[serde(default)]
+    pub usage_only: bool,
     #[serde(default)]
     pub meeting_active: bool,
     #[serde(default)]
@@ -580,6 +583,7 @@ mod tests {
             capture_state: Some("paused_privacy".to_string()),
             seconds_since_last_frame: None,
             unfiltered_capture: false,
+            usage_only: false,
             meeting_active: false,
             meeting_id: None,
             meeting_started_at: None,

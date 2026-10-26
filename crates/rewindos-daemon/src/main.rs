@@ -1,3 +1,4 @@
+mod activity;
 mod capture;
 mod detect;
 mod heartbeat;
@@ -659,6 +660,7 @@ async fn run_daemon() -> anyhow::Result<()> {
 
     // Capture gate: the single source of truth for whether/why capture runs.
     let gate = std::sync::Arc::new(crate::capture::gate::CaptureGate::new(true));
+    gate.set_usage_only(activity::load_usage_only(&db));
 
     // In-memory override (per-session). Seeded from config; durable opt-in lives
     // in config.toml. Re-defaults to fail-closed on restart by design.
@@ -742,6 +744,16 @@ async fn run_daemon() -> anyhow::Result<()> {
             debug!("auto-reprobe: gave up after {MAX_REPROBES} attempts; RecheckWindowInfo still available");
         });
     }
+
+    // Focused-app time runs beside the screenshot pipeline so usage-only mode
+    // (and X11 sessions where capture can't start) still record app usage.
+    activity::spawn(
+        db.clone(),
+        gate.clone(),
+        window_info.clone(),
+        app_labels.clone(),
+        config.privacy.clone(),
+    );
 
     // Lock watcher needs the system bus for logind; session bus for screensaver.
     match zbus::Connection::system().await {
