@@ -60,6 +60,11 @@ The capture daemon exposes a D-Bus service on the **session bus** for control by
       <arg name="enabled" type="b" direction="in"/>
     </method>
 
+    <!-- Usage-only (private) mode: track app time, take no screenshots -->
+    <method name="SetUsageOnly">
+      <arg name="enabled" type="b" direction="in"/>
+    </method>
+
     <!-- Write one day's vault companion note (returns when STARTED, not finished) -->
     <method name="ExportDay">
       <arg name="date" type="s" direction="in"/>
@@ -85,6 +90,7 @@ The capture daemon exposes a D-Bus service on the **session bus** for control by
     <signal name="StateChanged">
       <arg name="is_capturing" type="b"/>
       <arg name="meeting_active" type="b"/>
+      <arg name="usage_only" type="b"/>
     </signal>
 
     <!-- Whether capture is currently active -->
@@ -174,12 +180,14 @@ Returns current daemon status as JSON.
 
 **Capture-integrity fields:**
 - `capture_state` (string): one of `"capturing"`, `"stalled"`, `"paused_user"`,
-  `"paused_privacy"`, `"paused_locked"`. The effective state (may differ from
+  `"usage_only"`, `"paused_privacy"`, `"paused_locked"`. The effective state (may differ from
   `is_capturing`, which reflects user intent only).
 - `seconds_since_last_frame` (int|null): seconds since the last genuine frame;
   `null` if no frame has arrived yet.
 - `unfiltered_capture` (bool): the privacy escape hatch is active — capture is
   running without enforcing exclusions.
+- `usage_only` (bool): usage-only (private) mode is on. App time is still
+  tracked; no screenshots are taken.
 
 **Meeting fields** (present in all daemon versions; default to `false`/`null` when
 the meeting-transcription feature is not in use):
@@ -274,6 +282,19 @@ Recomputes the privacy gate immediately.
 
 **Response:** (none)
 
+### SetUsageOnly(enabled)
+
+Turns usage-only (private) mode on or off. While on, the daemon keeps sampling
+the focused app into `app_sessions` (app name only, never the window title, and
+never for excluded apps) but takes no screenshots, and `capture_state` reads
+`"usage_only"`. Pause and screen lock still stop app tracking. Persisted in
+`daemon_state`, so it survives a daemon restart. Emits `StateChanged`.
+
+**Request:**
+- `enabled` (bool)
+
+**Response:** (none)
+
 ### ExportDay(date)
 
 Renders and writes the vault companion note for one local day (gather →
@@ -329,12 +350,13 @@ Emits `PropertiesChanged` signal when changed.
 
 ## Signals
 
-### StateChanged(is_capturing: bool, meeting_active: bool)
+### StateChanged(is_capturing: bool, meeting_active: bool, usage_only: bool)
 
-Emitted when capture is paused/resumed (Pause/Resume) or a meeting starts/stops
-(StartMeeting/StopMeeting). Lets clients update the tray icon and status indicator
+Emitted when capture is paused/resumed (Pause/Resume), usage-only mode is
+toggled (SetUsageOnly), or a meeting starts/stops (StartMeeting/StopMeeting). Lets clients update the tray icon and status indicator
 without polling `GetStatus`. The tray subscribes to this and shows a red square
-while `meeting_active`, the live dot while capturing, and a dimmed glyph while paused.
+while `meeting_active`, the live dot while capturing, an amber dot in usage-only
+mode, and a dimmed glyph while paused.
 
 ## zbus Rust Interface
 
@@ -354,6 +376,7 @@ impl DaemonService {
     async fn delete_range(&self, start: i64, end: i64) -> zbus::fdo::Result<u64>;
     async fn recheck_window_info(&mut self) -> zbus::fdo::Result<String>;
     async fn set_unfiltered_capture(&mut self, enabled: bool) -> zbus::fdo::Result<()>;
+    async fn set_usage_only(&self, enabled: bool) -> zbus::fdo::Result<()>;
     async fn start_meeting(&self, title: &str) -> zbus::fdo::Result<i64>;
     async fn stop_meeting(&self) -> zbus::fdo::Result<()>;
     // Vault export (returns when the background export is STARTED).

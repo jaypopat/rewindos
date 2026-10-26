@@ -14,6 +14,8 @@ pub enum CaptureState {
     Capturing,
     Stalled,
     PausedUser,
+    /// Private mode: focused-app time is tracked, no screenshots are taken.
+    UsageOnly,
     PausedPrivacy,
     PausedLocked,
 }
@@ -24,17 +26,20 @@ impl CaptureState {
             CaptureState::Capturing => "capturing",
             CaptureState::Stalled => "stalled",
             CaptureState::PausedUser => "paused_user",
+            CaptureState::UsageOnly => "usage_only",
             CaptureState::PausedPrivacy => "paused_privacy",
             CaptureState::PausedLocked => "paused_locked",
         }
     }
 
-    /// Pure derivation. Displayed-label precedence is `locked > user > privacy`
+    /// Pure derivation. Displayed-label precedence is
+    /// `locked > user > usage_only > privacy`
     /// (a paused-then-locked session resumes-to-locked, so "locked" is the
     /// honest readout). `wants` is still stored separately and governs
     /// post-unlock behavior; this ordering only picks the emitted label.
     pub fn derive(
         wants: bool,
+        usage_only: bool,
         privacy_blocked: bool,
         lock_blocked: bool,
         last_frame_at_ms: u64,
@@ -46,6 +51,9 @@ impl CaptureState {
         }
         if !wants {
             return CaptureState::PausedUser;
+        }
+        if usage_only {
+            return CaptureState::UsageOnly;
         }
         if privacy_blocked {
             return CaptureState::PausedPrivacy;
@@ -70,6 +78,7 @@ pub fn stall_threshold_ms(interval_secs: u32) -> u64 {
 /// `should_capture()`; the D-Bus service derives the reported `CaptureState`.
 pub struct CaptureGate {
     wants_capture: AtomicBool,
+    usage_only: AtomicBool,
     privacy_blocked: AtomicBool,
     lock_blocked: AtomicBool,
     last_frame_at: AtomicU64,
@@ -84,6 +93,7 @@ impl CaptureGate {
     pub fn new(wants: bool) -> Self {
         Self {
             wants_capture: AtomicBool::new(wants),
+            usage_only: AtomicBool::new(false),
             privacy_blocked: AtomicBool::new(false),
             lock_blocked: AtomicBool::new(false),
             last_frame_at: AtomicU64::new(0),
@@ -102,9 +112,22 @@ impl CaptureGate {
     }
 
     pub fn should_capture(&self) -> bool {
-        self.wants_capture.load(Ordering::SeqCst)
+        self.should_track()
+            && !self.usage_only.load(Ordering::SeqCst)
             && !self.privacy_blocked.load(Ordering::SeqCst)
-            && !self.lock_blocked.load(Ordering::SeqCst)
+    }
+
+    /// Whether focused-app time should be recorded. Unlike screenshots this
+    /// ignores usage-only mode and the privacy veto: it stores app names only.
+    pub fn should_track(&self) -> bool {
+        self.wants_capture.load(Ordering::SeqCst) && !self.lock_blocked.load(Ordering::SeqCst)
+    }
+
+    pub fn usage_only(&self) -> bool {
+        self.usage_only.load(Ordering::SeqCst)
+    }
+    pub fn set_usage_only(&self, v: bool) {
+        self.usage_only.store(v, Ordering::SeqCst);
     }
 
     pub fn wants_capture(&self) -> bool {
@@ -146,6 +169,7 @@ impl CaptureGate {
     pub fn capture_state(&self, now_ms: u64, interval_secs: u32) -> CaptureState {
         CaptureState::derive(
             self.wants_capture.load(Ordering::SeqCst),
+            self.usage_only.load(Ordering::SeqCst),
             self.privacy_blocked.load(Ordering::SeqCst),
             self.lock_blocked.load(Ordering::SeqCst),
             self.last_frame_at(),
@@ -183,47 +207,73 @@ mod tests {
     use crate::window_info::{WindowInfo, WindowInfoError, WindowInfoProvider};
     use async_trait::async_trait;
 
-    // ---- derive() precedence: locked > user > privacy ----
+    // ---- derive() precedence: locked > user > usage_only > privacy ----
     #[test]
     fn derive_capturing_when_all_clear_and_recent_frame() {
-        let s = CaptureState::derive(true, false, false, 1_000, 1_500, 30_000);
+        let s = CaptureState::derive(true, false, false, false, 1_000, 1_500, 30_000);
         assert_eq!(s, CaptureState::Capturing);
     }
 
     #[test]
     fn derive_locked_beats_user_and_privacy() {
         // locked wins even if user also paused and privacy also blocked
-        let s = CaptureState::derive(false, true, true, 1_000, 1_500, 30_000);
+        let s = CaptureState::derive(false, false, true, true, 1_000, 1_500, 30_000);
         assert_eq!(s, CaptureState::PausedLocked);
     }
 
     #[test]
     fn derive_user_beats_privacy() {
-        let s = CaptureState::derive(false, true, false, 1_000, 1_500, 30_000);
+        let s = CaptureState::derive(false, false, true, false, 1_000, 1_500, 30_000);
         assert_eq!(s, CaptureState::PausedUser);
     }
 
     #[test]
+    fn derive_usage_only_beats_privacy_and_stall_but_not_user_or_lock() {
+        assert_eq!(CaptureState::derive(true, true, true, false, 0, 999_999, 30_000), CaptureState::UsageOnly);
+        assert_eq!(CaptureState::derive(false, true, false, false, 0, 1, 30_000), CaptureState::PausedUser);
+        assert_eq!(CaptureState::derive(true, true, false, true, 0, 1, 30_000), CaptureState::PausedLocked);
+        assert_eq!(
+            CaptureState::derive(true, true, false, false, 1_000, 1_500, 30_000).as_str(),
+            "usage_only"
+        );
+    }
+
+    #[test]
+    fn usage_only_stops_screenshots_but_keeps_tracking() {
+        let g = CaptureGate::new(true);
+        g.set_usage_only(true);
+        assert!(!g.should_capture());
+        assert!(g.should_track());
+        g.set_privacy_blocked(true);
+        assert!(g.should_track());
+        g.set_lock_blocked(true);
+        assert!(!g.should_track());
+        g.set_lock_blocked(false);
+        g.set_wants_capture(false);
+        assert!(!g.should_track());
+    }
+
+    #[test]
     fn derive_privacy_when_only_privacy_blocked() {
-        let s = CaptureState::derive(true, true, false, 1_000, 1_500, 30_000);
+        let s = CaptureState::derive(true, false, true, false, 1_000, 1_500, 30_000);
         assert_eq!(s, CaptureState::PausedPrivacy);
     }
 
     #[test]
     fn derive_stalled_when_frame_too_old() {
-        let s = CaptureState::derive(true, false, false, 1_000, 1_000 + 30_001, 30_000);
+        let s = CaptureState::derive(true, false, false, false, 1_000, 1_000 + 30_001, 30_000);
         assert_eq!(s, CaptureState::Stalled);
     }
 
     #[test]
     fn derive_stalled_when_no_frame_yet() {
-        let s = CaptureState::derive(true, false, false, 0, 999_999, 30_000);
+        let s = CaptureState::derive(true, false, false, false, 0, 999_999, 30_000);
         assert_eq!(s, CaptureState::Stalled);
     }
 
     #[test]
     fn derive_not_stalled_just_under_threshold() {
-        let s = CaptureState::derive(true, false, false, 1_000, 1_000 + 30_000, 30_000);
+        let s = CaptureState::derive(true, false, false, false, 1_000, 1_000 + 30_000, 30_000);
         assert_eq!(s, CaptureState::Capturing);
     }
 
