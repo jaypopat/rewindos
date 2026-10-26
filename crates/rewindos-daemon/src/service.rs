@@ -2,6 +2,7 @@ use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+use rewindos_core::analytics::{Analytics, Event, Stamped};
 use rewindos_core::config::AppConfig;
 use rewindos_core::db::Database;
 use rewindos_core::embedding::OllamaClient;
@@ -51,6 +52,7 @@ pub struct DaemonService {
     /// Serializes vault exports spawned by `ExportDay`/`ExportRange`. Runs are
     /// idempotent, but overlapping exports would just duplicate work.
     pub export_lock: Arc<tokio::sync::Mutex<()>>,
+    pub analytics: Arc<Analytics>,
 }
 
 /// Lock a mutex, logging a warning if it was poisoned.
@@ -103,9 +105,18 @@ impl DaemonService {
         #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
     ) -> zbus::fdo::Result<()> {
         info!(enabled, "usage-only mode set via D-Bus");
+        let was_enabled = self.gate.usage_only();
         crate::activity::persist_usage_only(&self.db, enabled)
             .map_err(|e| zbus::fdo::Error::Failed(format!("persist usage-only mode: {e}")))?;
         self.gate.set_usage_only(enabled);
+        if was_enabled != enabled {
+            let analytics = self.analytics.clone();
+            tokio::spawn(async move {
+                analytics
+                    .send(vec![Stamped::now(Event::PrivateModeToggled { enabled })])
+                    .await;
+            });
+        }
 
         let meeting_active = self.meeting_state.active.load(Ordering::Acquire);
         let _ = emitter
