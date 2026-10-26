@@ -1,5 +1,3 @@
-//! `daemon_heartbeat`: which features are on, sent while the daemon runs.
-
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -14,20 +12,17 @@ use crate::capture::gate::CaptureGate;
 const INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
 const STARTUP_DELAY: Duration = Duration::from_secs(30);
 
-/// `semantic_enabled` is whether startup found Ollama: the daemon runs hybrid
-/// search whenever it can, whatever `[semantic] enabled` says.
 pub fn spawn_heartbeat(
     analytics: Arc<Analytics>,
     db: Arc<Mutex<Database>>,
     gate: Arc<CaptureGate>,
-    semantic_enabled: bool,
+    semantic_available: bool,
 ) {
     tokio::spawn(async move {
         tokio::time::sleep(STARTUP_DELAY).await;
         let mut tick = tokio::time::interval(INTERVAL);
         loop {
             tick.tick().await;
-            // Fresh config each tick: the UI edits config.toml without telling us.
             let config = match AppConfig::load() {
                 Ok(c) => c,
                 Err(e) => {
@@ -35,7 +30,7 @@ pub fn spawn_heartbeat(
                     continue;
                 }
             };
-            let event = heartbeat(&config, &db, &gate, semantic_enabled).await;
+            let event = heartbeat(&config, &db, &gate, semantic_available).await;
             analytics.send(vec![Stamped::now(event)]).await;
         }
     });
@@ -45,7 +40,7 @@ async fn heartbeat(
     config: &AppConfig,
     db: &Arc<Mutex<Database>>,
     gate: &CaptureGate,
-    semantic_enabled: bool,
+    semantic_available: bool,
 ) -> Event {
     let db = db.clone();
     let screenshots_today = tokio::task::spawn_blocking(move || screenshots_today(&db))
@@ -53,7 +48,7 @@ async fn heartbeat(
         .unwrap_or(0);
     Event::DaemonHeartbeat(Heartbeat {
         capture_enabled: config.capture.enabled,
-        semantic_enabled,
+        semantic_enabled: semantic_available,
         chat_enabled: config.chat.enabled,
         chat_provider: ChatProvider::from_config(&config.chat),
         agentic_tools: config.chat.agentic_tools,
@@ -138,11 +133,6 @@ mod tests {
         );
     }
 
-    /// Sends a real heartbeat to the PostHog endpoint compiled into this test
-    /// binary: once with `[privacy] analytics = true`, then once with `false`.
-    /// Point it at a local listener to capture the request:
-    ///   REWINDOS_POSTHOG_KEY=test REWINDOS_POSTHOG_HOST=http://127.0.0.1:8765 \
-    ///     cargo test -p rewindos-daemon heartbeat_reaches_the_compiled_endpoint -- --ignored
     #[tokio::test]
     #[ignore = "sends to the compiled-in PostHog endpoint"]
     async fn heartbeat_reaches_the_compiled_endpoint() {

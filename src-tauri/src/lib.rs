@@ -64,8 +64,6 @@ struct AppState {
 }
 
 impl AppState {
-    /// Queues only while analytics is on, so nothing recorded during an
-    /// opt-out goes out after the user opts back in.
     fn track(&self, event: Event) {
         if self.config.lock().is_ok_and(|c| c.privacy.analytics) {
             self.analytics.push(event);
@@ -366,7 +364,6 @@ fn open_extension_page(app: tauri::AppHandle) -> Result<(), String> {
         .map_err(|e| format!("failed to open browser: {e}"))
 }
 
-/// Open docs/analytics.md on GitHub: every event and property analytics sends.
 #[tauri::command]
 fn open_analytics_doc(app: tauri::AppHandle) -> Result<(), String> {
     use tauri_plugin_opener::OpenerExt;
