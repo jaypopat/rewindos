@@ -9,26 +9,45 @@ const EXIT_FLUSH_TIMEOUT: Duration = Duration::from_secs(2);
 
 pub struct Queue {
     analytics: Analytics,
-    pending: Mutex<Vec<Stamped>>,
+    pending: Mutex<Option<Vec<Stamped>>>,
 }
 
 impl Queue {
-    pub fn new(analytics: Analytics) -> Self {
+    pub fn new(analytics: Analytics, enabled: bool) -> Self {
         Self {
             analytics,
-            pending: Mutex::new(Vec::new()),
+            pending: Mutex::new(enabled.then(Vec::new)),
         }
     }
 
+    pub fn set_enabled(&self, enabled: bool) {
+        let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
+        *pending = if enabled {
+            Some(pending.take().unwrap_or_default())
+        } else {
+            None
+        };
+    }
+
     pub fn push(&self, event: Event) {
-        self.pending
+        if let Some(pending) = self
+            .pending
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .push(Stamped::now(event));
+            .as_mut()
+        {
+            pending.push(Stamped::now(event));
+        }
     }
 
     async fn flush(&self) {
-        let events = std::mem::take(&mut *self.pending.lock().unwrap_or_else(|e| e.into_inner()));
+        let events = self
+            .pending
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_mut()
+            .map(std::mem::take)
+            .unwrap_or_default();
         self.analytics.send(events).await;
     }
 }
@@ -93,25 +112,86 @@ mod tests {
     #[tokio::test]
     async fn flush_sends_the_queue_as_one_batch_then_drains() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("config.toml"), "[privacy]\nanalytics = true\n").unwrap();
+        std::fs::write(
+            dir.path().join("config.toml"),
+            "[privacy]\nanalytics = true\n",
+        )
+        .unwrap();
         let (host, requests) = fake_posthog();
-        let queue = Queue::new(Analytics::new(
-            Source::Ui,
-            dir.path().to_path_buf(),
-            Some(Endpoint::new(&host, "test")),
-        ));
+        let queue = Queue::new(
+            Analytics::new(
+                Source::Ui,
+                dir.path().to_path_buf(),
+                Some(Endpoint::new(&host, "test")),
+            ),
+            true,
+        );
 
         queue.push(Event::AppOpened);
-        queue.push(Event::ViewOpened { view: View::Journal });
+        queue.push(Event::ViewOpened {
+            view: View::Journal,
+        });
+        queue.set_enabled(true);
         queue.flush().await;
         queue.flush().await;
 
         let batch = requests.try_recv().expect("first flush sent nothing");
-        let names: Vec<_> = batch["batch"].as_array().unwrap().iter().map(|e| e["event"].clone()).collect();
+        let names: Vec<_> = batch["batch"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| e["event"].clone())
+            .collect();
         assert_eq!(names, [json!("app_opened"), json!("view_opened")]);
         assert_eq!(batch["batch"][1]["properties"]["view"], "journal");
         assert_eq!(batch["batch"][1]["properties"]["source"], "ui");
-        assert!(requests.try_recv().is_err(), "second flush resent the batch");
+        assert!(
+            requests.try_recv().is_err(),
+            "second flush resent the batch"
+        );
+    }
+
+    #[tokio::test]
+    async fn opt_out_discards_pending_events_before_an_immediate_opt_in() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("config.toml"),
+            "[privacy]\nanalytics = true\n",
+        )
+        .unwrap();
+        let (host, requests) = fake_posthog();
+        let queue = Queue::new(
+            Analytics::new(
+                Source::Ui,
+                dir.path().to_path_buf(),
+                Some(Endpoint::new(&host, "test")),
+            ),
+            false,
+        );
+
+        queue.push(Event::AppOpened);
+        queue.flush().await;
+        assert!(requests.try_recv().is_err(), "sent with analytics disabled at startup");
+        queue.set_enabled(true);
+        queue.push(Event::AppOpened);
+        queue.set_enabled(false);
+        queue.push(Event::ViewOpened { view: View::Ask });
+        queue.set_enabled(true);
+        queue.push(Event::ViewOpened {
+            view: View::Settings,
+        });
+        queue.flush().await;
+
+        let body = requests
+            .try_recv()
+            .expect("no event sent after opting back in");
+        let batch = body["batch"].as_array().unwrap();
+        assert_eq!(
+            batch.len(),
+            1,
+            "events survived opt-out or were recorded while disabled"
+        );
+        assert_eq!(batch[0]["properties"]["view"], "settings");
     }
 
     #[test]
@@ -127,7 +207,10 @@ mod tests {
         assert!(parse(json!({ "event": "view_opened", "view": "timeline" })).is_err());
         assert!(parse(json!({ "event": "view_opened" })).is_err());
         assert!(parse(json!({ "event": "app_opened" })).is_err());
-        assert!(parse(json!({ "event": "search_performed", "mode": "keyword", "has_filters": false })).is_err());
+        assert!(parse(
+            json!({ "event": "search_performed", "mode": "keyword", "has_filters": false })
+        )
+        .is_err());
         assert!(parse(json!({ "view": "ask" })).is_err());
     }
 }
