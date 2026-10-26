@@ -22,6 +22,7 @@ vi.mock("@/lib/api", () => ({
 
 import { useConfig } from "./useConfig";
 import { updateConfig } from "@/lib/api";
+import { analytics } from "@/lib/analytics";
 
 function makeWrapper() {
   const client = new QueryClient({
@@ -60,6 +61,7 @@ describe("useConfig auto-save", () => {
     vi.useFakeTimers();
   });
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.useRealTimers();
   });
 
@@ -79,6 +81,8 @@ describe("useConfig auto-save", () => {
   });
 
   it("saves rapid analytics off/on transitions immediately and in order", async () => {
+    const intent = vi.spyOn(analytics, "consentIntent");
+    const persisted = vi.spyOn(analytics, "consentPersisted");
     const { result } = await renderLoaded();
     let releaseOff!: () => void;
     vi.mocked(updateConfig).mockImplementationOnce(
@@ -90,6 +94,8 @@ describe("useConfig auto-save", () => {
       result.current.update("privacy", "analytics", true);
     });
     await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(intent).toHaveBeenCalledTimes(2);
+    expect(persisted).not.toHaveBeenCalled();
     expect(vi.mocked(updateConfig).mock.calls.map(([c]) => c.privacy.analytics)).toEqual([false]);
 
     await act(async () => {
@@ -98,6 +104,26 @@ describe("useConfig auto-save", () => {
     });
     expect(vi.mocked(updateConfig).mock.calls.map(([c]) => c.privacy.analytics)).toEqual([false, true]);
     await act(async () => { await vi.advanceTimersByTimeAsync(800); });
+    expect(updateConfig).toHaveBeenCalledTimes(2);
+  });
+
+  it("stops capture before a queued off save and never acknowledges a failed consent save", async () => {
+    const intent = vi.spyOn(analytics, "consentIntent");
+    const persisted = vi.spyOn(analytics, "consentPersisted");
+    const { result } = await renderLoaded();
+    let release!: () => void;
+    vi.mocked(updateConfig).mockImplementationOnce(() => new Promise<void>((resolve) => { release = resolve; }));
+    act(() => result.current.update("ui", "global_hotkey", "pending"));
+    await act(async () => { result.current.flush(); await vi.advanceTimersByTimeAsync(0); });
+    act(() => result.current.update("privacy", "analytics", false));
+    expect(intent).toHaveBeenCalledTimes(1);
+    expect(updateConfig).toHaveBeenCalledTimes(1);
+    remote.failNext = true;
+    await act(async () => { release(); await vi.advanceTimersByTimeAsync(0); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(result.current.error).toContain("disk full");
+    expect(persisted).not.toHaveBeenCalled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
     expect(updateConfig).toHaveBeenCalledTimes(2);
   });
 

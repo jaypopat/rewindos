@@ -44,7 +44,10 @@ pub enum NativeEvent {
 }
 
 pub fn emit(app: &tauri::AppHandle, event: NativeEvent) {
-    if AppConfig::load().is_ok_and(|config| config.privacy.analytics) {
+    let enabled = AppConfig::default_base_dir()
+        .and_then(|dir| AppConfig::load_from(&dir.join("config.toml")))
+        .is_ok_and(|config| config.privacy.analytics);
+    if enabled {
         let _ = app.emit("analytics-action", event);
     }
 }
