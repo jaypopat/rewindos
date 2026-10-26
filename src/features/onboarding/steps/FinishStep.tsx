@@ -16,6 +16,7 @@ const CLOSING: Record<VerdictCode, string> = {
   stalled:
     "Almost there — capture isn't producing frames yet. The status banner will keep nagging until it is.",
   "paused-user": "You're set — capture is paused; resume it whenever you're ready.",
+  "usage-only": "You're set — Private Mode is on, so only app time is tracked until you turn it off.",
   "paused-locked": "You're set — capture will run whenever your session is unlocked.",
   waiting: "You're set — RewindOS is waiting for its first frame.",
   checking: "You're set — finishing the first capture check.",

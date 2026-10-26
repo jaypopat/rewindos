@@ -1,6 +1,7 @@
 import { lazy, Suspense, useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { getActivity, getDaemonStatus } from "@/lib/api";
+import { hasActivity } from "@/lib/activity";
 import { queryKeys } from "@/lib/query-keys";
 import { formatNumber, formatBytes, formatDuration } from "@/lib/format";
 import { StatCard } from "./StatCard";
@@ -94,20 +95,20 @@ export function ActivityView() {
         </div>
       )}
 
-      {data && data.total_screenshots === 0 && (
+      {data && !hasActivity(data) && (
         <div className="text-center py-20 text-text-muted text-sm">
           No captures in the last {range.label}. Start the daemon to begin recording.
         </div>
       )}
 
-      {data && data.total_screenshots > 0 && (
+      {data && hasActivity(data) && (
         <>
           {/* Row 1: Stat cards */}
           <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
             <StatCard
               label="Screen Time"
-              value={formatDuration(data.total_screenshots * 5)}
-              sparklineData={data.daily_activity.slice(-7).map((d) => d.screenshot_count * 5)}
+              value={formatDuration(data.total_active_seconds)}
+              sparklineData={data.daily_activity.slice(-7).map((d) => d.active_seconds)}
               detail={`${formatNumber(data.total_screenshots)} captures`}
               accentColor="#e8825a"
             />

@@ -21,7 +21,7 @@ use rewindos_core::schema::{
 };
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
-use tauri::menu::{MenuBuilder, MenuItemBuilder};
+use tauri::menu::{CheckMenuItemBuilder, MenuBuilder, MenuItemBuilder};
 use tauri::tray::TrayIconBuilder;
 use tauri::{Emitter, Manager, State};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
@@ -38,7 +38,12 @@ use tracing::warn;
 trait Daemon {
     fn get_status(&self) -> zbus::Result<String>;
     #[zbus(signal)]
-    fn state_changed(&self, is_capturing: bool, meeting_active: bool) -> zbus::Result<()>;
+    fn state_changed(
+        &self,
+        is_capturing: bool,
+        meeting_active: bool,
+        usage_only: bool,
+    ) -> zbus::Result<()>;
 }
 
 struct AppState {
@@ -88,6 +93,8 @@ struct DaemonStatusResponse {
     seconds_since_last_frame: Option<u64>,
     #[serde(default)]
     unfiltered_capture: bool,
+    #[serde(default)]
+    usage_only: bool,
     #[serde(default)]
     meeting_active: bool,
     #[serde(default)]
@@ -199,6 +206,26 @@ async fn resume_capture(state: State<'_, AppState>) -> Result<(), String> {
         .await
         .map_err(|e| format!("dbus call: {e}"))?;
 
+    Ok(())
+}
+
+/// Usage-only (private) mode: the daemon keeps tracking app time but stops
+/// taking screenshots.
+#[tauri::command]
+async fn set_usage_only(state: State<'_, AppState>, enabled: bool) -> Result<(), String> {
+    call_set_usage_only(&state.dbus, enabled).await
+}
+
+async fn call_set_usage_only(dbus: &zbus::Connection, enabled: bool) -> Result<(), String> {
+    dbus.call_method(
+        Some("com.rewindos.Daemon"),
+        "/com/rewindos/Daemon",
+        Some("com.rewindos.Daemon"),
+        "SetUsageOnly",
+        &(enabled,),
+    )
+    .await
+    .map_err(|e| format!("dbus call: {e}"))?;
     Ok(())
 }
 
@@ -1090,9 +1117,9 @@ async fn ask_agentic(
     use rewindos_core::agentic::{execute_tool, tool_schemas};
     use rewindos_core::chat::{ChatClient, ToolTurn};
 
-    let (config, capture_interval) = {
+    let config = {
         let cfg = state.config.lock().map_err(|e| format!("config lock: {e}"))?;
-        (cfg.chat.clone(), cfg.capture.interval_seconds)
+        cfg.chat.clone()
     };
     let client = ChatClient::new(&config);
     let tools = tool_schemas();
@@ -1144,7 +1171,7 @@ async fn ask_agentic(
 
                     let result = {
                         let db = state.db.lock().map_err(|e| format!("db lock: {e}"))?;
-                        execute_tool(&db, &call.name, &call.arguments, now, capture_interval)
+                        execute_tool(&db, &call.name, &call.arguments, now)
                     };
                     let (content, is_error) = match result {
                         Ok(s) => (s, false),
@@ -2066,6 +2093,11 @@ pub fn run() {
             let toggle_item = MenuItemBuilder::with_id("toggle", "Pause Capture")
                 .build(app)
                 .expect("failed to build toggle menu item");
+            let usage_only_item =
+                CheckMenuItemBuilder::with_id("usage_only", "Private Mode (track apps, no screenshots)")
+                    .checked(false)
+                    .build(app)
+                    .expect("failed to build usage-only menu item");
             let open_item = MenuItemBuilder::with_id("open", "Open RewindOS")
                 .build(app)
                 .expect("failed to build open menu item");
@@ -2075,6 +2107,7 @@ pub fn run() {
 
             let tray_menu = MenuBuilder::new(app)
                 .item(&toggle_item)
+                .item(&usage_only_item)
                 .item(&open_item)
                 .separator()
                 .item(&quit_item)
@@ -2091,6 +2124,10 @@ pub fn run() {
             let icon_paused =
                 tauri::image::Image::from_bytes(include_bytes!("../icons/tray-icon-paused.png"))
                     .expect("failed to load paused tray icon");
+            // Amber dot: usage-only (private) mode, app time tracked but no screenshots.
+            let icon_private =
+                tauri::image::Image::from_bytes(include_bytes!("../icons/tray-icon-private.png"))
+                    .expect("failed to load private tray icon");
             // Red square shown while a meeting is recording (takes priority over
             // the capture-state icons).
             let icon_recording =
@@ -2119,6 +2156,7 @@ pub fn run() {
             }
 
             let toggle_item_clone = toggle_item.clone();
+            let usage_only_item_clone = usage_only_item.clone();
             let icon_active_toggle = icon_active.clone();
             let icon_paused_toggle = icon_paused.clone();
 
@@ -2198,6 +2236,18 @@ pub fn run() {
                                 }
                             });
                         }
+                        "usage_only" => {
+                            // The menu flips the check mark on click; send that as the
+                            // new mode. The StateChanged signal re-syncs it either way.
+                            let enabled = usage_only_item_clone.is_checked().unwrap_or(false);
+                            let app = app.clone();
+                            tauri::async_runtime::spawn(async move {
+                                let dbus = app.state::<AppState>().dbus.clone();
+                                if let Err(e) = call_set_usage_only(&dbus, enabled).await {
+                                    warn!("failed to set usage-only mode from tray: {e}");
+                                }
+                            });
+                        }
                         "open" => {
                             if let Some(window) = app.get_webview_window("main") {
                                 let _ = window.show();
@@ -2220,7 +2270,9 @@ pub fn run() {
             // the initial icon with a single GetStatus, then react to each signal.
             let app_handle = app.handle().clone();
             let tray_toggle = toggle_item.clone();
+            let tray_usage_only = usage_only_item.clone();
             let icon_active_tray = icon_active.clone();
+            let icon_private_tray = icon_private.clone();
             let icon_paused_tray = icon_paused.clone();
             let icon_recording_tray = icon_recording.clone();
             tauri::async_runtime::spawn(async move {
@@ -2233,16 +2285,19 @@ pub fn run() {
                     }
                 };
 
-                // Apply a (is_capturing, meeting_active) state to the tray, only
-                // touching it when the resolved state actually changes.
+                // Apply a (is_capturing, meeting_active, usage_only) state to the
+                // tray, only touching it when the resolved state actually changes.
                 let mut last: Option<&'static str> = None;
-                let mut apply = |is_capturing: bool, meeting_active: bool| {
+                let mut apply = |is_capturing: bool, meeting_active: bool, usage_only: bool| {
+                    let _ = tray_usage_only.set_checked(usage_only);
                     let next = if meeting_active {
                         "recording"
-                    } else if is_capturing {
-                        "capturing"
-                    } else {
+                    } else if !is_capturing {
                         "paused"
+                    } else if usage_only {
+                        "private"
+                    } else {
+                        "capturing"
                     };
                     if last == Some(next) {
                         return;
@@ -2259,6 +2314,10 @@ pub fn run() {
                                 (&icon_recording_tray, "RewindOS - ● Recording meeting")
                             }
                             "capturing" => (&icon_active_tray, "RewindOS - Capturing"),
+                            "private" => (
+                                &icon_private_tray,
+                                "RewindOS - Private Mode (tracking apps, no screenshots)",
+                            ),
                             _ => (&icon_paused_tray, "RewindOS - Paused"),
                         };
                         let _ = tray.set_icon(Some(icon.clone()));
@@ -2273,6 +2332,7 @@ pub fn run() {
                         apply(
                             v["is_capturing"].as_bool().unwrap_or(true),
                             v["meeting_active"].as_bool().unwrap_or(false),
+                            v["usage_only"].as_bool().unwrap_or(false),
                         );
                     }
                 }
@@ -2281,7 +2341,7 @@ pub fn run() {
                     Ok(mut stream) => {
                         while let Some(sig) = stream.next().await {
                             if let Ok(args) = sig.args() {
-                                apply(args.is_capturing, args.meeting_active);
+                                apply(args.is_capturing, args.meeting_active, args.usage_only);
                             }
                         }
                     }
@@ -2303,6 +2363,7 @@ pub fn run() {
             get_daemon_status,
             pause_capture,
             resume_capture,
+            set_usage_only,
             gnome_extension_status,
             recheck_window_info,
             open_extension_page,

@@ -46,7 +46,6 @@ pub fn execute_tool(
     name: &str,
     args: &Value,
     now: i64,
-    capture_interval_secs: u32,
 ) -> Result<String> {
     fn parse<T: serde::de::DeserializeOwned>(args: &Value) -> Result<T> {
         serde_json::from_value(args.clone())
@@ -55,7 +54,7 @@ pub fn execute_tool(
     let out: Value = match name {
         "search_screenshots" => json!(mcp::search_screenshots(db, parse(args)?)?),
         "get_timeline" => json!(mcp::get_timeline(db, parse(args)?)?),
-        "get_app_usage" => json!(mcp::get_app_usage(db, parse(args)?, capture_interval_secs)?),
+        "get_app_usage" => json!(mcp::get_app_usage(db, parse(args)?)?),
         "get_screenshot_detail" => json!(mcp::get_screenshot_detail(db, parse(args)?)?),
         "get_recent_activity" => json!(mcp::get_recent_activity(db, parse(args)?, now)?),
         "search_transcripts" => json!(mcp::search_transcripts(db, parse(args)?, now)?),
@@ -92,7 +91,7 @@ mod tests {
     fn execute_search_returns_json_with_seeded_row() {
         let db = Database::open_in_memory().unwrap();
         let args = json!({ "query": "rust async", "limit": 5 });
-        let out = execute_tool(&db, "search_screenshots", &args, 1_700_000_000, 5).unwrap();
+        let out = execute_tool(&db, "search_screenshots", &args, 1_700_000_000).unwrap();
         // Valid JSON array (empty is fine — no rows seeded), proves dispatch + serialize.
         let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert!(parsed.is_array());
@@ -101,6 +100,6 @@ mod tests {
     #[test]
     fn execute_unknown_tool_errors() {
         let db = Database::open_in_memory().unwrap();
-        assert!(execute_tool(&db, "no_such_tool", &serde_json::Value::Null, 0, 5).is_err());
+        assert!(execute_tool(&db, "no_such_tool", &serde_json::Value::Null, 0).is_err());
     }
 }

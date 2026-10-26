@@ -106,15 +106,13 @@ pub struct AppUsage {
 pub fn get_app_usage(
     db: &Database,
     input: GetAppUsageInput,
-    capture_interval_seconds: u32,
 ) -> crate::error::Result<Vec<AppUsage>> {
     let stats = db.get_app_usage_stats(input.start_time, Some(input.end_time))?;
-    let seconds = capture_interval_seconds as f64;
     Ok(stats
         .into_iter()
         .map(|s| AppUsage {
             app_name: s.app_name,
-            minutes: s.screenshot_count as f64 * seconds / 60.0,
+            minutes: s.active_seconds as f64 / 60.0,
             screenshot_count: s.screenshot_count,
         })
         .collect())
@@ -433,7 +431,11 @@ mod tests {
         let db = Database::open_in_memory().unwrap();
         seed_screenshot(&db, "firefox", "A", "window text a", 1_700_000_000);
         seed_screenshot(&db, "firefox", "B", "window text b", 1_700_000_030);
-        seed_screenshot(&db, "code", "C", "window text c", 1_700_000_060);
+        db.record_app_activity("firefox", 1_700_000_000, 90).unwrap();
+        db.record_app_activity("firefox", 1_700_000_060, 90).unwrap();
+        // Usage-only time: focused but never screenshotted.
+        db.record_app_activity("notes", 1_700_000_120, 90).unwrap();
+        db.record_app_activity("notes", 1_700_000_150, 90).unwrap();
 
         let usage = get_app_usage(
             &db,
@@ -441,13 +443,15 @@ mod tests {
                 start_time: 0,
                 end_time: 2_000_000_000,
             },
-            5,
         )
         .unwrap();
 
         let firefox = usage.iter().find(|u| u.app_name == "firefox").unwrap();
         assert_eq!(firefox.screenshot_count, 2);
-        assert!((firefox.minutes - (2.0 * 5.0 / 60.0)).abs() < 0.001);
+        assert!((firefox.minutes - 2.0).abs() < 0.001);
+        let notes = usage.iter().find(|u| u.app_name == "notes").unwrap();
+        assert_eq!(notes.screenshot_count, 0);
+        assert!((notes.minutes - 0.5).abs() < 0.001);
     }
 
     #[test]

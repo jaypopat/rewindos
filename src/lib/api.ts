@@ -65,6 +65,7 @@ export interface DaemonStatus {
   capture_state?: string | null;
   seconds_since_last_frame?: number | null;
   unfiltered_capture?: boolean;
+  usage_only?: boolean;
   meeting_active?: boolean;
   meeting_id?: number | null;
   meeting_started_at?: number | null;
@@ -114,6 +115,10 @@ export async function resumeCapture(): Promise<void> {
   return invoke("resume_capture");
 }
 
+export async function setUsageOnly(enabled: boolean): Promise<void> {
+  return invoke("set_usage_only", { enabled });
+}
+
 export interface ExtensionStatus {
   installed: boolean;
 }
@@ -141,6 +146,8 @@ export async function getAppNames(): Promise<string[]> {
 export interface AppUsageStat {
   app_name: string;
   screenshot_count: number;
+  /** Measured focused time; also counted in usage-only (private) mode. */
+  active_seconds: number;
   percentage: number;
 }
 
@@ -148,6 +155,7 @@ export interface DailyActivity {
   date: string;
   screenshot_count: number;
   unique_apps: number;
+  active_seconds: number;
 }
 
 export interface HourlyActivity {
@@ -161,6 +169,7 @@ export interface ActivityResponse {
   hourly_activity: HourlyActivity[];
   total_screenshots: number;
   total_apps: number;
+  total_active_seconds: number;
 }
 
 export async function getActivity(

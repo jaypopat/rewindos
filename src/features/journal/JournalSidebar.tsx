@@ -1,4 +1,5 @@
 import type { JournalDateInfo, JournalStreakInfo, ActivityResponse } from "@/lib/api";
+import { hasActivity } from "@/lib/activity";
 import { cn } from "@/lib/utils";
 import { AppDot } from "@/components/AppDot";
 import { Flame, Lightbulb, Download } from "lucide-react";
@@ -83,7 +84,7 @@ export function JournalSidebar({
             </h3>
             <div className="space-y-1.5">
               {activityData.app_usage.slice(0, 6).map((app) => {
-                const mins = Math.round((app.screenshot_count * 5) / 60);
+                const mins = Math.round(app.active_seconds / 60);
                 return (
                   <div key={app.app_name} className="flex items-center gap-2">
                     <AppDot appName={app.app_name} size={6} />
@@ -135,7 +136,7 @@ export function JournalSidebar({
         </Button>
 
         {/* Empty state for days with no data */}
-        {activityData && activityData.total_screenshots === 0 && (
+        {activityData && !hasActivity(activityData) && (
           <div className="text-center py-6">
             <p className="text-xs text-text-muted">No captured data for this day.</p>
             <p className="text-[10px] text-text-muted mt-1">

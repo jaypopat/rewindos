@@ -157,13 +157,12 @@ pub async fn build(
             let db = db.lock().map_err(|e| format!("db lock: {e}"))?;
             let stats = db.get_app_usage_stats(start, Some(end)).unwrap_or_default();
             let sessions = db.get_ocr_sessions_with_ids(start, end, 80, None).unwrap_or_default();
-            let secs = config.capture.interval_seconds as f64;
             let stat_tuples: Vec<_> = stats
                 .iter()
                 .map(|s| {
                     (
                         s.app_name.clone(),
-                        s.screenshot_count as f64 * secs / 60.0,
+                        s.active_seconds as f64 / 60.0,
                         s.screenshot_count as usize,
                     )
                 })
