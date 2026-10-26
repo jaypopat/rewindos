@@ -13,7 +13,6 @@ pub mod paddle_ocr;
 pub mod prompts;
 pub mod schema;
 pub mod summary;
-pub mod usage;
 pub mod vault;
 pub mod whisper_model;
 
