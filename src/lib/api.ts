@@ -743,7 +743,7 @@ export async function getConfig(): Promise<AppConfig> {
 }
 
 export async function updateConfig(
-  config: Record<string, unknown>,
+  config: AppConfig,
 ): Promise<void> {
   return invoke("update_config", { configJson: config });
 }
