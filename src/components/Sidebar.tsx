@@ -163,6 +163,8 @@ function NavButton({ item, active, collapsed, onSelect }: NavButtonProps) {
   return (
     <Button
       variant="ghost"
+      data-analytics-control={`nav-${view}`}
+      data-ph-capture-attribute-control={`nav-${view}`}
       onClick={() => onSelect(view)}
       title={`${label} (${shortcut})`}
       className={cn(
@@ -191,7 +193,7 @@ function NavButton({ item, active, collapsed, onSelect }: NavButtonProps) {
       >
         {icon}
       </span>
-      {!collapsed && <span className="text-sm font-[450] tracking-tight">{label}</span>}
+      {!collapsed && <span data-replay-label={`nav-${view}`} className="text-sm font-[450] tracking-tight">{label}</span>}
     </Button>
   );
 }

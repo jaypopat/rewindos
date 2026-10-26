@@ -1,216 +1,90 @@
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::path::Path;
 
-use rewindos_core::analytics::{Analytics, Event, Stamped, View};
-use serde::Deserialize;
+use rewindos_core::analytics::{install_id, ChatProvider, CommonProps, Endpoint, Source};
+use rewindos_core::config::AppConfig;
+use rewindos_core::schema::SearchMode;
+use serde::Serialize;
+use tauri::Emitter;
 
-const FLUSH_EVERY: Duration = Duration::from_secs(60);
-const EXIT_FLUSH_TIMEOUT: Duration = Duration::from_secs(2);
-
-pub struct Queue {
-    analytics: Analytics,
-    pending: Mutex<Option<Vec<Stamped>>>,
+#[derive(Serialize)]
+pub struct Bootstrap {
+    enabled: bool,
+    project: Option<Project>,
 }
 
-impl Queue {
-    pub fn new(analytics: Analytics, enabled: bool) -> Self {
-        Self {
-            analytics,
-            pending: Mutex::new(enabled.then(Vec::new)),
-        }
-    }
-
-    pub fn set_enabled(&self, enabled: bool) {
-        let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
-        *pending = if enabled {
-            Some(pending.take().unwrap_or_default())
-        } else {
-            None
-        };
-    }
-
-    pub fn push(&self, event: Event) {
-        if let Some(pending) = self
-            .pending
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .as_mut()
-        {
-            pending.push(Stamped::now(event));
-        }
-    }
-
-    async fn flush(&self) {
-        let events = self
-            .pending
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .as_mut()
-            .map(std::mem::take)
-            .unwrap_or_default();
-        self.analytics.send(events).await;
-    }
+#[derive(Serialize)]
+struct Project {
+    endpoint: Endpoint,
+    distinct_id: String,
+    common: CommonProps,
 }
 
-pub fn spawn_flusher(queue: Arc<Queue>) {
-    tauri::async_runtime::spawn(async move {
-        loop {
-            tokio::time::sleep(FLUSH_EVERY).await;
-            queue.flush().await;
-        }
-    });
+pub fn bootstrap(dir: &Path, endpoint: Option<Endpoint>) -> Result<Bootstrap, String> {
+    let enabled = AppConfig::load_from(&dir.join("config.toml"))
+        .is_ok_and(|config| config.privacy.analytics);
+    let project = if enabled {
+        endpoint.map(|endpoint| {
+            Ok::<_, String>(Project {
+                endpoint,
+                distinct_id: install_id(dir).map_err(|e| e.to_string())?.to_string(),
+                common: CommonProps::detect(Source::Ui),
+            })
+        }).transpose()?
+    } else {
+        None
+    };
+    Ok(Bootstrap { enabled, project })
 }
 
-/// Blocks quitting for at most `EXIT_FLUSH_TIMEOUT`, so a dead network can't hang it.
-pub fn flush_on_exit(queue: &Queue) {
-    tauri::async_runtime::block_on(async {
-        let _ = tokio::time::timeout(EXIT_FLUSH_TIMEOUT, queue.flush()).await;
-    });
-}
-
-/// The events the frontend may report through `track_event`. Everything else
-/// is emitted in Rust where the action happens.
-#[derive(Debug, PartialEq, Eq, Deserialize)]
+#[derive(Clone, Serialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
-pub enum UiEvent {
-    ViewOpened { view: View },
+pub enum NativeEvent {
+    SearchPerformed { mode: SearchMode, has_filters: bool },
+    AskSent { provider: ChatProvider },
 }
 
-impl From<UiEvent> for Event {
-    fn from(event: UiEvent) -> Self {
-        match event {
-            UiEvent::ViewOpened { view } => Event::ViewOpened { view },
-        }
+pub fn emit(app: &tauri::AppHandle, event: NativeEvent) {
+    if AppConfig::load().is_ok_and(|config| config.privacy.analytics) {
+        let _ = app.emit("analytics-action", event);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rewindos_core::analytics::{Endpoint, Source};
     use serde_json::json;
 
-    fn parse(value: serde_json::Value) -> Result<UiEvent, serde_json::Error> {
-        serde_json::from_value(value)
+    #[test]
+    fn bootstrap_reuses_the_daemon_identity_and_exposes_only_public_config() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("config.toml"), "[privacy]\nanalytics = true\n").unwrap();
+        let daemon_id = install_id(dir.path()).unwrap();
+        let value = serde_json::to_value(bootstrap(dir.path(), Some(Endpoint::new("https://us.i.posthog.com", "public"))).unwrap()).unwrap();
+        assert_eq!(value["project"]["distinct_id"], daemon_id.to_string());
+        assert_eq!(value["project"]["endpoint"], json!({"host": "https://us.i.posthog.com", "api_key": "public"}));
+        assert_eq!(value["project"]["common"]["source"], "ui");
+        assert_eq!(value["project"].as_object().unwrap().len(), 3);
     }
 
-    fn fake_posthog() -> (String, std::sync::mpsc::Receiver<serde_json::Value>) {
-        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
-        let host = format!("http://{}", server.server_addr().to_ip().unwrap());
-        let (tx, rx) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
-            for mut request in server.incoming_requests() {
-                let mut body = String::new();
-                request.as_reader().read_to_string(&mut body).unwrap();
-                tx.send(serde_json::from_str(&body).unwrap()).unwrap();
-                request.respond(tiny_http::Response::empty(200)).unwrap();
+    #[test]
+    fn no_key_opt_out_and_unreadable_config_never_create_an_identity() {
+        for (config, endpoint) in [
+            (Some(true), None),
+            (Some(false), Some(Endpoint::new("http://localhost", "k"))),
+            (None, Some(Endpoint::new("http://localhost", "k"))),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            if let Some(enabled) = config {
+                std::fs::write(dir.path().join("config.toml"), format!("[privacy]\nanalytics = {enabled}\n")).unwrap();
             }
-        });
-        (host, rx)
-    }
-
-    #[tokio::test]
-    async fn flush_sends_the_queue_as_one_batch_then_drains() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(
-            dir.path().join("config.toml"),
-            "[privacy]\nanalytics = true\n",
-        )
-        .unwrap();
-        let (host, requests) = fake_posthog();
-        let queue = Queue::new(
-            Analytics::new(
-                Source::Ui,
-                dir.path().to_path_buf(),
-                Some(Endpoint::new(&host, "test")),
-            ),
-            true,
-        );
-
-        queue.push(Event::AppOpened);
-        queue.push(Event::ViewOpened {
-            view: View::Journal,
-        });
-        queue.set_enabled(true);
-        queue.flush().await;
-        queue.flush().await;
-
-        let batch = requests.try_recv().expect("first flush sent nothing");
-        let names: Vec<_> = batch["batch"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|e| e["event"].clone())
-            .collect();
-        assert_eq!(names, [json!("app_opened"), json!("view_opened")]);
-        assert_eq!(batch["batch"][1]["properties"]["view"], "journal");
-        assert_eq!(batch["batch"][1]["properties"]["source"], "ui");
-        assert!(
-            requests.try_recv().is_err(),
-            "second flush resent the batch"
-        );
-    }
-
-    #[tokio::test]
-    async fn opt_out_discards_pending_events_before_an_immediate_opt_in() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(
-            dir.path().join("config.toml"),
-            "[privacy]\nanalytics = true\n",
-        )
-        .unwrap();
-        let (host, requests) = fake_posthog();
-        let queue = Queue::new(
-            Analytics::new(
-                Source::Ui,
-                dir.path().to_path_buf(),
-                Some(Endpoint::new(&host, "test")),
-            ),
-            false,
-        );
-
-        queue.push(Event::AppOpened);
-        queue.flush().await;
-        assert!(requests.try_recv().is_err(), "sent with analytics disabled at startup");
-        queue.set_enabled(true);
-        queue.push(Event::AppOpened);
-        queue.set_enabled(false);
-        queue.push(Event::ViewOpened { view: View::Ask });
-        queue.set_enabled(true);
-        queue.push(Event::ViewOpened {
-            view: View::Settings,
-        });
-        queue.flush().await;
-
-        let body = requests
-            .try_recv()
-            .expect("no event sent after opting back in");
-        let batch = body["batch"].as_array().unwrap();
-        assert_eq!(
-            batch.len(),
-            1,
-            "events survived opt-out or were recorded while disabled"
-        );
-        assert_eq!(batch[0]["properties"]["view"], "settings");
+            assert!(bootstrap(dir.path(), endpoint).unwrap().project.is_none());
+            assert!(!dir.path().join("install_id").exists());
+        }
     }
 
     #[test]
-    fn track_event_accepts_known_views() {
-        assert_eq!(
-            parse(json!({ "event": "view_opened", "view": "ask" })).unwrap(),
-            UiEvent::ViewOpened { view: View::Ask }
-        );
-    }
-
-    #[test]
-    fn track_event_rejects_unknown_views_and_events() {
-        assert!(parse(json!({ "event": "view_opened", "view": "timeline" })).is_err());
-        assert!(parse(json!({ "event": "view_opened" })).is_err());
-        assert!(parse(json!({ "event": "app_opened" })).is_err());
-        assert!(parse(
-            json!({ "event": "search_performed", "mode": "keyword", "has_filters": false })
-        )
-        .is_err());
-        assert!(parse(json!({ "view": "ask" })).is_err());
+    fn bridge_has_exact_content_free_properties() {
+        assert_eq!(serde_json::to_value(NativeEvent::SearchPerformed { mode: SearchMode::Hybrid, has_filters: true }).unwrap(), json!({"event": "search_performed", "mode": "hybrid", "has_filters": true}));
+        assert_eq!(serde_json::to_value(NativeEvent::AskSent { provider: ChatProvider::ClaudeCode }).unwrap(), json!({"event": "ask_sent", "provider": "claude_code"}));
     }
 }

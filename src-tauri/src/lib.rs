@@ -11,7 +11,7 @@ mod updater;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use rewindos_core::analytics::{Analytics, ChatProvider, Endpoint, Event, Source};
+use rewindos_core::analytics::{ChatProvider, Endpoint};
 use rewindos_core::config::AppConfig;
 use rewindos_core::db::Database;
 use rewindos_core::embedding::OllamaClient as EmbeddingClient;
@@ -60,7 +60,6 @@ struct AppState {
     /// the precomputed (app_breakdown, screenshot_count) so polls can render
     /// without recomputing or surfacing a stale cache mid-regeneration.
     daily_summary_in_flight: Arc<tokio::sync::Mutex<HashMap<String, (Vec<AppTimeEntry>, i64)>>>,
-    analytics: Arc<analytics::Queue>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -125,6 +124,7 @@ struct UiSearchFilters {
 
 #[tauri::command]
 async fn search(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     query: String,
     filters: UiSearchFilters,
@@ -154,14 +154,15 @@ async fn search(
     if let Some(mode) = response.search_mode {
         let has_filters =
             filters.start_time.is_some() || filters.end_time.is_some() || filters.app_name.is_some();
-        state.analytics.push(Event::SearchPerformed { mode, has_filters });
+        analytics::emit(&app, analytics::NativeEvent::SearchPerformed { mode, has_filters });
     }
     Ok(response)
 }
 
 #[tauri::command]
-fn track_event(state: State<'_, AppState>, event: analytics::UiEvent) {
-    state.analytics.push(event.into());
+fn analytics_bootstrap() -> Result<analytics::Bootstrap, String> {
+    let dir = AppConfig::default_base_dir().map_err(|e| e.to_string())?;
+    analytics::bootstrap(&dir, Endpoint::compiled())
 }
 
 #[tauri::command]
@@ -1007,6 +1008,7 @@ async fn build_chat_context(
 
 #[tauri::command]
 async fn ask_claude(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     chat_id: i64,
     prompt: String,
@@ -1039,7 +1041,7 @@ async fn ask_claude(
         )
         .map_err(|e| e.to_string())?;
     }
-    state.analytics.push(Event::AskSent { provider: ChatProvider::ClaudeCode });
+    analytics::emit(&app, analytics::NativeEvent::AskSent { provider: ChatProvider::ClaudeCode });
 
     let resume = existing_session_id.is_some();
     let session_arg = existing_session_id
@@ -1134,6 +1136,7 @@ async fn ask_claude(
 /// user message is NOT written here to avoid a double-write.
 #[tauri::command]
 async fn ask_agentic(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     chat_id: i64,
     prompt: String,
@@ -1146,7 +1149,7 @@ async fn ask_agentic(
         let cfg = state.config.lock().map_err(|e| format!("config lock: {e}"))?;
         cfg.chat.clone()
     };
-    state.analytics.push(Event::AskSent { provider: ChatProvider::from_config(&config) });
+    analytics::emit(&app, analytics::NativeEvent::AskSent { provider: ChatProvider::from_config(&config) });
     let client = ChatClient::new(&config);
     let tools = tool_schemas();
     let now = chrono::Utc::now().timestamp();
@@ -1862,13 +1865,14 @@ enum ChatStreamEvent {
 
 #[tauri::command]
 async fn chat_stream_completion(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     stream_id: String,
     chat: rewindos_core::config::ChatConfig,
     messages: Vec<rewindos_core::chat::ChatMessage>,
     on_event: tauri::ipc::Channel<ChatStreamEvent>,
 ) -> Result<(), String> {
-    state.analytics.push(Event::AskSent { provider: ChatProvider::from_config(&chat) });
+    analytics::emit(&app, analytics::NativeEvent::AskSent { provider: ChatProvider::from_config(&chat) });
     let cancelled = Arc::new(std::sync::atomic::AtomicBool::new(false));
     {
         let mut map = state.chat_cancel_flags.lock().await;
@@ -1958,7 +1962,6 @@ fn update_config(state: State<'_, AppState>, config_json: serde_json::Value) -> 
     rewindos_core::config::write_config_file(&config_path, &toml_str)
         .map_err(|e| format!("write config: {e}"))?;
 
-    state.analytics.set_enabled(new_config.privacy.analytics);
     *cfg = new_config;
 
     Ok(())
@@ -2078,13 +2081,6 @@ pub fn run() {
                 None
             };
 
-            let analytics = Arc::new(analytics::Queue::new(Analytics::new(
-                Source::Ui,
-                AppConfig::default_base_dir().map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?,
-                Endpoint::compiled(),
-            ), config.privacy.analytics));
-            analytics::spawn_flusher(analytics.clone());
-
             let audio_server = match audio_server::AudioServer::start() {
                 Ok(s) => Some(s),
                 Err(e) => {
@@ -2102,9 +2098,7 @@ pub fn run() {
                 chat_cancel_flags: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
                 audio_server,
                 daily_summary_in_flight: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
-                analytics,
             });
-            app.state::<AppState>().analytics.push(Event::AppOpened);
 
             // Register Ctrl+Shift+Space global shortcut
             let ctrl_shift_space =
@@ -2392,7 +2386,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             search,
-            track_event,
+            analytics_bootstrap,
             get_daemon_status,
             pause_capture,
             resume_capture,
@@ -2487,12 +2481,5 @@ pub fn run() {
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|app, event| {
-            if let tauri::RunEvent::Exit = event {
-                if let Some(state) = app.try_state::<AppState>() {
-                    analytics::flush_on_exit(&state.analytics);
-                }
-            }
-        });
+        .run(|_app, _event| {});
 }
-

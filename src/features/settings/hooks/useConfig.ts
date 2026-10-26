@@ -1,3 +1,4 @@
+import { analytics } from "@/lib/analytics";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { updateConfig } from "@/lib/api";
@@ -21,10 +22,14 @@ export function useConfig() {
     configRef.current = config;
   }, [config]);
 
+  const consentTickets = useRef(new WeakMap<AppConfig, number>());
+
   const saveMutation = useMutation({
     scope: { id: "settings-config" },
     mutationFn: updateConfig,
     onSuccess: (_data, sent) => {
+      const ticket = consentTickets.current.get(sent);
+      if (ticket !== undefined) analytics.consentPersisted(ticket);
       queryClient.setQueryData(queryKeys.config(), sent);
       queryClient.invalidateQueries({ queryKey: queryKeys.config() });
       // Clear the buffer only if no newer edits arrived while this save was
@@ -94,7 +99,10 @@ export function useConfig() {
       const next = { ...base, [section]: { ...base[section], [key]: value } };
       configRef.current = next;
       setLocalEdits(next);
-      if (section === "privacy" && key === "analytics") saveNow(next);
+      if (section === "privacy" && key === "analytics") {
+        consentTickets.current.set(next, analytics.consentIntent());
+        saveNow(next);
+      }
     },
     [saveNow],
   );
