@@ -1,4 +1,5 @@
 pub mod agentic;
+pub mod analytics;
 pub mod app_label;
 pub mod chat;
 pub mod chat_store;
