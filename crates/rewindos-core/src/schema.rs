@@ -179,6 +179,8 @@ impl OcrStatus {
 pub struct AppUsageStat {
     pub app_name: String,
     pub screenshot_count: i64,
+    /// Focused time from `app_sessions`, counted in usage-only mode too.
+    pub active_seconds: i64,
     pub percentage: f64,
 }
 
@@ -187,6 +189,7 @@ pub struct DailyActivity {
     pub date: String,
     pub screenshot_count: i64,
     pub unique_apps: i64,
+    pub active_seconds: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -202,6 +205,7 @@ pub struct ActivityResponse {
     pub hourly_activity: Vec<HourlyActivity>,
     pub total_screenshots: i64,
     pub total_apps: i64,
+    pub total_active_seconds: i64,
 }
 
 // -- Task breakdown / active blocks --

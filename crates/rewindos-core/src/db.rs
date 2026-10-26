@@ -306,6 +306,11 @@ pub fn fts5_quote(raw: &str) -> String {
         .join(" OR ")
 }
 
+/// Seconds of an `app_sessions` row inside [?1, ?2), with ?2 NULL meaning open-ended.
+const CLIPPED_SECONDS: &str = "MIN(ended_at, COALESCE(?2, ended_at)) - MAX(started_at, ?1)";
+/// `app_sessions` rows overlapping [?1, ?2).
+const SESSION_OVERLAPS: &str = "ended_at > ?1 AND (?2 IS NULL OR started_at < ?2)";
+
 pub struct Database {
     conn: Connection,
 }
@@ -922,6 +927,7 @@ impl Database {
             "DELETE FROM screenshots WHERE timestamp < ?1",
             params![timestamp],
         )?;
+        self.trim_app_sessions(i64::MIN, timestamp)?;
 
         Self::remove_files(&paths);
         Ok(count as u64)
@@ -944,6 +950,7 @@ impl Database {
             "DELETE FROM screenshots WHERE timestamp >= ?1 AND timestamp < ?2",
             params![start, end],
         )?;
+        self.trim_app_sessions(start, end)?;
 
         Self::remove_files(&paths);
         Ok(count as u64)
@@ -1075,12 +1082,73 @@ impl Database {
         Ok(rows.filter_map(|r| r.ok()).collect())
     }
 
-    /// Rename every screenshot row with app_name `from` to `to`. Returns rows changed.
+    /// Rename every screenshot row with app_name `from` to `to`, and the matching
+    /// app sessions. Returns screenshot rows changed.
     pub fn rename_app(&self, from: &str, to: &str) -> Result<u64> {
         let n = self
             .conn
             .execute("UPDATE screenshots SET app_name = ?2 WHERE app_name = ?1", [from, to])?;
+        self.conn
+            .execute("UPDATE app_sessions SET app_name = ?2 WHERE app_name = ?1", [from, to])?;
         Ok(n as u64)
+    }
+
+    /// Record that `app_name` is focused at `now`. Extends the latest session
+    /// when it is the same app and no more than `max_gap` seconds old; on an app
+    /// switch the previous session is closed at `now` so no time is lost between
+    /// samples. A longer gap (lock, pause, suspend) always starts a new session.
+    pub fn record_app_activity(&self, app_name: &str, now: i64, max_gap: i64) -> Result<()> {
+        let tx = self.conn.unchecked_transaction()?;
+        let latest: Option<(i64, String, i64)> = tx
+            .query_row(
+                "SELECT id, app_name, ended_at FROM app_sessions
+                 ORDER BY ended_at DESC, id DESC LIMIT 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .optional()?;
+
+        let continuous = |ended_at: i64| now >= ended_at && now - ended_at <= max_gap;
+        match latest {
+            Some((id, ref app, ended_at)) if app == app_name && continuous(ended_at) => {
+                tx.execute("UPDATE app_sessions SET ended_at = ?2 WHERE id = ?1", params![id, now])?;
+            }
+            other => {
+                if let Some((id, _, ended_at)) = other {
+                    if continuous(ended_at) {
+                        tx.execute(
+                            "UPDATE app_sessions SET ended_at = ?2 WHERE id = ?1",
+                            params![id, now],
+                        )?;
+                    }
+                }
+                tx.execute(
+                    "INSERT INTO app_sessions (app_name, started_at, ended_at) VALUES (?1, ?2, ?2)",
+                    params![app_name, now],
+                )?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Trim app sessions so none covers time in [start, end). A session that
+    /// straddles the whole range is cut at `start`, erring toward deleting more.
+    fn trim_app_sessions(&self, start: i64, end: i64) -> Result<()> {
+        self.conn.execute(
+            "DELETE FROM app_sessions WHERE started_at >= ?1 AND ended_at <= ?2",
+            params![start, end],
+        )?;
+        self.conn.execute(
+            "UPDATE app_sessions SET ended_at = ?1 WHERE started_at < ?1 AND ended_at > ?1",
+            params![start],
+        )?;
+        self.conn.execute(
+            "UPDATE app_sessions SET started_at = ?2
+             WHERE started_at >= ?1 AND started_at < ?2 AND ended_at > ?2",
+            params![start, end],
+        )?;
+        Ok(())
     }
 
     /// Full-text search with filters, pagination, snippet highlighting, and scene dedup.
@@ -1293,67 +1361,111 @@ impl Database {
 
     /// Get app usage statistics in a time range [since, until).
     /// If `until` is `None`, no upper bound is applied (open-ended).
+    /// Time comes from `app_sessions`; screenshot counts ride along. Apps seen
+    /// only in usage-only mode appear with a zero screenshot count.
     pub fn get_app_usage_stats(&self, since: i64, until: Option<i64>) -> Result<Vec<AppUsageStat>> {
-        let total: f64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM screenshots
-             WHERE timestamp >= ?1 AND (?2 IS NULL OR timestamp < ?2) AND app_name IS NOT NULL",
-            params![since, until],
-            |row| row.get(0),
-        )?;
+        let mut by_app: std::collections::HashMap<String, (i64, i64)> =
+            std::collections::HashMap::new();
 
-        if total == 0.0 {
-            return Ok(Vec::new());
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT app_name, SUM({CLIPPED_SECONDS}) FROM app_sessions
+             WHERE {SESSION_OVERLAPS} GROUP BY app_name"
+        ))?;
+        let rows = stmt.query_map(params![since, until], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })?;
+        for row in rows {
+            let (app, secs) = row?;
+            by_app.entry(app).or_default().0 += secs;
         }
 
         let mut stmt = self.conn.prepare(
-            "SELECT app_name, COUNT(*) as cnt
-             FROM screenshots
+            "SELECT app_name, COUNT(*) FROM screenshots
              WHERE timestamp >= ?1 AND (?2 IS NULL OR timestamp < ?2) AND app_name IS NOT NULL
-             GROUP BY app_name
-             ORDER BY cnt DESC",
+             GROUP BY app_name",
         )?;
-
         let rows = stmt.query_map(params![since, until], |row| {
-            let count: i64 = row.get(1)?;
-            Ok(AppUsageStat {
-                app_name: row.get(0)?,
-                screenshot_count: count,
-                percentage: (count as f64 / total) * 100.0,
-            })
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
         })?;
-
-        let mut results = Vec::new();
         for row in rows {
-            results.push(row?);
+            let (app, count) = row?;
+            by_app.entry(app).or_default().1 += count;
         }
+
+        let total_secs: i64 = by_app.values().map(|(secs, _)| secs).sum();
+        let total_count: i64 = by_app.values().map(|(_, count)| count).sum();
+        let mut results: Vec<AppUsageStat> = by_app
+            .into_iter()
+            .filter(|(_, (secs, count))| *secs > 0 || *count > 0)
+            .map(|(app_name, (active_seconds, screenshot_count))| AppUsageStat {
+                percentage: if total_secs > 0 {
+                    active_seconds as f64 / total_secs as f64 * 100.0
+                } else {
+                    screenshot_count as f64 / total_count as f64 * 100.0
+                },
+                app_name,
+                screenshot_count,
+                active_seconds,
+            })
+            .collect();
+        results.sort_by(|a, b| {
+            b.active_seconds
+                .cmp(&a.active_seconds)
+                .then(b.screenshot_count.cmp(&a.screenshot_count))
+                .then_with(|| a.app_name.cmp(&b.app_name))
+        });
         Ok(results)
     }
 
-    /// Get daily activity (screenshot count + unique apps) in a time range [since, until).
+    /// Get daily activity in a time range [since, until): screenshot count,
+    /// unique apps, and focused seconds. A session counts toward the local day
+    /// it started on.
     pub fn get_daily_activity(&self, since: i64, until: Option<i64>) -> Result<Vec<DailyActivity>> {
+        let mut by_day: std::collections::BTreeMap<String, DailyActivity> =
+            std::collections::BTreeMap::new();
+        let blank = |date: &str| DailyActivity {
+            date: date.to_string(),
+            screenshot_count: 0,
+            unique_apps: 0,
+            active_seconds: 0,
+        };
+
         let mut stmt = self.conn.prepare(
             "SELECT date(timestamp, 'unixepoch', 'localtime') as day,
                     COUNT(*) as cnt,
                     COUNT(DISTINCT app_name) as apps
              FROM screenshots
              WHERE timestamp >= ?1 AND (?2 IS NULL OR timestamp < ?2)
-             GROUP BY day
-             ORDER BY day",
+             GROUP BY day",
         )?;
-
         let rows = stmt.query_map(params![since, until], |row| {
-            Ok(DailyActivity {
-                date: row.get(0)?,
-                screenshot_count: row.get(1)?,
-                unique_apps: row.get(2)?,
-            })
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?, row.get::<_, i64>(2)?))
         })?;
-
-        let mut results = Vec::new();
         for row in rows {
-            results.push(row?);
+            let (day, count, apps) = row?;
+            let entry = by_day.entry(day.clone()).or_insert_with(|| blank(&day));
+            entry.screenshot_count = count;
+            entry.unique_apps = apps;
         }
-        Ok(results)
+
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT date(MAX(started_at, ?1), 'unixepoch', 'localtime') as day,
+                    SUM({CLIPPED_SECONDS}),
+                    COUNT(DISTINCT app_name)
+             FROM app_sessions WHERE {SESSION_OVERLAPS}
+             GROUP BY day"
+        ))?;
+        let rows = stmt.query_map(params![since, until], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?, row.get::<_, i64>(2)?))
+        })?;
+        for row in rows {
+            let (day, secs, apps) = row?;
+            let entry = by_day.entry(day.clone()).or_insert_with(|| blank(&day));
+            entry.active_seconds = secs;
+            entry.unique_apps = entry.unique_apps.max(apps);
+        }
+
+        Ok(by_day.into_values().collect())
     }
 
     /// Get hourly activity distribution in a time range [since, until).
@@ -1399,12 +1511,8 @@ impl Database {
             |row| row.get(0),
         )?;
 
-        let total_apps: i64 = self.conn.query_row(
-            "SELECT COUNT(DISTINCT app_name) FROM screenshots
-             WHERE timestamp >= ?1 AND (?2 IS NULL OR timestamp < ?2) AND app_name IS NOT NULL",
-            params![since, until],
-            |row| row.get(0),
-        )?;
+        let total_apps = app_usage.len() as i64;
+        let total_active_seconds = app_usage.iter().map(|a| a.active_seconds).sum();
 
         Ok(ActivityResponse {
             app_usage,
@@ -1412,6 +1520,7 @@ impl Database {
             hourly_activity,
             total_screenshots,
             total_apps,
+            total_active_seconds,
         })
     }
 
@@ -3306,6 +3415,135 @@ mod tests {
         assert!((stats[0].percentage - 66.666).abs() < 1.0);
         assert_eq!(stats[1].app_name, "code");
         assert_eq!(stats[1].screenshot_count, 1);
+    }
+
+    fn sessions(db: &Database) -> Vec<(String, i64, i64)> {
+        let mut stmt = db
+            .conn
+            .prepare("SELECT app_name, started_at, ended_at FROM app_sessions ORDER BY started_at, id")
+            .unwrap();
+        stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn record_app_activity_extends_switches_and_splits_on_gap() {
+        let db = make_test_db();
+        for t in [100, 105, 110] {
+            db.record_app_activity("code", t, 15).unwrap();
+        }
+        db.record_app_activity("firefox", 115, 15).unwrap();
+        db.record_app_activity("firefox", 120, 15).unwrap();
+        // Screen locked for a while, then firefox again: a fresh session.
+        db.record_app_activity("firefox", 500, 15).unwrap();
+
+        assert_eq!(
+            sessions(&db),
+            vec![
+                ("code".to_string(), 100, 115),
+                ("firefox".to_string(), 115, 120),
+                ("firefox".to_string(), 500, 500),
+            ]
+        );
+    }
+
+    #[test]
+    fn app_usage_counts_usage_only_time_without_screenshots() {
+        let db = make_test_db();
+        let mut ss = make_screenshot(1000);
+        ss.app_name = Some("code".to_string());
+        db.insert_screenshot(&ss).unwrap();
+        db.record_app_activity("code", 1000, 15).unwrap();
+        db.record_app_activity("code", 1010, 15).unwrap();
+        // Private work: tracked, never screenshotted.
+        for t in [1020, 1030, 1040, 1050] {
+            db.record_app_activity("notes", t, 15).unwrap();
+        }
+
+        let stats = db.get_app_usage_stats(0, None).unwrap();
+        assert_eq!(stats[0].app_name, "notes");
+        assert_eq!(stats[0].active_seconds, 30);
+        assert_eq!(stats[0].screenshot_count, 0);
+        assert_eq!(stats[1].app_name, "code");
+        assert_eq!(stats[1].active_seconds, 20);
+        assert_eq!(stats[1].screenshot_count, 1);
+        assert!((stats[0].percentage - 60.0).abs() < 0.01);
+
+        let activity = db.get_activity(0, None).unwrap();
+        assert_eq!(activity.total_active_seconds, 50);
+        assert_eq!(activity.total_apps, 2);
+    }
+
+    #[test]
+    fn app_usage_clips_sessions_to_the_query_range() {
+        let db = make_test_db();
+        db.record_app_activity("code", 100, 1000).unwrap();
+        db.record_app_activity("code", 400, 1000).unwrap();
+
+        let stats = db.get_app_usage_stats(200, Some(300)).unwrap();
+        assert_eq!(stats.len(), 1);
+        assert_eq!(stats[0].active_seconds, 100);
+        assert!(db.get_app_usage_stats(500, None).unwrap().is_empty());
+    }
+
+    #[test]
+    fn deleting_a_range_trims_app_sessions() {
+        let db = make_test_db();
+        db.record_app_activity("code", 100, 1000).unwrap();
+        db.record_app_activity("code", 400, 1000).unwrap();
+        db.record_app_activity("firefox", 500, 1000).unwrap();
+        db.record_app_activity("firefox", 600, 1000).unwrap();
+
+        db.delete_screenshots_in_range(300, 550).unwrap();
+        assert_eq!(
+            sessions(&db),
+            vec![("code".to_string(), 100, 300), ("firefox".to_string(), 550, 600)]
+        );
+
+        db.delete_screenshots_before(200).unwrap();
+        assert_eq!(
+            sessions(&db),
+            vec![("code".to_string(), 200, 300), ("firefox".to_string(), 550, 600)]
+        );
+    }
+
+    #[test]
+    fn rename_app_renames_sessions_too() {
+        let db = make_test_db();
+        db.record_app_activity("org.kde.konsole", 100, 15).unwrap();
+        db.rename_app("org.kde.konsole", "Konsole").unwrap();
+        assert_eq!(sessions(&db)[0].0, "Konsole");
+    }
+
+    #[test]
+    fn migration_backfills_sessions_from_screenshot_history() {
+        Database::ensure_sqlite_vec();
+        let mut conn = Connection::open_in_memory().unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(9))
+            .run(&mut conn)
+            .unwrap();
+        for (ts, app) in [(100, "code"), (105, "code"), (110, "firefox"), (500, "firefox")] {
+            conn.execute(
+                "INSERT INTO screenshots (timestamp, timestamp_ms, app_name, file_path, width, height, file_size_bytes, perceptual_hash)
+                 VALUES (?1, ?1 * 1000, ?2, 'x.webp', 1, 1, 1, x'00')",
+                params![ts, app],
+            )
+            .unwrap();
+        }
+        embedded::migrations::runner().run(&mut conn).unwrap();
+        let db = Database { conn };
+
+        assert_eq!(
+            sessions(&db),
+            vec![
+                ("code".to_string(), 100, 110),
+                ("firefox".to_string(), 110, 115),
+                ("firefox".to_string(), 500, 505),
+            ]
+        );
     }
 
     #[test]
