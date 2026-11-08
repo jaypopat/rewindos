@@ -19,6 +19,7 @@ import {
   type JournalEntry,
   type JournalDateInfo,
 } from "@/lib/api";
+import { hasActivity } from "@/lib/activity";
 import { queryKeys } from "@/lib/query-keys";
 import { useDebounce } from "@/hooks/useDebounce";
 import { dateToKey, dayStartEnd } from "@/lib/time-ranges";
@@ -338,11 +339,11 @@ export function useJournalEntry() {
   // ── Memory jogger prompts ──
 
   const prompts = useMemo(() => {
-    if (!activityData || activityData.total_screenshots === 0) return [];
+    if (!activityData || !hasActivity(activityData)) return [];
     const p: string[] = [];
     const topApps = activityData.app_usage.slice(0, 3);
     for (const app of topApps) {
-      const mins = Math.round((app.screenshot_count * 5) / 60 * 10) / 10;
+      const mins = Math.round(app.active_seconds / 60 * 10) / 10;
       if (mins >= 5) {
         p.push(
           `You spent ~${mins >= 60 ? `${Math.floor(mins / 60)}h ${Math.round(mins % 60)}m` : `${Math.round(mins)}m`} in ${app.app_name} — what did you work on?`,

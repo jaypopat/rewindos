@@ -75,7 +75,7 @@ impl DaemonService {
         self.gate.set_wants_capture(false);
 
         let meeting_active = self.meeting_state.active.load(Ordering::Acquire);
-        let _ = emitter.state_changed(false, meeting_active).await;
+        let _ = emitter.state_changed(false, meeting_active, self.gate.usage_only()).await;
         Ok(())
     }
 
@@ -91,7 +91,26 @@ impl DaemonService {
         self.gate.set_wants_capture(true);
 
         let meeting_active = self.meeting_state.active.load(Ordering::Acquire);
-        let _ = emitter.state_changed(true, meeting_active).await;
+        let _ = emitter.state_changed(true, meeting_active, self.gate.usage_only()).await;
+        Ok(())
+    }
+
+    /// Turn usage-only (private) mode on or off: app time keeps being tracked,
+    /// screenshots stop. Persisted, so it survives a daemon restart.
+    async fn set_usage_only(
+        &self,
+        enabled: bool,
+        #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
+    ) -> zbus::fdo::Result<()> {
+        info!(enabled, "usage-only mode set via D-Bus");
+        crate::activity::persist_usage_only(&self.db, enabled)
+            .map_err(|e| zbus::fdo::Error::Failed(format!("persist usage-only mode: {e}")))?;
+        self.gate.set_usage_only(enabled);
+
+        let meeting_active = self.meeting_state.active.load(Ordering::Acquire);
+        let _ = emitter
+            .state_changed(self.gate.wants_capture(), meeting_active, enabled)
+            .await;
         Ok(())
     }
 
@@ -150,6 +169,7 @@ impl DaemonService {
             capture_state,
             seconds_since_last_frame,
             unfiltered_capture,
+            usage_only: self.gate.usage_only(),
             meeting_active: self.meeting_state.active.load(std::sync::atomic::Ordering::Acquire),
             meeting_id: {
                 let id = self.meeting_state.meeting_id.load(std::sync::atomic::Ordering::Acquire);
@@ -331,7 +351,7 @@ impl DaemonService {
             .await
             .map_err(|_| zbus::fdo::Error::Failed("no reply from meeting controller".into()))?
             .map_err(zbus::fdo::Error::Failed)?;
-        let _ = emitter.state_changed(self.gate.wants_capture(), true).await;
+        let _ = emitter.state_changed(self.gate.wants_capture(), true, self.gate.usage_only()).await;
         Ok(id)
     }
 
@@ -349,7 +369,7 @@ impl DaemonService {
             .await
             .map_err(|_| zbus::fdo::Error::Failed("no reply from meeting controller".into()))?
             .map_err(zbus::fdo::Error::Failed)?;
-        let _ = emitter.state_changed(self.gate.wants_capture(), false).await;
+        let _ = emitter.state_changed(self.gate.wants_capture(), false, self.gate.usage_only()).await;
         Ok(())
     }
 
@@ -360,6 +380,7 @@ impl DaemonService {
         emitter: &SignalEmitter<'_>,
         is_capturing: bool,
         meeting_active: bool,
+        usage_only: bool,
     ) -> zbus::Result<()>;
 
     /// List available microphone sources (JSON array of {id,name,description}).
