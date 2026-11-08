@@ -11,6 +11,7 @@ use rewindos_core::schema::NewTranscriptSegment;
 
 use crate::capture::audio::{rms, AudioSource, AudioWindow, CAPTURE_RATE};
 use crate::meeting::encode::{EncodeError, OpusWriter};
+use crate::meeting::remote::RemoteTranscriber;
 use crate::meeting::whisper::{TranscribeError, WhisperTranscriber};
 
 /// Windows whose RMS is below this are not transcribed. Whisper hallucinates
@@ -39,6 +40,17 @@ impl Transcribe for WhisperTranscriber {
         window_start_ms: i64,
     ) -> Result<Vec<NewTranscriptSegment>, TranscribeError> {
         WhisperTranscriber::transcribe_window(self, pcm, source, window_start_ms)
+    }
+}
+
+impl Transcribe for RemoteTranscriber {
+    fn transcribe_window(
+        &self,
+        pcm: &[f32],
+        source: AudioSource,
+        window_start_ms: i64,
+    ) -> Result<Vec<NewTranscriptSegment>, TranscribeError> {
+        RemoteTranscriber::transcribe_window(self, pcm, source, window_start_ms)
     }
 }
 

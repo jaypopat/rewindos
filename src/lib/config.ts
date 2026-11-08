@@ -49,7 +49,11 @@ export interface AppConfig {
   };
   meeting: {
     enabled: boolean;
-    engine: string;
+    engine: "whisper-cpp" | "openai-compatible" | "whisper-cpp-server";
+    service_url: string;
+    service_api_key: string;
+    service_model: string;
+    service_timeout_secs: number;
     model: string;
     model_dir: string;
     whisper_bin: string;

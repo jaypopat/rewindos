@@ -12,6 +12,29 @@ use opus::{Application, Channels, Encoder};
 
 /// Capture/encode sample rate (whisper's native input; matches `AudioWindow`).
 const SAMPLE_RATE: u32 = 16_000;
+
+/// Encode mono f32 PCM as a small, standard PCM WAV payload for HTTP services.
+pub fn pcm_to_wav(samples: &[f32]) -> Vec<u8> {
+    let data_len = samples.len() * 2;
+    let mut out = Vec::with_capacity(44 + data_len);
+    out.extend_from_slice(b"RIFF");
+    out.extend_from_slice(&(36 + data_len as u32).to_le_bytes());
+    out.extend_from_slice(b"WAVEfmt ");
+    out.extend_from_slice(&16u32.to_le_bytes());
+    out.extend_from_slice(&1u16.to_le_bytes());
+    out.extend_from_slice(&1u16.to_le_bytes());
+    out.extend_from_slice(&SAMPLE_RATE.to_le_bytes());
+    out.extend_from_slice(&(SAMPLE_RATE * 2).to_le_bytes());
+    out.extend_from_slice(&2u16.to_le_bytes());
+    out.extend_from_slice(&16u16.to_le_bytes());
+    out.extend_from_slice(b"data");
+    out.extend_from_slice(&(data_len as u32).to_le_bytes());
+    for &sample in samples {
+        let value = (sample.clamp(-1.0, 1.0) * i16::MAX as f32) as i16;
+        out.extend_from_slice(&value.to_le_bytes());
+    }
+    out
+}
 /// 20 ms frame at 16 kHz — the Opus frame size we encode.
 const FRAME_SAMPLES: usize = 320;
 /// Granule units per 20 ms frame. Ogg-Opus granule is always at 48 kHz, so
@@ -141,8 +164,12 @@ impl<W: Write> OpusWriter<W> {
     fn stage(&mut self, packet: Vec<u8>) -> Result<(), EncodeError> {
         if let Some(prev) = self.held.take() {
             self.granule += GRANULE_PER_FRAME;
-            self.writer
-                .write_packet(prev, SERIAL, PacketWriteEndInfo::NormalPacket, self.granule)?;
+            self.writer.write_packet(
+                prev,
+                SERIAL,
+                PacketWriteEndInfo::NormalPacket,
+                self.granule,
+            )?;
         }
         self.held = Some(packet);
         Ok(())
@@ -205,12 +232,7 @@ mod tests {
         let vlen = u32::from_le_bytes([t[8], t[9], t[10], t[11]]) as usize;
         assert_eq!(vlen, "rewindos".len());
         assert_eq!(&t[12..12 + vlen], b"rewindos");
-        let count = u32::from_le_bytes([
-            t[12 + vlen],
-            t[13 + vlen],
-            t[14 + vlen],
-            t[15 + vlen],
-        ]);
+        let count = u32::from_le_bytes([t[12 + vlen], t[13 + vlen], t[14 + vlen], t[15 + vlen]]);
         assert_eq!(count, 0, "user comment count");
     }
 

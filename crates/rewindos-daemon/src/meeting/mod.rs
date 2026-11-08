@@ -10,5 +10,6 @@ pub mod controller;
 pub mod echo_cancel;
 pub mod encode;
 pub mod postprocess;
+pub mod remote;
 pub mod session;
 pub mod whisper;
