@@ -1418,8 +1418,7 @@ impl Database {
     }
 
     /// Get daily activity in a time range [since, until): screenshot count,
-    /// unique apps, and focused seconds. A session counts toward the local day
-    /// it started on.
+    /// unique apps, and focused seconds. Sessions are split at local midnight.
     pub fn get_daily_activity(&self, since: i64, until: Option<i64>) -> Result<Vec<DailyActivity>> {
         let mut by_day: std::collections::BTreeMap<String, DailyActivity> =
             std::collections::BTreeMap::new();
@@ -1449,11 +1448,22 @@ impl Database {
         }
 
         let mut stmt = self.conn.prepare(&format!(
-            "SELECT date(MAX(started_at, ?1), 'unixepoch', 'localtime') as day,
-                    SUM({CLIPPED_SECONDS}),
+            "WITH RECURSIVE slices(app_name, started_at, ended_at, midnight) AS (
+                 SELECT app_name, MAX(started_at, ?1),
+                        MIN(ended_at, COALESCE(?2, ended_at)),
+                        unixepoch(MAX(started_at, ?1), 'unixepoch', 'localtime',
+                                  'start of day', '+1 day', 'utc')
+                 FROM app_sessions WHERE {SESSION_OVERLAPS}
+                 UNION ALL
+                 SELECT app_name, midnight, ended_at,
+                        unixepoch(midnight, 'unixepoch', 'localtime',
+                                  'start of day', '+1 day', 'utc')
+                 FROM slices WHERE midnight < ended_at
+             )
+             SELECT date(started_at, 'unixepoch', 'localtime') as day,
+                    SUM(MIN(ended_at, midnight) - started_at),
                     COUNT(DISTINCT app_name)
-             FROM app_sessions WHERE {SESSION_OVERLAPS}
-             GROUP BY day"
+             FROM slices GROUP BY day"
         ))?;
         let rows = stmt.query_map(params![since, until], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?, row.get::<_, i64>(2)?))
@@ -3551,6 +3561,48 @@ mod tests {
         let db = make_test_db();
         let stats = db.get_app_usage_stats(0, None).unwrap();
         assert!(stats.is_empty());
+    }
+
+    #[test]
+    fn daily_activity_splits_sessions_at_local_midnight() {
+        let db = make_test_db();
+        // Derive midnight using the same local calendar as the public query,
+        // without changing the process timezone used by other tests.
+        let midnight: i64 = db.conn.query_row(
+            "SELECT unixepoch('2026-11-08 00:00:00', 'utc')", [], |r| r.get(0),
+        ).unwrap();
+        db.record_app_activity("Editor", midnight - 3600, 7200).unwrap();
+        db.record_app_activity("Editor", midnight + 3600, 7200).unwrap();
+
+        let daily = db.get_daily_activity(midnight - 3600, None).unwrap();
+        let values: Vec<_> = daily.iter().map(|d| (d.date.as_str(), d.active_seconds, d.unique_apps)).collect();
+        assert_eq!(values, vec![("2026-11-07", 3600, 1), ("2026-11-08", 3600, 1)]);
+
+        let clipped = db.get_daily_activity(midnight - 1800, Some(midnight + 1800)).unwrap();
+        assert_eq!(clipped.iter().map(|d| d.active_seconds).collect::<Vec<_>>(), vec![1800, 1800]);
+        let first_day = db.get_daily_activity(midnight - 3600, Some(midnight)).unwrap();
+        assert_eq!(first_day.len(), 1);
+        assert_eq!(first_day[0].active_seconds, 3600);
+    }
+
+    #[test]
+    fn daily_activity_splits_multiday_sessions_across_clock_changes() {
+        for dates in [
+            ["2026-03-28", "2026-03-29", "2026-03-30", "2026-03-31"],
+            ["2026-10-24", "2026-10-25", "2026-10-26", "2026-10-27"],
+        ] {
+            let db = make_test_db();
+            let boundaries: Vec<i64> = dates.iter().map(|date| {
+                db.conn.query_row("SELECT unixepoch(?1, 'utc')", [date], |r| r.get(0)).unwrap()
+            }).collect();
+            db.record_app_activity("Editor", boundaries[0], 400_000).unwrap();
+            db.record_app_activity("Editor", boundaries[3], 400_000).unwrap();
+            let daily = db.get_daily_activity(boundaries[0], Some(boundaries[3])).unwrap();
+            let actual: Vec<_> = daily.iter().map(|d| (d.date.as_str(), d.active_seconds)).collect();
+            let expected: Vec<_> = dates[..3].iter().zip(boundaries.windows(2))
+                .map(|(date, range)| (*date, range[1] - range[0])).collect();
+            assert_eq!(actual, expected);
+        }
     }
 
     #[test]
