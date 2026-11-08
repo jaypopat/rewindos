@@ -1,4 +1,5 @@
 pub mod agentic;
+pub mod analytics;
 pub mod app_label;
 pub mod chat;
 pub mod chat_store;
@@ -13,7 +14,6 @@ pub mod paddle_ocr;
 pub mod prompts;
 pub mod schema;
 pub mod summary;
-pub mod usage;
 pub mod vault;
 pub mod whisper_model;
 

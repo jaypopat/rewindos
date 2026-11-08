@@ -3,6 +3,7 @@ use std::process::Output;
 use std::sync::Arc;
 use std::time::Duration;
 
+use serde::Serialize;
 use tokio::process::Command;
 use tracing::{debug, warn};
 
@@ -18,7 +19,8 @@ pub struct OcrOutput {
 }
 
 /// Which OCR engine to use.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum OcrEngine {
     Tesseract,
     PaddleOcr,

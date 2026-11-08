@@ -1,7 +1,8 @@
+import { analytics, startAnalytics } from "@/lib/analytics";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { useHotkey, useHotkeySequences, type HotkeySequence } from "@tanstack/react-hotkeys";
-import type { SearchFilters } from "@/lib/api";
+import { type SearchFilters } from "@/lib/api";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useGlobalKeyboard } from "@/hooks/useGlobalKeyboard";
 import { Sidebar, type View } from "@/components/Sidebar";
@@ -173,6 +174,9 @@ function App() {
     }
   }, []);
 
+  useEffect(startAnalytics, []);
+  useEffect(() => { analytics.setView(view); }, [view]);
+
   const handleGoToHistoryDate = useCallback((date: string) => {
     dispatch({ type: "CHANGE_VIEW", view: "history", date });
   }, []);
@@ -238,8 +242,8 @@ function App() {
       <Sidebar activeView={view} onViewChange={handleViewChange} />
 
       <div className="flex-1 flex flex-col min-w-0 min-h-0">
-        <GnomeExtensionBanner />
-        <UnfilteredWarningBanner />
+        <div data-analytics-sensitive><GnomeExtensionBanner /></div>
+        <div data-analytics-sensitive><UnfilteredWarningBanner /></div>
         <header className="flex items-center gap-4 px-7 h-[60px] border-b border-line shrink-0">
           <div className="font-mono text-[11px] uppercase tracking-[0.14em] text-text-muted whitespace-nowrap">
             Rewind<span className="mx-2 text-text-ghost">/</span>
@@ -248,6 +252,8 @@ function App() {
           <Button
             type="button"
             variant="ghost"
+            data-analytics-control="open-recall"
+            data-ph-capture-attribute-control="open-recall"
             onClick={() => setPaletteOpen(true)}
             className="ml-auto justify-start h-[34px] px-3 min-w-[240px] rounded-lg border border-line-2 hover:border-line-hi hover:bg-transparent text-text-muted hover:text-text-muted text-[13px] transition-colors whitespace-nowrap"
           >
@@ -260,17 +266,19 @@ function App() {
           <Button
             type="button"
             variant="ghost"
+            data-analytics-control="save-moment"
+            data-ph-capture-attribute-control="save-moment"
             onClick={() => setShowSaveMoment(true)}
             className="size-[34px] grid place-items-center rounded-lg text-text-muted hover:text-text-primary hover:bg-panel transition-colors"
             title="Save moment"
           >
             <Clock className="size-[18px]" strokeWidth={1.7} />
           </Button>
-          <DaemonPanel />
+          <div data-analytics-sensitive><DaemonPanel /></div>
         </header>
 
         {/* keyed on view so switching views crossfades the content region */}
-        <div key={view} className="flex-1 flex flex-col min-h-0 animate-in fade-in duration-200 ease-quiet">
+        <div key={view} data-analytics-sensitive={view === "settings" ? undefined : ""} className="flex-1 flex flex-col min-h-0 animate-in fade-in duration-200 ease-quiet">
 
         {view === "search" && subView === "list" && (
           <div className="flex-1 flex flex-col min-h-0">

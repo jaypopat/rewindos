@@ -22,6 +22,7 @@ vi.mock("@/lib/api", () => ({
 
 import { useConfig } from "./useConfig";
 import { updateConfig } from "@/lib/api";
+import { analytics } from "@/lib/analytics";
 
 function makeWrapper() {
   const client = new QueryClient({
@@ -54,12 +55,13 @@ const hotkey = () =>
 
 describe("useConfig auto-save", () => {
   beforeEach(() => {
-    remote.config = { ui: { global_hotkey: "Ctrl+Shift+Space" } };
+    remote.config = { ui: { global_hotkey: "Ctrl+Shift+Space" }, privacy: { analytics: true } };
     remote.failNext = false;
     vi.clearAllMocks();
     vi.useFakeTimers();
   });
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.useRealTimers();
   });
 
@@ -76,6 +78,83 @@ describe("useConfig auto-save", () => {
     });
     expect(updateConfig).toHaveBeenCalledTimes(1);
     expect(hotkey()).toEqual(["ABC"]);
+  });
+
+  it("saves rapid analytics off/on transitions immediately and in order", async () => {
+    const intent = vi.spyOn(analytics, "consentIntent");
+    const persisted = vi.spyOn(analytics, "consentPersisted");
+    const { result } = await renderLoaded();
+    let releaseOff!: () => void;
+    vi.mocked(updateConfig).mockImplementationOnce(
+      () => new Promise<void>((resolve) => { releaseOff = resolve; }),
+    );
+
+    act(() => {
+      result.current.update("privacy", "analytics", false);
+      result.current.update("privacy", "analytics", true);
+    });
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(intent).toHaveBeenCalledTimes(2);
+    expect(persisted).not.toHaveBeenCalled();
+    expect(vi.mocked(updateConfig).mock.calls.map(([c]) => c.privacy.analytics)).toEqual([false]);
+
+    await act(async () => {
+      releaseOff();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(vi.mocked(updateConfig).mock.calls.map(([c]) => c.privacy.analytics)).toEqual([false, true]);
+    await act(async () => { await vi.advanceTimersByTimeAsync(800); });
+    expect(updateConfig).toHaveBeenCalledTimes(2);
+  });
+
+  it("stops capture before a queued off save and never acknowledges a failed consent save", async () => {
+    const intent = vi.spyOn(analytics, "consentIntent");
+    const persisted = vi.spyOn(analytics, "consentPersisted");
+    const { result } = await renderLoaded();
+    let release!: () => void;
+    vi.mocked(updateConfig).mockImplementationOnce(() => new Promise<void>((resolve) => { release = resolve; }));
+    act(() => result.current.update("ui", "global_hotkey", "pending"));
+    await act(async () => { result.current.flush(); await vi.advanceTimersByTimeAsync(0); });
+    act(() => result.current.update("privacy", "analytics", false));
+    expect(intent).toHaveBeenCalledTimes(1);
+    expect(updateConfig).toHaveBeenCalledTimes(1);
+    remote.failNext = true;
+    await act(async () => { release(); await vi.advanceTimersByTimeAsync(0); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(result.current.error).toContain("disk full");
+    expect(persisted).not.toHaveBeenCalled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(updateConfig).toHaveBeenCalledTimes(2);
+  });
+
+  it("orders analytics transitions behind an in-flight save and preserves newer edits", async () => {
+    const { result } = await renderLoaded();
+    let releaseSave!: () => void;
+    vi.mocked(updateConfig).mockImplementationOnce(
+      () => new Promise<void>((resolve) => { releaseSave = resolve; }),
+    );
+    act(() => result.current.update("ui", "global_hotkey", "A"));
+    await act(async () => {
+      result.current.flush();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    act(() => {
+      result.current.update("privacy", "analytics", false);
+      result.current.update("ui", "global_hotkey", "AB");
+      result.current.update("privacy", "analytics", true);
+    });
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(updateConfig).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      releaseSave();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(vi.mocked(updateConfig).mock.calls.map(([c]) => c.privacy.analytics)).toEqual([true, false, true]);
+    expect(hotkey()).toEqual(["A", "A", "AB"]);
+    await act(async () => { await vi.advanceTimersByTimeAsync(800); });
+    expect(updateConfig).toHaveBeenCalledTimes(3);
   });
 
   it("flush() persists immediately without waiting for the debounce", async () => {

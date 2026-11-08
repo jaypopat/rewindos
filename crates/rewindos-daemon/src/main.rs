@@ -1,7 +1,7 @@
 mod activity;
+mod analytics;
 mod capture;
 mod detect;
-mod heartbeat;
 mod lock_watcher;
 mod meeting;
 mod mcp_server;
@@ -941,8 +941,17 @@ async fn run_daemon() -> anyhow::Result<()> {
         });
     }
 
-    // Anonymous daily usage heartbeat (opt-out via [privacy] usage_heartbeat).
-    heartbeat::spawn();
+    let analytics = Arc::new(rewindos_core::analytics::Analytics::new(
+        rewindos_core::analytics::Source::Daemon,
+        AppConfig::default_base_dir()?,
+        rewindos_core::analytics::Endpoint::compiled(),
+    ));
+    crate::analytics::spawn_heartbeat(
+        analytics.clone(),
+        db.clone(),
+        gate.clone(),
+        ollama_client.is_some(),
+    );
 
     // Register D-Bus service
     let export_lock: Arc<tokio::sync::Mutex<()>> = Arc::new(tokio::sync::Mutex::new(()));
@@ -967,6 +976,7 @@ async fn run_daemon() -> anyhow::Result<()> {
         meeting_state,
         mic_monitor: std::sync::Mutex::new(None),
         export_lock: export_lock.clone(),
+        analytics,
     };
 
     dbus_conn

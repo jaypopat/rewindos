@@ -4,7 +4,7 @@
 
 ### Perfect memory for your Linux desktop.
 
-A private, open-source alternative to **Windows Recall** and **Rewind.ai**. Everything you've ever seen on your screen, instantly searchable — **no cloud, no account, no telemetry, 100% on your machine.**
+A private, open-source alternative to **Windows Recall** and **Rewind.ai**. Your screen history is searchable on your own machine, with **no account required.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE)
 [![Latest release](https://img.shields.io/github/v/release/jaypopat/rewindos?label=release)](https://github.com/jaypopat/rewindos/releases/latest)
@@ -35,7 +35,7 @@ A private, open-source alternative to **Windows Recall** and **Rewind.ai**. Ever
 
 ## Why RewindOS
 
-- **Truly local.** Capture, OCR, search, and AI all run on your machine. No cloud, no account, no telemetry — it works fully offline.
+- **Local capture and search.** Capture, OCR, and search run on your machine. Choose local AI to use RewindOS offline.
 - **Open source.** MIT-licensed. Read every line, audit what it stores, fork it.
 - **Built for Linux.** Native Wayland capture via `xdg-desktop-portal` + PipeWire — works on KDE, GNOME, and wlroots compositors. No competitor ships here.
 - **Fast.** SQLite FTS5 gives sub-100ms full-text search across weeks of screen history.
@@ -44,7 +44,7 @@ A private, open-source alternative to **Windows Recall** and **Rewind.ai**. Ever
 |---|:---:|:---:|:---:|
 | Linux / Wayland | ✅ | ❌ | ❌ |
 | Open source | ✅ | ❌ | ❌ |
-| Local-only, no cloud | ✅ | ✅ <sup>1</sup> | ✅ |
+| Local capture and search | ✅ | ✅ <sup>1</sup> | ✅ |
 | No subscription | ✅ | ✅ | ❌ |
 | Bring-your-own AI (local or API) | ✅ | ❌ | ❌ |
 | Independent — not shut down / acqui-hired | ✅ | ✅ | ❌ <sup>2</sup> |
@@ -53,7 +53,7 @@ A private, open-source alternative to **Windows Recall** and **Rewind.ai**. Ever
 
 > Rewind got the privacy model right — it stored everything locally too — but it was macOS-only, proprietary, and is now gone. RewindOS is the open-source, Linux-native version that no acquisition can switch off.
 >
-> Also open source: [omi](https://github.com/BasedHardware/omi) — but macOS-only and cloud-backed. RewindOS stays fully local and Linux-native.
+> Also open source: [omi](https://github.com/BasedHardware/omi) — but macOS-only and cloud-backed. RewindOS stores your screen history locally and runs on Linux.
 
 ## Features
 
@@ -75,7 +75,7 @@ A rich-text **journal** (Tiptap) with tags, templates, screenshot attachments, a
 **🔒 Privacy**
 Exclude specific apps or window-title patterns (password managers, private browsing). Global hotkey `Ctrl+Shift+Space` opens search instantly; the app runs quietly in the system tray.
 
-RewindOS reaches the network on its own for one thing: a daily check-in (the app's update check and the capture daemon's heartbeat) via a small [Cloudflare Worker](workers/update-proxy) (open source, in this repo). The worker hashes your IP with a daily, server-only salt to count **distinct active devices**, then discards it — no IP, no identifier, no payload is ever stored. All it keeps is an anonymous daily count, bucketed by app version and desktop environment (so the project can see release adoption and KDE-vs-GNOME mix); both are aggregate counts, never tied to you. The full dataset is [published live](https://rewindos-updates.incident-agent.workers.dev/stats). Opt out entirely with `usage_heartbeat = false` under `[privacy]` in `~/.rewindos/config.toml`. (The update check also falls back to GitHub directly if the worker is down.)
+RewindOS checks GitHub for updates and sends usage analytics to PostHog by default. Turn analytics off in **Settings → Privacy** or set `[privacy] analytics = false`. Analytics include a random install ID, feature use, browser and screen-size metadata, and fixed-control clicks. Session replay is disabled in this build because native verification found a stylesheet privacy leak. Screen history, app names, window titles, searches, chats, and journal text stay out of analytics. [See every event and property](docs/analytics.md).
 
 <div align="center">
 <table>

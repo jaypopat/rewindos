@@ -58,10 +58,21 @@ run on your machine, and the captured data never leaves it.
   your user, malware, a logged-in attacker) is outside what a local capture tool
   can defend against.
 
-## The one network call
+## Network calls
 
-RewindOS reaches the network on its own only for a daily update check / anonymous
-device count, which is documented and published in full at
-<https://rewindos-updates.incident-agent.workers.dev/stats>. No screen content,
-IP, or identifier is stored. It can be disabled with `usage_heartbeat = false`
-under `[privacy]` in `~/.rewindos/config.toml`.
+RewindOS checks the GitHub Releases API for updates and sends usage analytics
+to PostHog by default. Analytics use a random install ID, feature properties,
+browser and screen-size metadata, and clicks on allowlisted fixed controls.
+Session replay is hard-disabled locally and remote settings cannot enable it.
+Native verification of the candidate recorder found that stylesheet mutations
+and adopted stylesheets could bypass text and attribute masking. The candidate
+masking configuration remains in source for further investigation. No replay
+snapshots are sent in this build.
+Analytics never include screen content, OCR text, app names, window titles,
+search queries, chat messages, file paths, or journal and meeting content.
+Console, network bodies and headers, canvas recording, and error autocapture
+are disabled locally. Remote settings cannot loosen these privacy rules.
+
+Turn analytics off in **Settings → Privacy** or set `analytics = false` under
+`[privacy]` in `~/.rewindos/config.toml`. The setting applies without a restart.
+[Analytics documentation](docs/analytics.md) lists every event and property.

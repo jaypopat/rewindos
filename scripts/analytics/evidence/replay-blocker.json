@@ -1,0 +1,69 @@
+{
+  "runtime": "WebKitGTK 2.52.6",
+  "sdk": "posthog-js 1.438.23",
+  "status": "fail",
+  "reason": "Stylesheet rule mutations and adopted stylesheets bypass text and DOM attribute masking. Production replay is hard-disabled.",
+  "synthetic_data_only": true,
+  "payload_sha256": "0bb3cee6f3116667b2607323d864e299319cf892d1d5725535057c57e6e0f932",
+  "observed_rrweb_events": [
+    {
+      "type": 3,
+      "data": {
+        "source": 8,
+        "id": 8,
+        "adds": [
+          {
+            "rule": ".mutated::before { content: \"CANARY_STYLESHEET_MUTATION\"; }",
+            "index": 0
+          }
+        ]
+      },
+      "timestamp": 1793051813044,
+      "cv": "2024-10"
+    },
+    {
+      "type": 3,
+      "data": {
+        "source": 15,
+        "id": 1,
+        "styleIds": [
+          1
+        ],
+        "styles": [
+          {
+            "styleId": 1,
+            "rules": [
+              {
+                "rule": ".adopted::before { content: \"CANARY_ADOPTED_STYLESHEET\"; }",
+                "index": 0
+              }
+            ]
+          }
+        ]
+      },
+      "timestamp": 1793051813046
+    },
+    {
+      "type": 3,
+      "data": {
+        "source": 15,
+        "id": 37,
+        "styleIds": [
+          1
+        ],
+        "styles": [
+          {
+            "styleId": 1,
+            "rules": [
+              {
+                "rule": ".adopted::before { content: \"CANARY_ADOPTED_STYLESHEET\"; }",
+                "index": 0
+              }
+            ]
+          }
+        ]
+      },
+      "timestamp": 1793051834099
+    }
+  ]
+}

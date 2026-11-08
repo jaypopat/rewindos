@@ -13,6 +13,7 @@ export interface AppConfig {
   privacy: {
     excluded_apps: string[];
     excluded_title_patterns: string[];
+    analytics: boolean;
   };
   ocr: {
     enabled: boolean;

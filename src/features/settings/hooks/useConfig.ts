@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { analytics } from "@/lib/analytics";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { updateConfig } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
@@ -16,11 +17,19 @@ export function useConfig() {
 
   // Derive config: local edits take priority, otherwise use fetched data
   const config = localEdits ?? fetchedConfig ?? null;
+  const configRef = useRef(config);
+  useLayoutEffect(() => {
+    configRef.current = config;
+  }, [config]);
+
+  const consentTickets = useRef(new WeakMap<AppConfig, number>());
 
   const saveMutation = useMutation({
-    mutationFn: (c: AppConfig) =>
-      updateConfig(c as unknown as Record<string, unknown>),
+    scope: { id: "settings-config" },
+    mutationFn: updateConfig,
     onSuccess: (_data, sent) => {
+      const ticket = consentTickets.current.get(sent);
+      if (ticket !== undefined) analytics.consentPersisted(ticket);
       queryClient.setQueryData(queryKeys.config(), sent);
       queryClient.invalidateQueries({ queryKey: queryKeys.config() });
       // Clear the buffer only if no newer edits arrived while this save was
@@ -85,13 +94,17 @@ export function useConfig() {
       key: K,
       value: AppConfig[S][K],
     ) => {
-      setLocalEdits((prev) => {
-        const base = prev ?? fetchedConfig ?? null;
-        if (!base) return prev;
-        return { ...base, [section]: { ...base[section], [key]: value } };
-      });
+      const base = configRef.current;
+      if (!base) return;
+      const next = { ...base, [section]: { ...base[section], [key]: value } };
+      configRef.current = next;
+      setLocalEdits(next);
+      if (section === "privacy" && key === "analytics") {
+        consentTickets.current.set(next, analytics.consentIntent());
+        saveNow(next);
+      }
     },
-    [fetchedConfig],
+    [saveNow],
   );
 
   return {

@@ -79,7 +79,7 @@ export function SettingsView() {
           </div>
           <div className="ml-auto flex items-center gap-3 pb-1">
             {error && (
-              <span className="font-mono text-[10.5px] text-signal-error">{error}</span>
+              <span data-analytics-sensitive className="font-mono text-[10.5px] text-signal-error">{error}</span>
             )}
             {saving && (
               <span className="font-mono text-[10.5px] text-text-muted">saving…</span>
@@ -96,6 +96,8 @@ export function SettingsView() {
             {TABS.map((t) => (
               <Button
                 key={t.id}
+                data-analytics-control={`settings-${t.id}`}
+                data-ph-capture-attribute-control={`settings-${t.id}`}
                 variant="ghost"
                 onClick={() => setTab(t.id)}
                 className={cn(
@@ -105,13 +107,13 @@ export function SettingsView() {
                     : "text-text-secondary hover:text-text-primary hover:bg-panel",
                 )}
               >
-                {t.label}
+                <span data-replay-label={`settings-${t.id}`}>{t.label}</span>
               </Button>
             ))}
           </div>
 
           {/* Fields */}
-          <div className="flex-1 min-w-0 max-w-[640px]">{tabContent[tab]}</div>
+          <div data-analytics-sensitive className="flex-1 min-w-0 max-w-[640px]">{tabContent[tab]}</div>
         </div>
       </div>
     </div>

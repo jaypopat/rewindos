@@ -9,14 +9,6 @@ use serde::{Deserialize, Serialize};
 pub const REPO: &str = "jaypopat/rewindos";
 const TARBALL_NAME: &str = "rewindos-linux-x86_64.tar.gz";
 
-/// Update checks go through a Cloudflare Worker (workers/update-proxy) that
-/// edge-caches GitHub's releases/latest response. Same JSON, same path shape
-/// as api.github.com. The worker counts the request as a distinct active
-/// device (hashed IP, daily salt, never stored — see its source and /stats);
-/// the daemon's heartbeat feeds the same count. On any proxy failure we fall
-/// back to GitHub directly, so updates never depend on the proxy being up.
-use rewindos_core::usage;
-const UPDATE_PROXY_BASE: &str = usage::PROXY_BASE;
 const GITHUB_API_BASE: &str = "https://api.github.com";
 
 #[derive(Debug, Deserialize)]
@@ -133,7 +125,7 @@ impl Default for UpdaterEnv {
     fn default() -> Self {
         let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
         Self {
-            api_base: UPDATE_PROXY_BASE.into(),
+            api_base: GITHUB_API_BASE.into(),
             bin_dir: home.join(".local/bin"),
             app_dir: home.join(".local/share/applications"),
             icon_base: home.join(".local/share/icons/hicolor"),
@@ -202,12 +194,14 @@ pub fn build_update_status(
     }
 }
 
-async fn fetch_latest_from(
-    client: &reqwest::Client,
-    base: &str,
-) -> Result<ReleaseInfo, String> {
+async fn fetch_latest_release(env: &UpdaterEnv) -> Result<ReleaseInfo, String> {
+    let client = reqwest::Client::builder()
+        .user_agent("rewindos-updater") // GitHub API rejects UA-less requests
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|e| format!("http client: {e}"))?;
     let json = client
-        .get(format!("{base}/repos/{REPO}/releases/latest"))
+        .get(format!("{}/repos/{REPO}/releases/latest", env.api_base))
         .send()
         .await
         .map_err(|e| format!("releases API: {e}"))?
@@ -217,27 +211,6 @@ async fn fetch_latest_from(
         .await
         .map_err(|e| format!("releases API body: {e}"))?;
     parse_latest_release(&json)
-}
-
-async fn fetch_latest_release(env: &UpdaterEnv) -> Result<ReleaseInfo, String> {
-    let client = reqwest::Client::builder()
-        .user_agent("rewindos-updater") // GitHub API rejects UA-less requests
-        .default_headers(usage::headers()) // version + desktop for the proxy's aggregate counts
-        .timeout(std::time::Duration::from_secs(15))
-        .build()
-        .map_err(|e| format!("http client: {e}"))?;
-    match fetch_latest_from(&client, &env.api_base).await {
-        Ok(release) => Ok(release),
-        // Proxy down or rate-limited (it returns 5xx for both): go straight
-        // to GitHub. Only when api_base is the real proxy — tests inject
-        // their own api_base and must not escape to the network.
-        Err(proxy_err) if env.api_base == UPDATE_PROXY_BASE => {
-            fetch_latest_from(&client, GITHUB_API_BASE)
-                .await
-                .map_err(|gh_err| format!("proxy: {proxy_err}; github: {gh_err}"))
-        }
-        Err(e) => Err(e),
-    }
 }
 
 const APP_ID: &str = "io.github.jaypopat.rewindos";
@@ -718,17 +691,14 @@ mod tests {
         assert_eq!(s.install_kind, InstallKind::Packaged);
     }
 
-    /// Exercises the real network path with the production default env, so it
-    /// proves two things at once: the shipped `api_base` points at the proxy,
-    /// and the proxy returns a parseable release. Hits the live worker (and
-    /// increments its counter), so it's #[ignore]d — run explicitly with:
-    ///   cargo test -p rewindos --lib updater::tests::live_check_hits_proxy -- --ignored
+    /// Hits the live GitHub API with the production default env. Run with:
+    ///   cargo test -p rewindos --lib updater::tests::live_check_hits_github -- --ignored
     #[tokio::test]
-    #[ignore = "hits the live update proxy"]
-    async fn live_check_hits_proxy() {
+    #[ignore = "hits the live GitHub API"]
+    async fn live_check_hits_github() {
         let env = UpdaterEnv::default();
-        assert_eq!(env.api_base, UPDATE_PROXY_BASE, "default must target the proxy");
-        let release = fetch_latest_release(&env).await.expect("proxy fetch failed");
+        assert_eq!(env.api_base, GITHUB_API_BASE, "default must target GitHub");
+        let release = fetch_latest_release(&env).await.expect("GitHub fetch failed");
         assert!(release.tag.starts_with('v'), "got tag {}", release.tag);
         assert!(release.tarball_url.contains(TARBALL_NAME));
     }
