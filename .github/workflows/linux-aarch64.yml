@@ -1,0 +1,84 @@
+name: Linux ARM64 container build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+  pull_request:
+    paths:
+      - '.github/workflows/linux-aarch64.yml'
+      - 'packaging/linux/**'
+      - 'scripts/build-linux.sh'
+      - 'scripts/package-rpm.sh'
+      - 'scripts/smoke-*.py'
+      - 'scripts/check-asahi-elf.py'
+      - 'Cargo.*'
+      - 'crates/**'
+      - 'src-tauri/**'
+      - 'src/**'
+      - 'package.json'
+      - 'bun.lock'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-aarch64-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # Same native container and entry point used on Asahi; no cross sysroot,
+      # QEMU, privileged container, host credentials, or release permission.
+      - name: Build Ubuntu 24.04 toolchain image
+        run: docker build -f packaging/linux/Containerfile -t rewindos-builder .
+      - name: Test, build and package
+        run: |
+          docker run --rm \
+            --user "$(id -u):$(id -g)" \
+            -e HOME=/work/.build-home \
+            -e CARGO_HOME=/work/.build-home/cargo \
+            -e CARGO_BUILD_JOBS=2 \
+            -v "$PWD:/work" \
+            rewindos-builder
+      - name: Smoke-test the UI without network or the host desktop
+        run: |
+          docker run --rm --network none \
+            --user "$(id -u):$(id -g)" \
+            -e HOME=/work/.build-home \
+            -v "$PWD:/work" \
+            rewindos-builder python3 scripts/smoke-linux-ui.py
+      - name: Build Fedora RPM toolchain image
+        run: docker build -f packaging/linux/rpm.Containerfile -t rewindos-rpm-builder .
+      - name: Package a native Fedora RPM
+        run: |
+          docker run --rm --user "$(id -u):$(id -g)" \
+            -e HOME=/work/.build-home -v "$PWD:/work" rewindos-rpm-builder
+      - name: Install RPM and resolve Fedora runtime dependencies
+        run: |
+          docker run --name rewindos-rpm-installed -v "$PWD:/work:ro" \
+            rewindos-rpm-builder bash -ec 'dnf -y install /work/dist/*.rpm; rpm -V rewindos; /usr/bin/rewindos-daemon --version'
+          docker commit rewindos-rpm-installed rewindos-rpm-validated
+      - name: Smoke-test installed RPM and OCR without network
+        run: |
+          docker run --rm --network none --user "$(id -u):$(id -g)" \
+            -e HOME=/work/.build-home -e REWINDOS_SMOKE_BINARY=/usr/bin/rewindos \
+            -v "$PWD:/work" rewindos-rpm-validated \
+            bash -ec 'python3 scripts/check-asahi-elf.py /usr/bin/rewindos /usr/bin/rewindos-daemon; python3 scripts/smoke-linux-ui.py; python3 scripts/smoke-ocr.py'
+      - name: Upload ARM64 test build
+        uses: actions/upload-artifact@v4
+        with:
+          name: rewindos-linux-aarch64
+          path: |
+            dist/rewindos-linux-aarch64.tar.gz
+            dist/rewindos-linux-aarch64.tar.gz.sha256
+            dist/*.aarch64.rpm
+            dist/*.aarch64.rpm.sha256
+          if-no-files-found: error
+          retention-days: 14
