@@ -17,5 +17,9 @@ RUN case "$(uname -m)" in aarch64) arch=aarch64 ;; x86_64) arch=x64 ;; *) exit 1
     && unzip /opt/bun.zip -d /opt \
     && mkdir -p /opt/bun/bin \
     && cp "/opt/bun-linux-${arch}/bun" /opt/bun/bin/bun
+ARG BUILD_UID=1000
+ARG BUILD_GID=1000
+COPY packaging/linux/create-build-user.sh /opt/create-build-user.sh
+RUN bash /opt/create-build-user.sh "$BUILD_UID" "$BUILD_GID"
 WORKDIR /work
 CMD ["bash", "scripts/build-linux.sh"]

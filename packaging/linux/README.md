@@ -10,7 +10,8 @@ or QEMU. The same `Containerfile` and script run on Asahi and GitHub's
 From the repository root, with rootless Podman:
 
 ```sh
-podman build -f packaging/linux/Containerfile -t localhost/rewindos-builder .
+podman build --build-arg BUILD_UID="$(id -u)" --build-arg BUILD_GID="$(id -g)" \
+  -f packaging/linux/Containerfile -t localhost/rewindos-builder .
 podman run --name rewindos-build --userns=keep-id \
   --user "$(id -u):$(id -g)" \
   -e HOME=/work/.build-home \
@@ -31,7 +32,10 @@ Choose a fresh container name for another build, or start an existing stopped
 build container. Docker uses the same commands without `--userns=keep-id` and,
 on hosts without SELinux, without the `:Z` volume suffix. The dependency cache
 and test data stay in the ignored `.build-home/` directory. Two build jobs limit
-memory pressure on a laptop. There is no host package install, service
+memory pressure on a laptop. Both images declare a real passwd/group entry for
+the build UID/GID: D-Bus cannot run as an unknown numeric UID. Xvfb starts before
+the private session bus so activated desktop services inherit the test display.
+There is no host package install, service
 activation, display mount, session bus mount, or screen-capture permission.
 
 Output:

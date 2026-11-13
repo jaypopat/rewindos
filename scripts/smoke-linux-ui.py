@@ -44,7 +44,7 @@ def has_window(title):
 def main():
     # The outer invocation establishes isolated X and D-Bus servers.
     if len(sys.argv) == 1:
-        subprocess.run(["dbus-run-session", "--", "xvfb-run", "-a", "python3", __file__, "--inside"], check=True)
+        subprocess.run(["xvfb-run", "-a", "dbus-run-session", "--", "python3", __file__, "--inside"], check=True)
         return
     home = Path(".build-home/ui-smoke").resolve()
     (home / ".rewindos").mkdir(parents=True, exist_ok=True)
