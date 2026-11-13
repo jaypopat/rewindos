@@ -7,7 +7,13 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 pub const REPO: &str = "jaypopat/rewindos";
-const TARBALL_NAME: &str = "rewindos-linux-x86_64.tar.gz";
+fn release_directory() -> String {
+    format!("rewindos-linux-{}", std::env::consts::ARCH)
+}
+
+fn tarball_name() -> String {
+    format!("{}.tar.gz", release_directory())
+}
 
 /// Update checks go through a Cloudflare Worker (workers/update-proxy) that
 /// edge-caches GitHub's releases/latest response. Same JSON, same path shape
@@ -52,8 +58,8 @@ pub fn parse_latest_release(json: &str) -> Result<ReleaseInfo, String> {
             .ok_or_else(|| format!("release {} has no asset {name}", release.tag_name))
     };
     Ok(ReleaseInfo {
-        tarball_url: url_of(TARBALL_NAME)?,
-        sha_url: url_of(&format!("{TARBALL_NAME}.sha256"))?,
+        tarball_url: url_of(&tarball_name())?,
+        sha_url: url_of(&format!("{}.sha256", tarball_name()))?,
         tag: release.tag_name,
         notes: release.body.unwrap_or_default(),
     })
@@ -322,7 +328,7 @@ fn rollback(env: &UpdaterEnv) -> Result<(), String> {
     }
 }
 
-/// Swap an extracted release (stage = the rewindos-linux-x86_64/ dir) into
+/// Swap an extracted release (stage = the rewindos-linux-<arch>/ dir) into
 /// place. Mirrors install.sh place_files() + smoke_check(). Nothing on disk
 /// changes unless the smoke check passes. On failure the two binaries are
 /// rotated back; the unit file, desktop files, icons, and worker are
@@ -496,7 +502,7 @@ where
 
     // tempdir is cleaned up on drop, on every exit path
     let staging = tempfile::tempdir().map_err(|e| format!("staging dir: {e}"))?;
-    let tarball = staging.path().join(TARBALL_NAME);
+    let tarball = staging.path().join(tarball_name());
 
     progress(UpdateProgress::Downloading { pct: 0 });
     download_with_progress(&client, &release.tarball_url, &tarball, &progress).await?;
@@ -524,7 +530,7 @@ where
         tar::Archive::new(flate2::read::GzDecoder::new(gz))
             .unpack(&stage_root)
             .map_err(|e| format!("extract: {e}"))?;
-        let stage = stage_root.join("rewindos-linux-x86_64");
+        let stage = stage_root.join(release_directory());
         apply_update(&stage, &env, &tag, &progress)?;
         progress(UpdateProgress::Done);
         Ok(())
@@ -589,7 +595,11 @@ mod tests {
             {"name": "rewindos-linux-x86_64.tar.gz",
              "browser_download_url": "https://example.com/rewindos-linux-x86_64.tar.gz"},
             {"name": "rewindos-linux-x86_64.tar.gz.sha256",
-             "browser_download_url": "https://example.com/rewindos-linux-x86_64.tar.gz.sha256"}
+             "browser_download_url": "https://example.com/rewindos-linux-x86_64.tar.gz.sha256"},
+            {"name": "rewindos-linux-aarch64.tar.gz",
+             "browser_download_url": "https://example.com/rewindos-linux-aarch64.tar.gz"},
+            {"name": "rewindos-linux-aarch64.tar.gz.sha256",
+             "browser_download_url": "https://example.com/rewindos-linux-aarch64.tar.gz.sha256"}
         ]
     }"###;
 
@@ -598,8 +608,17 @@ mod tests {
         let r = parse_latest_release(SAMPLE_RELEASE).unwrap();
         assert_eq!(r.tag, "v1.0.9");
         assert!(r.notes.contains("fix stuff"));
-        assert!(r.tarball_url.ends_with(".tar.gz"));
+        assert!(r.tarball_url.ends_with(&tarball_name()));
         assert!(r.sha_url.ends_with(".sha256"));
+    }
+
+    #[test]
+    fn release_for_another_architecture_is_rejected() {
+        let mut json: serde_json::Value = serde_json::from_str(SAMPLE_RELEASE).unwrap();
+        json["assets"].as_array_mut().unwrap().retain(|asset| {
+            !asset["name"].as_str().unwrap().starts_with(&release_directory())
+        });
+        assert!(parse_latest_release(&json.to_string()).is_err());
     }
 
     #[test]
@@ -730,7 +749,7 @@ mod tests {
         assert_eq!(env.api_base, UPDATE_PROXY_BASE, "default must target the proxy");
         let release = fetch_latest_release(&env).await.expect("proxy fetch failed");
         assert!(release.tag.starts_with('v'), "got tag {}", release.tag);
-        assert!(release.tarball_url.contains(TARBALL_NAME));
+        assert!(release.tarball_url.contains(&tarball_name()));
     }
 
     #[test]
@@ -745,7 +764,7 @@ mod tests {
     /// Build a fake extracted-tarball stage dir. Binaries are shell scripts so
     /// the smoke check can really exec them.
     fn fake_stage(dir: &Path, daemon_exit_code: i32) -> PathBuf {
-        let stage = dir.join("rewindos-linux-x86_64");
+        let stage = dir.join(release_directory());
         std::fs::create_dir_all(stage.join("icons")).unwrap();
         let write_exec = |name: &str, body: &str| {
             let p = stage.join(name);

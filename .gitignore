@@ -1,5 +1,6 @@
 # Rust build output
 /target/
+/.build-home/
 
 # Node
 node_modules
