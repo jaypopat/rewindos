@@ -462,11 +462,9 @@ enum SpaVideoFormat {
     Unknown(u32),
 }
 
-// SPA format IDs (from spa/param/video/format-utils.h)
-const SPA_VIDEO_FORMAT_BGRX: u32 = 7;
-const SPA_VIDEO_FORMAT_RGBX: u32 = 8;
-const SPA_VIDEO_FORMAT_BGRA: u32 = 9;
-const SPA_VIDEO_FORMAT_RGBA: u32 = 10;
+// Use libspa's definitions for both negotiation and decoding. Handwritten IDs
+// can advertise a different byte layout than the decoder expects.
+use pipewire::spa::param::video::VideoFormat as SpaFormat;
 
 // SPA pod property keys (from spa/param/format.h enum spa_format)
 const SPA_FORMAT_MEDIA_TYPE: u32 = 1;
@@ -552,12 +550,12 @@ fn parse_video_format(param: &pipewire::spa::pod::Pod) -> Result<VideoFormat, St
         return Err(format!("missing size in format (property keys: {keys:x?})"));
     }
 
-    let spa_format = match format_id {
-        SPA_VIDEO_FORMAT_BGRX => SpaVideoFormat::BGRx,
-        SPA_VIDEO_FORMAT_RGBX => SpaVideoFormat::RGBx,
-        SPA_VIDEO_FORMAT_BGRA => SpaVideoFormat::BGRA,
-        SPA_VIDEO_FORMAT_RGBA => SpaVideoFormat::RGBA,
-        other => SpaVideoFormat::Unknown(other),
+    let spa_format = match SpaFormat::from_raw(format_id) {
+        SpaFormat::BGRx => SpaVideoFormat::BGRx,
+        SpaFormat::RGBx => SpaVideoFormat::RGBx,
+        SpaFormat::BGRA => SpaVideoFormat::BGRA,
+        SpaFormat::RGBA => SpaVideoFormat::RGBA,
+        other => SpaVideoFormat::Unknown(other.as_raw()),
     };
 
     Ok(VideoFormat {
@@ -644,12 +642,12 @@ fn build_video_params(buf: &mut [u8]) -> Result<&pipewire::spa::pod::Pod, String
                 value: Value::Choice(ChoiceValue::Id(Choice(
                     ChoiceFlags::empty(),
                     ChoiceEnum::Enum {
-                        default: Id(SPA_VIDEO_FORMAT_BGRX),
+                        default: Id(SpaFormat::BGRx.as_raw()),
                         alternatives: vec![
-                            Id(SPA_VIDEO_FORMAT_BGRX),
-                            Id(SPA_VIDEO_FORMAT_RGBX),
-                            Id(SPA_VIDEO_FORMAT_BGRA),
-                            Id(SPA_VIDEO_FORMAT_RGBA),
+                            Id(SpaFormat::BGRx.as_raw()),
+                            Id(SpaFormat::RGBx.as_raw()),
+                            Id(SpaFormat::BGRA.as_raw()),
+                            Id(SpaFormat::RGBA.as_raw()),
                         ],
                     },
                 ))),
@@ -724,6 +722,68 @@ mod tests {
     use super::*;
     use std::env;
     use std::sync::Mutex;
+
+    #[test]
+    fn negotiated_colours_preserve_rgb_channels() {
+        use pipewire::spa::param::video::VideoFormat as SpaFormat;
+        use pipewire::spa::pod::serialize::PodSerializer;
+        use pipewire::spa::pod::{ChoiceValue, Object, Property, PropertyFlags, Value};
+        use pipewire::spa::utils::{Choice, ChoiceEnum, ChoiceFlags, Id, Rectangle};
+
+        // Use SPA's definitions, not our decoding constants, to model the
+        // compositor's real format response. Mutter wraps fixated values in
+        // Choice::None; other compositors can return bare values.
+        for choice_wrapped in [false, true] {
+            for (format, pixels) in [
+                (SpaFormat::RGBx, [10, 20, 30, 0]),
+                (SpaFormat::BGRx, [30, 20, 10, 0]),
+                (SpaFormat::RGBA, [10, 20, 30, 255]),
+                (SpaFormat::BGRA, [30, 20, 10, 255]),
+            ] {
+                let id = Id(format.as_raw());
+                let size = Rectangle { width: 1, height: 1 };
+                let (format_value, size_value) = if choice_wrapped {
+                    (
+                        Value::Choice(ChoiceValue::Id(Choice(
+                            ChoiceFlags::empty(), ChoiceEnum::None(id),
+                        ))),
+                        Value::Choice(ChoiceValue::Rectangle(Choice(
+                            ChoiceFlags::empty(), ChoiceEnum::None(size),
+                        ))),
+                    )
+                } else {
+                    (Value::Id(id), Value::Rectangle(size))
+                };
+                let object = Value::Object(Object {
+                    type_: pipewire::spa::utils::SpaTypes::ObjectParamFormat.as_raw(),
+                    id: pipewire::spa::param::ParamType::Format.as_raw(),
+                    properties: vec![
+                        Property {
+                            key: SPA_FORMAT_VIDEO_FORMAT,
+                            value: format_value,
+                            flags: PropertyFlags::empty(),
+                        },
+                        Property {
+                            key: SPA_FORMAT_VIDEO_SIZE,
+                            value: size_value,
+                            flags: PropertyFlags::empty(),
+                        },
+                    ],
+                });
+                let (cursor, len) = PodSerializer::serialize(
+                    std::io::Cursor::new(Vec::new()), &object,
+                ).unwrap();
+                let bytes = cursor.into_inner();
+                let pod = pipewire::spa::pod::Pod::from_bytes(&bytes[..len as usize]).unwrap();
+                let negotiated = parse_video_format(pod).unwrap();
+                let rgba = convert_spa_to_rgba(
+                    &pixels, negotiated.width, negotiated.height, 4, negotiated.spa_format,
+                );
+                assert_eq!(rgba, [10, 20, 30, 255],
+                    "wrong RGB channels for {format:?}, Choice-wrapped={choice_wrapped}");
+            }
+        }
+    }
 
     // Env var manipulation isn't thread-safe — run with --test-threads=1
     static ENV_LOCK: Mutex<()> = Mutex::new(());
